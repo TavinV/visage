@@ -28,7 +28,7 @@ from app.engine.embedder import FaceEmbedder
 from app.engine.liveness import LivenessDetector
 from app.engine.comparator import FaceComparator
 from app.core.security import validate_api_key_middleware
-from app.api.routes import recognize, embeddings
+from app.api.routes import recognize, embeddings, calibrate
 
 
 # Instâncias globais de modelos (singleton por worker)
@@ -129,6 +129,7 @@ app.middleware("http")(validate_api_key_middleware)
 # Incluir rotas
 app.include_router(recognize.router)
 app.include_router(embeddings.router)
+app.include_router(calibrate.router)
 
 
 # Schema de resposta de health
@@ -152,6 +153,7 @@ async def health_check() -> HealthResponse:
         "embedder": face_embedder is not None,
         "liveness_v1": liveness_detector is not None,
         "liveness_v2": liveness_detector is not None,
+        "calibration": True,
     }
 
     status_str = "ok" if all(models_loaded.values()) else "degraded"

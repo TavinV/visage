@@ -63,30 +63,38 @@ class LivenessDetector:
     # API pública
     # ------------------------------------------------------------------
 
-    def check(self, frame_bgr: np.ndarray, bbox: np.ndarray) -> Tuple[bool, float]:
+    def check(
+        self,
+        frame_bgr: np.ndarray,
+        bbox: np.ndarray,
+        threshold: float = 0.85,
+        v1_weight: float = 0.40,
+        v2_weight: float = 0.60,
+    ) -> Tuple[bool, float, float, float]:
         """
-        Verifica se a face no frame pertence a uma pessoa real.
+        Verifica se a face no frame pertence a uma pessoa real com thresholds dinâmicos.
 
         Args:
             frame_bgr: Frame BGR completo (não o crop — o frame inteiro).
-            bbox:      Bounding box [x1, y1, x2, y2] retornado pelo SCRFD.
+            bbox: Bounding box [x1, y1, x2, y2] retornado pelo SCRFD.
+            threshold: Threshold de score de liveness (padrão 0.85).
+            v1_weight: Peso do modelo V1 (padrão 0.40).
+            v2_weight: Peso do modelo V2 (padrão 0.60).
 
         Returns:
-            (is_live, score) onde score ∈ [0.0, 1.0].
-            is_live = True se score >= settings.liveness_threshold.
+            (is_live, score_combined, score_v1_raw, score_v2_raw)
+            Os scores raw sempre são retornados independente do threshold.
         """
-        from app.core.config import settings
-
         score_v1 = self._infer(self._sess_v1, self._in_v1, self._out_v1,
                                frame_bgr, bbox, self._SCALE_V1)
         score_v2 = self._infer(self._sess_v2, self._in_v2, self._out_v2,
                                frame_bgr, bbox, self._SCALE_V2)
 
-        score_final = float(0.4 * score_v1 + 0.6 * score_v2)
-        score_final = float(np.clip(score_final, 0.0, 1.0))
-        is_live = score_final >= settings.liveness_threshold
+        score_combined = float(v1_weight * score_v1 + v2_weight * score_v2)
+        score_combined = float(np.clip(score_combined, 0.0, 1.0))
+        is_live = score_combined >= threshold
 
-        return is_live, score_final
+        return is_live, score_combined, float(score_v1), float(score_v2)
 
     # ------------------------------------------------------------------
     # Métodos internos

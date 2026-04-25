@@ -26,9 +26,10 @@ class FaceComparator:
         self,
         query_embedding: np.ndarray,
         candidate_embeddings: dict[int, np.ndarray],
+        threshold: Optional[float] = None,
     ) -> Optional[tuple[int, float, float]]:
         """
-        Compara um embedding contra múltiplos candidatos vetorizadamente.
+        Compara um embedding contra múltiplos candidatos vetorizadamente com threshold dinâmico.
 
         Como embeddings ArcFace são normalizados L2 (||e|| = 1), usa-se:
         similarity = candidate_matrix @ query_embedding
@@ -37,6 +38,7 @@ class FaceComparator:
         Args:
             query_embedding: numpy.ndarray (512,) normalizado
             candidate_embeddings: dict[person_id -> ndarray (512,)]
+            threshold: Threshold de distância (usa self.threshold se None)
 
         Returns:
             Tupla (person_id, distance, confidence) se match encontrado,
@@ -44,6 +46,9 @@ class FaceComparator:
         """
         if not candidate_embeddings:
             return None
+
+        # Usar threshold fornecido ou o padrão da instância
+        effective_threshold = threshold if threshold is not None else self.threshold
 
         # Montar matriz de candidatos: (N, 512)
         person_ids = list(candidate_embeddings.keys())
@@ -67,7 +72,7 @@ class FaceComparator:
         best_person_id = person_ids[best_idx]
 
         # Verificar threshold
-        if best_distance > self.threshold:
+        if best_distance > effective_threshold:
             return None
 
         # Calcular confidence (0.0 a 1.0)

@@ -17,17 +17,19 @@ from typing import Tuple
 def analyze_screen_saturation(
     frame_bgr: np.ndarray,
     bbox: np.ndarray,
-) -> Tuple[bool, float]:
+    saturation_max: float = 140.0,
+    saturation_std_min: float = 45.0,
+) -> Tuple[bool, float, float]:
     """
-    Analisa a saturação HSV da região da face para detectar telas.
+    Analisa a saturação HSV da região da face para detectar telas com thresholds dinâmicos.
 
     Telas tendem a ter saturação média mais alta e distribuição mais estreita
     que pele humana real. Isso ocorre porque pixels de tela são gerados por
     sub-pixels RGB puros, enquanto pele humana tem variação orgânica de cor.
 
     Limiares empíricos:
-        saturation_mean > 140  → saturação muito alta (padrão de tela)
-        saturation_std  < 45   → distribuição estreita (uniforme como display)
+        saturation_mean > saturation_max  → saturação muito alta (padrão de tela)
+        saturation_std  < saturation_std_min   → distribuição estreita (uniforme como display)
         Ambos devem ser verdadeiros para considerar suspeito.
 
     Esta função NÃO bloqueia sozinha — combinar com liveness_score para
@@ -35,12 +37,15 @@ def analyze_screen_saturation(
 
     Args:
         frame_bgr: Frame BGR completo (não o crop).
-        bbox:      Bounding box [x1, y1, x2, y2] da face detectada.
+        bbox: Bounding box [x1, y1, x2, y2] da face detectada.
+        saturation_max: Threshold de saturação máxima para detecção de tela (padrão 140.0).
+        saturation_std_min: Threshold de desvio padrão mínimo (padrão 45.0).
 
     Returns:
-        (is_suspicious, saturation_mean)
+        (is_suspicious, saturation_mean, saturation_std)
         is_suspicious: True se os limiares de tela forem atingidos.
         saturation_mean: Média da saturação HSV no crop (0–255).
+        saturation_std: Desvio padrão da saturação HSV no crop.
     """
     h, w = frame_bgr.shape[:2]
     x1, y1, x2, y2 = bbox[:4]
@@ -63,7 +68,7 @@ def analyze_screen_saturation(
                          max(0, int(x1)):min(w, int(x2))]
 
     if crop.size == 0:
-        return False, 0.0
+        return False, 0.0, 0.0
 
     # Converter para HSV e extrair canal S (saturação)
     hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
@@ -73,6 +78,6 @@ def analyze_screen_saturation(
     saturation_std  = float(saturation.std())
 
     # Tela: saturação alta E distribuição estreita (uniforme)
-    is_suspicious = (saturation_mean > 140.0) and (saturation_std < 45.0)
+    is_suspicious = (saturation_mean > saturation_max) and (saturation_std < saturation_std_min)
 
-    return is_suspicious, saturation_mean
+    return is_suspicious, saturation_mean, saturation_std

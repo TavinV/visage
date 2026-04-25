@@ -1,5 +1,5 @@
 """
-Rota POST /recognize para reconhecimento facial.
+Rota POST /recognize para reconhecimento facial com thresholds dinâmicos.
 
 Pipeline com early exit (ordem obrigatória):
   1. Decodificar imagem
@@ -20,29 +20,11 @@ from typing import Optional
 import cv2
 import numpy as np
 from fastapi import APIRouter, HTTPException, UploadFile, Form, status
-from pydantic import BaseModel, Field
-from typing import Optional
+
+from app.api.schemas import RecognizeResponse, ThresholdConfig
 
 router = APIRouter(tags=["recognition"])
 
-
-# ---------------------------------------------------------------------------
-# Schemas
-# ---------------------------------------------------------------------------
-
-class RecognizeResponse(BaseModel):
-    status: str
-    candidate_id: Optional[int] = None
-    confidence: Optional[float] = None
-    liveness_score: Optional[float] = None
-    saturation_mean: Optional[float] = None
-    best_distance: Optional[float] = None
-    processing_ms: int
-
-
-# ---------------------------------------------------------------------------
-# Audit frame helper
-# ---------------------------------------------------------------------------
 
 async def _save_audit_frame(
     frame_bgr: np.ndarray,
@@ -80,14 +62,21 @@ async def _save_audit_frame(
         logging.getLogger(__name__).warning("audit_frame falhou: %s", exc)
 
 
-@router.post("/recognize", response_model=dict)
+@router.post("/recognize", response_model=RecognizeResponse)
 async def recognize(
     tenant_id: str = Form(...),
     image: UploadFile = Form(...),
     candidates: str = Form(...),
-) -> dict:
+    recognition_threshold: Optional[float] = Form(None),
+    liveness_threshold: Optional[float] = Form(None),
+    liveness_v1_weight: Optional[float] = Form(None),
+    liveness_v2_weight: Optional[float] = Form(None),
+    hsv_saturation_max: Optional[float] = Form(None),
+    hsv_saturation_std_min: Optional[float] = Form(None),
+    detection_score_min: Optional[float] = Form(None),
+) -> RecognizeResponse:
     """
-    Reconhece face em imagem contra lista de embeddings criptografados.
+    Reconhece face em imagem contra lista de embeddings criptografados com thresholds dinâmicos.
 
     Pipeline com early exit:
       1. Decodificar imagem (cv2)
@@ -100,17 +89,13 @@ async def recognize(
       8. Audit frame salvo assincronamente (fire-and-forget)
 
     Args:
-        tenant_id:  ID do tenant (cache isolado por tenant)
-        image:      Frame em multipart/form-data (JPEG/PNG)
+        tenant_id: ID do tenant (cache isolado por tenant)
+        image: Frame em multipart/form-data (JPEG/PNG)
         candidates: JSON com lista de embeddings criptografados
+        Thresholds opcionais: se None, usa defaults de ThresholdConfig
 
     Returns:
-        dict com status, candidate_id, liveness_score, saturation_mean,
-        processing_ms e demais campos relevantes.
-
-    Raises:
-        HTTP 400: Imagem inválida ou candidates malformado
-        HTTP 422: Embedding adulterado (InvalidTag AES-GCM)
+        RecognizeResponse com status, confidence e scores brutos.
     """
     import json
     from app.core.config import settings
@@ -127,7 +112,28 @@ async def recognize(
     start_time = time.time()
 
     # ------------------------------------------------------------------
-    # Step 1 — Parsear candidatos
+    # Montar ThresholdConfig com valores fornecidos ou defaults
+    # ------------------------------------------------------------------
+    thresholds_dict = {}
+    if recognition_threshold is not None:
+        thresholds_dict['recognition'] = recognition_threshold
+    if liveness_threshold is not None:
+        thresholds_dict['liveness'] = liveness_threshold
+    if liveness_v1_weight is not None:
+        thresholds_dict['liveness_v1_weight'] = liveness_v1_weight
+    if liveness_v2_weight is not None:
+        thresholds_dict['liveness_v2_weight'] = liveness_v2_weight
+    if hsv_saturation_max is not None:
+        thresholds_dict['hsv_saturation_max'] = hsv_saturation_max
+    if hsv_saturation_std_min is not None:
+        thresholds_dict['hsv_saturation_std_min'] = hsv_saturation_std_min
+    if detection_score_min is not None:
+        thresholds_dict['detection_score_min'] = detection_score_min
+
+    thresholds = ThresholdConfig(**thresholds_dict)
+
+    # ------------------------------------------------------------------
+    # Parsear candidatos
     # ------------------------------------------------------------------
     try:
         candidates_list = json.loads(candidates)
@@ -138,7 +144,7 @@ async def recognize(
         )
 
     # ------------------------------------------------------------------
-    # Step 2 — Decodificar imagem
+    # Decodificar imagem
     # ------------------------------------------------------------------
     try:
         image_bytes = await image.read()
@@ -155,81 +161,108 @@ async def recognize(
         )
 
     # ------------------------------------------------------------------
-    # Step 3 — Detectar faces (uma chamada única ao SCRFD)
+    # Detectar faces
     # ------------------------------------------------------------------
-    all_faces = face_detector.detect_all_faces(image_array, min_det_score=0.75)
+    all_faces = face_detector.detect_all_faces(image_array, min_det_score=thresholds.detection_score_min)
 
     if len(all_faces) == 0:
         asyncio.create_task(
             _save_audit_frame(image_array, tenant_id, "no_face_detected", None)
         )
-        return {
-            "status": "no_face_detected",
-            "processing_ms": int((time.time() - start_time) * 1000),
-        }
+        return RecognizeResponse(
+            status="no_face_detected",
+            processing_ms=int((time.time() - start_time) * 1000),
+        )
 
     if len(all_faces) > 1:
         asyncio.create_task(
             _save_audit_frame(image_array, tenant_id, "multiple_faces", None)
         )
-        return {
-            "status": "multiple_faces_detected",
-            "processing_ms": int((time.time() - start_time) * 1000),
-        }
+        return RecognizeResponse(
+            status="multiple_faces_detected",
+            processing_ms=int((time.time() - start_time) * 1000),
+        )
 
     face_data = all_faces[0]
     bbox = face_data["bbox"]
+    detection_score_raw = float(face_data.get("det_score", 0.0))
 
     # ------------------------------------------------------------------
-    # Step 4 — Liveness MiniFASNet V1+V2
+    # Liveness MiniFASNet V1+V2 com pesos dinâmicos
     # ------------------------------------------------------------------
-    liveness_score = 1.0
+    liveness_v1_raw = None
+    liveness_v2_raw = None
+    liveness_combined_raw = None
 
     if liveness_detector is not None:
-        is_live, liveness_score = liveness_detector.check(face_data["image"], bbox)
+        is_live, liveness_combined_raw, liveness_v1_raw, liveness_v2_raw = liveness_detector.check(
+            face_data["image"],
+            bbox,
+            threshold=thresholds.liveness,
+            v1_weight=thresholds.liveness_v1_weight,
+            v2_weight=thresholds.liveness_v2_weight,
+        )
 
         if not is_live:
             asyncio.create_task(
                 _save_audit_frame(image_array, tenant_id, "liveness_failed", None)
             )
-            return {
-                "status": "liveness_failed",
-                "liveness_score": round(liveness_score, 4),
-                "processing_ms": int((time.time() - start_time) * 1000),
-            }
+            return RecognizeResponse(
+                status="liveness_failed",
+                liveness_v1_raw=liveness_v1_raw,
+                liveness_v2_raw=liveness_v2_raw,
+                liveness_combined_raw=liveness_combined_raw,
+                detection_score_raw=detection_score_raw,
+                processing_ms=int((time.time() - start_time) * 1000),
+            )
+    else:
+        liveness_combined_raw = 1.0
 
     # ------------------------------------------------------------------
-    # Step 5 — Análise HSV (complementar, não bloqueia sozinha)
+    # Análise HSV com thresholds dinâmicos
     # ------------------------------------------------------------------
-    is_screen_suspicious, saturation_mean = analyze_screen_saturation(image_array, bbox)
+    is_screen_suspicious, saturation_mean, saturation_std = analyze_screen_saturation(
+        image_array,
+        bbox,
+        saturation_max=thresholds.hsv_saturation_max,
+        saturation_std_min=thresholds.hsv_saturation_std_min,
+    )
 
     # Bloqueia se HSV suspeito E score MiniFASNet abaixo de threshold * 1.2
-    # (zona cinza: o modelo aprovou por pouco mas o sinal de tela é forte)
-    if is_screen_suspicious and liveness_score < (settings.liveness_threshold * 1.2):
+    if is_screen_suspicious and liveness_combined_raw < (thresholds.liveness * 1.2):
         asyncio.create_task(
             _save_audit_frame(image_array, tenant_id, "liveness_failed_screen", None)
         )
-        return {
-            "status": "liveness_failed",
-            "liveness_score": round(liveness_score, 4),
-            "saturation_mean": round(saturation_mean, 2),
-            "reason": "screen_detected",
-            "processing_ms": int((time.time() - start_time) * 1000),
-        }
+        return RecognizeResponse(
+            status="liveness_failed",
+            liveness_v1_raw=liveness_v1_raw,
+            liveness_v2_raw=liveness_v2_raw,
+            liveness_combined_raw=liveness_combined_raw,
+            saturation_mean=saturation_mean,
+            saturation_std=saturation_std,
+            detection_score_raw=detection_score_raw,
+            processing_ms=int((time.time() - start_time) * 1000),
+        )
 
     # ------------------------------------------------------------------
-    # Step 6 — Extrair embedding ArcFace
+    # Extrair embedding ArcFace
     # ------------------------------------------------------------------
     query_embedding = face_embedder.extract_embedding(face_data["embedding"])
 
     # ------------------------------------------------------------------
-    # Step 7 — Resolver candidatos
+    # Resolver candidatos
     # ------------------------------------------------------------------
     if not candidates_list:
-        return {
-            "status": "not_identified",
-            "processing_ms": int((time.time() - start_time) * 1000),
-        }
+        return RecognizeResponse(
+            status="face_not_recognized",
+            liveness_v1_raw=liveness_v1_raw,
+            liveness_v2_raw=liveness_v2_raw,
+            liveness_combined_raw=liveness_combined_raw,
+            saturation_mean=saturation_mean,
+            saturation_std=saturation_std,
+            detection_score_raw=detection_score_raw,
+            processing_ms=int((time.time() - start_time) * 1000),
+        )
 
     crypto = EmbeddingCrypto(settings.aes_key)
     candidate_ids = [c["person_id"] for c in candidates_list]
@@ -256,7 +289,7 @@ async def recognize(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=detail)
 
     # ------------------------------------------------------------------
-    # Step 8 — Comparação vetorizada
+    # Comparação vetorizada com threshold dinâmico
     # ------------------------------------------------------------------
     embeddings_for_comparison = {
         idx: cached_embeddings[c["person_id"]]
@@ -264,38 +297,52 @@ async def recognize(
         if c["person_id"] in cached_embeddings
     }
 
-    result = face_comparator.compare_one_vs_many(query_embedding, embeddings_for_comparison)
+    result = face_comparator.compare_one_vs_many(
+        query_embedding,
+        embeddings_for_comparison,
+        threshold=thresholds.recognition,
+    )
 
     processing_ms = int((time.time() - start_time) * 1000)
+    best_distance_raw = None
 
     # ------------------------------------------------------------------
-    # Step 9 — Retornar + audit assíncrono
+    # Retornar resultado
     # ------------------------------------------------------------------
     if result is not None:
-        idx, _distance, confidence = result
+        idx, best_distance_raw, confidence = result
         person_id_found = candidates_list[idx]["person_id"]
 
         asyncio.create_task(
             _save_audit_frame(image_array, tenant_id, "identified", person_id_found)
         )
 
-        return {
-            "status": "identified",
-            "candidate_id": person_id_found,
-            "confidence": float(confidence),
-            "liveness_score": round(liveness_score, 4),
-            "saturation_mean": round(saturation_mean, 2),
-            "processing_ms": processing_ms,
-        }
+        return RecognizeResponse(
+            status="identified",
+            person_id=person_id_found,
+            confidence=float(confidence),
+            liveness_v1_raw=liveness_v1_raw,
+            liveness_v2_raw=liveness_v2_raw,
+            liveness_combined_raw=liveness_combined_raw,
+            saturation_mean=saturation_mean,
+            saturation_std=saturation_std,
+            detection_score_raw=detection_score_raw,
+            best_distance_raw=best_distance_raw,
+            processing_ms=processing_ms,
+        )
 
     asyncio.create_task(
         _save_audit_frame(image_array, tenant_id, "not_identified", None)
     )
 
-    return {
-        "status": "not_identified",
-        "liveness_score": round(liveness_score, 4),
-        "saturation_mean": round(saturation_mean, 2),
-        "processing_ms": processing_ms,
-    }
-
+    return RecognizeResponse(
+        status="face_not_recognized",
+        liveness_v1_raw=liveness_v1_raw,
+        liveness_v2_raw=liveness_v2_raw,
+        liveness_combined_raw=liveness_combined_raw,
+        saturation_mean=saturation_mean,
+        saturation_std=saturation_std,
+        detection_score_raw=detection_score_raw,
+        best_distance_raw=best_distance_raw,
+        processing_ms=processing_ms,
+    )
