@@ -1,0 +1,429 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// Plans & Tenants
+// ============================================================================
+
+model Plan {
+  id             Int     @id @default(autoincrement())
+  name           String  @db.VarChar(100)
+  maxClasses     Int     @default(20) // turmas ativas simultâneas
+  priceMonthly   Decimal @db.Decimal(19, 2)
+  isActive       Boolean @default(true)
+  tenants        Tenant[]
+  createdAt      DateTime @default(now()) @db.Timestamptz()
+
+  @@map("plans")
+}
+
+model Tenant {
+  id                Int      @id @default(autoincrement())
+  planId            Int
+  plan              Plan     @relation(fields: [planId], references: [id])
+  name              String   @db.VarChar(200)
+  document          String?  @db.VarChar(20) // CNPJ ou CPF
+  institutionType   String   @db.VarChar(20) // 'school' | 'university'
+  status            String   @default("trial") @db.VarChar(20) // 'active' | 'suspended' | 'trial' | 'cancelled'
+  trialEndsAt       DateTime? @db.Timestamptz()
+  timezone          String   @default("America/Sao_Paulo") @db.VarChar(50)
+  
+  // Relations
+  settings          TenantSettings?
+  keys              TenantKeys?
+  users             User[]
+  locations         Location[]
+  academicPeriods   AcademicPeriod[]
+  courses           Course[]
+  classes           Class[]
+  devices           Device[]
+  facialEmbeddings  FacialEmbedding[]
+  classSessions     ClassSession[]
+  attendanceRecords AttendanceRecord[]
+  preAttendances    PreAttendance[]
+  recognitionLogs   RecognitionLog[]
+
+  createdAt         DateTime @default(now()) @db.Timestamptz()
+  updatedAt         DateTime @updatedAt @db.Timestamptz()
+
+  @@map("tenants")
+}
+
+model TenantSettings {
+  tenantId                  Int      @id
+  tenant                    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  recognitionThreshold      Float    @default(1.10)
+  livenessThreshold         Float    @default(0.85)
+  livenessEnabled           Boolean  @default(true)
+  staticPixelThreshold      Float    @default(3.0)
+  allowManualOverride       Boolean  @default(true)
+  
+  // Pré-presença
+  preAttendanceEnabled      Boolean  @default(false)
+  preAttendanceWindowMin    Int      @default(30)
+  
+  // Checkout individual
+  individualCheckoutEnabled Boolean  @default(false)
+  
+  // Fraud frames
+  saveFraudFrames           Boolean  @default(true)
+  fraudRetentionHours       Int      @default(24)
+  
+  updatedAt                 DateTime @updatedAt @db.Timestamptz()
+
+  @@map("tenant_settings")
+}
+
+model TenantKeys {
+  tenantId    Int      @id
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  dekCt       Bytes    // DEK cifrada com MASTER_KEY
+  dekIv       Bytes    // 12 bytes
+  dekTag      Bytes    // 16 bytes (tag GCM)
+  keyVersion  Int      @default(1)
+  
+  createdAt   DateTime @default(now()) @db.Timestamptz()
+  updatedAt   DateTime @updatedAt @db.Timestamptz()
+
+  @@map("tenant_keys")
+}
+
+// ============================================================================
+// Users & Authentication
+// ============================================================================
+
+model User {
+  id                Int      @id @default(autoincrement())
+  tenantId          Int
+  tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  name              String   @db.VarChar(200)
+  email             String?  @db.VarChar(200)
+  passwordHash      String?  @db.VarChar(255) // NULL para alunos sem acesso ao painel
+  role              String   @db.VarChar(20) // 'super_admin' | 'admin' | 'manager' | 'teacher' | 'student'
+  status            String   @default("active") @db.VarChar(20) // 'active' | 'inactive' | 'pending'
+  document          String?  @db.VarChar(20) // CPF
+  enrollmentCode    String?  @db.VarChar(50) // matrícula institucional (opcional)
+  
+  // Relations
+  facialEmbeddings  FacialEmbedding[]
+  taughtClasses     Class[] @relation("TeacherClasses")
+  createdClassSessions ClassSession[] @relation("CreatedBy")
+  taughtClassSessions  ClassSession[] @relation("TeacherClass")
+  classEnrollments  ClassEnrollment[]
+  attendanceRecords AttendanceRecord[]
+  checkoutReleased  AttendanceRecord[] @relation("CheckoutReleasedBy")
+  adjustedRecords   AttendanceRecord[] @relation("AdjustedBy")
+  preAttendances    PreAttendance[]
+  recognitionLogs   RecognitionLog[]
+  
+  createdAt         DateTime @default(now()) @db.Timestamptz()
+  updatedAt         DateTime @updatedAt @db.Timestamptz()
+
+  @@unique([tenantId, email])
+  @@map("users")
+}
+
+// ============================================================================
+// Facial Recognition
+// ============================================================================
+
+model FacialEmbedding {
+  id              BigInt   @id @default(autoincrement())
+  tenantId        Int
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  userId          Int
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  embeddingIv     Bytes    // 12 bytes
+  embeddingTag    Bytes    // 16 bytes (tag GCM)
+  embeddingCt     Bytes    // 2048 bytes (512 float32)
+  keyVersion      Int      @default(1)
+  modelVersion    String   @default("arcface_r50_v1") @db.VarChar(50)
+  
+  createdAt       DateTime @default(now()) @db.Timestamptz()
+
+  @@unique([userId, modelVersion])
+  @@map("facial_embeddings")
+}
+
+model Device {
+  id                Int      @id @default(autoincrement())
+  tenantId          Int
+  tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  deviceFingerprint String   @db.VarChar(255)
+  label             String?  @db.VarChar(100)
+  apiKeyHash        String   @db.VarChar(255)
+  locationId        Int?
+  location          Location? @relation(fields: [locationId], references: [id])
+  
+  isActive          Boolean  @default(true)
+  lastSeenAt        DateTime? @db.Timestamptz()
+  
+  recognitionLogs   RecognitionLog[]
+  
+  createdAt         DateTime @default(now()) @db.Timestamptz()
+
+  @@unique([tenantId, deviceFingerprint])
+  @@index([apiKeyHash])
+  @@index([tenantId, isActive])
+  @@map("devices")
+}
+
+// ============================================================================
+// Locations
+// ============================================================================
+
+model Location {
+  id              Int      @id @default(autoincrement())
+  tenantId        Int
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  name            String   @db.VarChar(100)
+  address         String?  @db.VarChar(300)
+  isActive        Boolean  @default(true)
+  
+  classes         Class[]
+  devices         Device[]
+  preAttendances  PreAttendance[]
+  
+  createdAt       DateTime @default(now()) @db.Timestamptz()
+
+  @@map("locations")
+}
+
+// ============================================================================
+// Academic Structure
+// ============================================================================
+
+model AcademicPeriod {
+  id              Int      @id @default(autoincrement())
+  tenantId        Int
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  name            String   @db.VarChar(100) // "2026/1"
+  startsAt        DateTime @db.Date()
+  endsAt          DateTime @db.Date()
+  isActive        Boolean  @default(true)
+  
+  courses         Course[]
+  
+  createdAt       DateTime @default(now()) @db.Timestamptz()
+
+  @@map("academic_periods")
+}
+
+model Course {
+  id                  Int      @id @default(autoincrement())
+  tenantId            Int
+  tenant              Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  academicPeriodId    Int
+  academicPeriod      AcademicPeriod @relation(fields: [academicPeriodId], references: [id])
+  
+  name                String   @db.VarChar(200)
+  
+  classes             Class[]
+  
+  createdAt           DateTime @default(now()) @db.Timestamptz()
+
+  @@map("courses")
+}
+
+model Class {
+  id                  Int      @id @default(autoincrement())
+  tenantId            Int
+  tenant              Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  courseId            Int
+  course              Course   @relation(fields: [courseId], references: [id])
+  
+  name                String   @db.VarChar(100)
+  teacherId           Int
+  teacher             User     @relation("TeacherClasses", fields: [teacherId], references: [id])
+  
+  room                String?  @db.VarChar(50)
+  locationId          Int?
+  location            Location? @relation(fields: [locationId], references: [id])
+  
+  totalClassesPlanned Int      @default(0)
+  
+  enrollments         ClassEnrollment[]
+  classSessions       ClassSession[]
+  studentSummaries    StudentClassSummary[]
+  
+  createdAt           DateTime @default(now()) @db.Timestamptz()
+
+  @@map("classes")
+}
+
+model ClassEnrollment {
+  classId    Int
+  class      Class     @relation(fields: [classId], references: [id], onDelete: Cascade)
+  
+  userId     Int
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  enrolledAt DateTime  @default(now()) @db.Timestamptz()
+
+  @@id([classId, userId])
+  @@map("class_enrollments")
+}
+
+model StudentClassSummary {
+  classId         Int
+  class           Class     @relation(fields: [classId], references: [id], onDelete: Cascade)
+  
+  userId          Int
+  
+  classesAttended Int       @default(0)
+  classesAbsent   Int       @default(0)
+  lastUpdatedAt   DateTime  @default(now()) @updatedAt @db.Timestamptz()
+
+  @@id([classId, userId])
+  @@index([userId])
+  @@map("student_class_summary")
+}
+
+// ============================================================================
+// Attendance
+// ============================================================================
+
+model ClassSession {
+  id                BigInt    @id @default(autoincrement())
+  tenantId          Int
+  tenant            Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  classId           Int
+  class             Class     @relation(fields: [classId], references: [id])
+  
+  teacherId         Int
+  teacher           User      @relation("TeacherClass", fields: [teacherId], references: [id])
+  
+  createdById       Int
+  createdBy         User      @relation("CreatedBy", fields: [createdById], references: [id])
+  
+  startedAt         DateTime  @default(now()) @db.Timestamptz()
+  endedAt           DateTime? @db.Timestamptz()
+  status            String    @default("open") @db.VarChar(20) // 'open' | 'closed'
+  classesWorth      Int       @default(1)
+  
+  attendanceRecords AttendanceRecord[]
+  
+  createdAt         DateTime  @default(now()) @db.Timestamptz()
+
+  @@map("class_sessions")
+}
+
+model AttendanceRecord {
+  id                BigInt    @id @default(autoincrement())
+  tenantId          Int
+  tenant            Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  classSessionId    BigInt
+  classSession      ClassSession @relation(fields: [classSessionId], references: [id])
+  
+  userId            Int
+  user              User      @relation(fields: [userId], references: [id])
+  
+  status            String    @db.VarChar(20) // 'present' | 'absent' | 'manual' | 'early_checkout'
+  recognizedAt      DateTime? @db.Timestamptz()
+  checkedOutAt      DateTime? @db.Timestamptz()
+  
+  checkoutReleasedById Int?
+  checkoutReleasedBy   User? @relation("CheckoutReleasedBy", fields: [checkoutReleasedById], references: [id])
+  
+  confidence        Float?
+  livenessScore     Float?
+  wasPreAttendance  Boolean   @default(false)
+  
+  adjustedById      Int?
+  adjustedBy        User?     @relation("AdjustedBy", fields: [adjustedById], references: [id])
+  adjustedAt        DateTime? @db.Timestamptz()
+  
+  createdAt         DateTime  @default(now()) @db.Timestamptz()
+
+  @@unique([classSessionId, userId])
+  @@index([tenantId, classSessionId])
+  @@index([classSessionId, status])
+  @@map("attendance_records")
+}
+
+model PreAttendance {
+  id              BigInt    @id @default(autoincrement())
+  tenantId        Int
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  locationId      Int
+  location        Location  @relation(fields: [locationId], references: [id])
+  
+  userId          Int
+  user            User      @relation(fields: [userId], references: [id])
+  
+  recognizedAt    DateTime  @db.Timestamptz()
+  confidence      Float
+  livenessScore   Float
+  expires_at      DateTime  @db.Timestamptz()
+  consolidated   Boolean   @default(false)
+  
+  createdAt       DateTime  @default(now()) @db.Timestamptz()
+
+  @@unique([tenantId, locationId, userId, recognizedAt(sort: Desc)])
+  @@index([tenantId, locationId, consolidated])
+  @@map("pre_attendances")
+}
+
+// ============================================================================
+// Recognition & Audit
+// ============================================================================
+
+model RecognitionLog {
+  id              BigInt    @id @default(autoincrement())
+  tenantId        Int
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  deviceId        Int?
+  device          Device?   @relation(fields: [deviceId], references: [id])
+  
+  userId          Int?
+  user            User?     @relation(fields: [userId], references: [id])
+  
+  status          String    @db.VarChar(30) // 'identified' | 'not_identified' | 'liveness_failed' | 'no_face_detected'
+  confidence      Float?
+  livenessScore   Float?
+  saturationMean  Float?
+  processingMs    Int?
+  
+  fraudFramePath  String?   @db.VarChar(500)
+  fraudFrameExists Boolean  @default(false)
+  
+  createdAt       DateTime  @default(now()) @db.Timestamptz()
+
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@index([tenantId, fraudFrameExists])
+  @@map("recognition_logs")
+}
+
+model AuditCleanupLog {
+  id              Int       @id @default(autoincrement())
+  runAt           DateTime  @default(now()) @db.Timestamptz()
+  filesDeleted    Int       @default(0)
+  bytesFreed      BigInt    @default(0)
+  tenantsProcessed Int      @default(0)
+  errorMessage    String?   @db.Text
+
+  @@map("audit_cleanup_logs")
+}

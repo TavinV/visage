@@ -23,6 +23,7 @@ from insightface.app import FaceAnalysis
 from app.core.config import settings
 from app.infra.cache_memory import MemoryEmbeddingCache
 from app.utils.crypto import EmbeddingCrypto
+from app.services.dek_manager import DEKManager
 from app.engine.detector import FaceDetector
 from app.engine.embedder import FaceEmbedder
 from app.engine.liveness import LivenessDetector
@@ -38,6 +39,7 @@ face_embedder: FaceEmbedder = None
 liveness_detector: LivenessDetector = None
 face_comparator: FaceComparator = None
 embedding_cache: MemoryEmbeddingCache = None
+dek_manager: DEKManager = None
 
 
 @asynccontextmanager
@@ -47,12 +49,17 @@ async def lifespan(app: FastAPI):
     Carrega modelos no startup e libera recursos no shutdown.
     """
     global face_analysis, face_detector, face_embedder, liveness_detector
-    global face_comparator, embedding_cache
+    global face_comparator, embedding_cache, dek_manager
 
     # ========== STARTUP ==========
     print("[STARTUP] Carregando Face Recognition Engine...")
 
     try:
+        # Inicializar DEK Manager (descriptografa DEKs com MASTER_KEY)
+        print("[STARTUP] Inicializando DEK Manager...")
+        dek_manager = DEKManager(settings.master_key, ttl_hours=settings.dek_cache_ttl_hours)
+        print("[STARTUP] ✓ DEK Manager inicializado")
+
         # Carregar FaceAnalysis (SCRFD detector + ArcFace embedder)
         print("[STARTUP] Inicializando FaceAnalysis com buffalo_s...")
         face_analysis = FaceAnalysis(name="buffalo_s", providers=["CPUExecutionProvider"])
@@ -103,6 +110,7 @@ async def lifespan(app: FastAPI):
     liveness_detector = None
     face_comparator = None
     embedding_cache = None
+    dek_manager = None
     print("[SHUTDOWN] ✓ Recursos liberados")
 
 
@@ -154,6 +162,7 @@ async def health_check() -> HealthResponse:
         "liveness_v1": liveness_detector is not None,
         "liveness_v2": liveness_detector is not None,
         "calibration": True,
+        "calibration_recognition": True,
     }
 
     status_str = "ok" if all(models_loaded.values()) else "degraded"

@@ -67,6 +67,10 @@ async def recognize(
     tenant_id: str = Form(...),
     image: UploadFile = Form(...),
     candidates: str = Form(...),
+    dek_ct: str = Form(None),  # DEK criptografada (hex) — opcional para backwards compat
+    dek_iv: str = Form(None),  # IV da DEK (hex)
+    dek_tag: str = Form(None),  # Tag GCM da DEK (hex)
+    dek_key_version: str = Form(default="1"),  # Versão da chave
     recognition_threshold: Optional[float] = Form(None),
     liveness_threshold: Optional[float] = Form(None),
     liveness_v1_weight: Optional[float] = Form(None),
@@ -77,6 +81,7 @@ async def recognize(
 ) -> RecognizeResponse:
     """
     Reconhece face em imagem contra lista de embeddings criptografados com thresholds dinâmicos.
+    Suporta DEK per-tenant criptografada com MASTER_KEY.
 
     Pipeline com early exit:
       1. Decodificar imagem (cv2)
@@ -92,6 +97,10 @@ async def recognize(
         tenant_id: ID do tenant (cache isolado por tenant)
         image: Frame em multipart/form-data (JPEG/PNG)
         candidates: JSON com lista de embeddings criptografados
+        dek_ct: DEK criptografada com MASTER_KEY (hex format)
+        dek_iv: IV de 12 bytes da DEK (hex format)
+        dek_tag: Tag de autenticação GCM (hex format)
+        dek_key_version: Versão da MASTER_KEY usada para cifrar DEK
         Thresholds opcionais: se None, usa defaults de ThresholdConfig
 
     Returns:
@@ -107,9 +116,30 @@ async def recognize(
         liveness_detector,
         face_comparator,
         embedding_cache,
+        dek_manager,  # Novo gerenciador de DEK
     )
 
     start_time = time.time()
+
+    # ------------------------------------------------------------------
+    # Descriptografar DEK se fornecida (novo fluxo multi-tenant)
+    # ------------------------------------------------------------------
+    if dek_ct and dek_iv and dek_tag:
+        try:
+            # DEKManager descifra e cacheia a DEK
+            dek_manager.decrypt_dek(
+                tenant_id=tenant_id,
+                dek_ct_hex=dek_ct,
+                dek_iv_hex=dek_iv,
+                dek_tag_hex=dek_tag,
+                key_version=dek_key_version,
+            )
+            # DEK agora está cacheada e será usada para descriptografar embeddings
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Erro ao descriptografar DEK: {str(exc)}",
+            )
 
     # ------------------------------------------------------------------
     # Montar ThresholdConfig com valores fornecidos ou defaults

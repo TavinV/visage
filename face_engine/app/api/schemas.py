@@ -9,6 +9,27 @@ from typing import Optional, Literal
 
 
 # ============================================================================
+# SCHEMAS DE CRIPTOGRAFIA
+# ============================================================================
+
+class EncryptedDEK(BaseModel):
+    """DEK encriptada com MASTER_KEY — recebida do Node.js"""
+    dek_ct: str = Field(..., description="Ciphertext em hexadecimal")
+    dek_iv: str = Field(..., description="IV em hexadecimal (12 bytes)")
+    dek_tag: str = Field(..., description="Tag GCM em hexadecimal (16 bytes)")
+    key_version: int = Field(..., description="Versão da chave para auditoria")
+
+
+class EncryptedEmbedding(BaseModel):
+    """Embedding criptografado armazenado no Node.js"""
+    person_id: int
+    embedding_iv: str = Field(..., description="IV em hexadecimal (12 bytes)")
+    embedding_tag: str = Field(..., description="Tag GCM em hexadecimal (16 bytes)")
+    embedding_ct: str = Field(..., description="Ciphertext em hexadecimal (2048 bytes)")
+    key_version: int = Field(..., description="Versão da DEK usada na criptografia")
+
+
+# ============================================================================
 # SCHEMAS DE RECONHECIMENTO
 # ============================================================================
 
@@ -39,9 +60,10 @@ class ThresholdConfig(BaseModel):
 
 
 class RecognizeRequest(BaseModel):
-    """Request para POST /recognize com suporte a thresholds dinâmicos."""
+    """Request para POST /recognize com suporte a thresholds dinâmicos e DEK por tenant."""
     tenant_id: str = Field(..., description="ID do tenant para isolamento de cache")
-    candidates: list[dict] = Field(..., description="Lista de candidatos com embeddings criptografados")
+    tenant_dek: EncryptedDEK = Field(..., description="DEK encriptada com MASTER_KEY")
+    candidates: list[EncryptedEmbedding] = Field(..., description="Lista de candidatos com embeddings criptografados")
     thresholds: ThresholdConfig = Field(default_factory=ThresholdConfig, description="Thresholds customizáveis")
 
 
@@ -115,29 +137,90 @@ class CalibrateResponse(BaseModel):
 # SCHEMAS DE CALIBRAÇÃO DE RECONHECIMENTO
 # ============================================================================
 
-class RecognitionSampleResult(BaseModel):
-    """Resultado de processamento de uma amostra para calibração de reconhecimento."""
-    label: Literal['same_person', 'other_person']
-    face_detected: bool
-    error: Optional[str] = None
+class PersonSummary(BaseModel):
+    """Resumo de uma pessoa processada na calibração (sem embeddings brutos)."""
+    person_id: str
+    photo_count: int
+    failed_photos: int
+
+
+class DistanceDistribution(BaseModel):
+    """Estatísticas descritivas de uma distribuição de distâncias."""
+    count: int
+    mean: float
+    std: float
+    min: float
+    max: float
+    p5: float
+    p25: float
+    p50: float
+    p75: float
+    p95: float
+
+
+class RecognitionThresholdOption(BaseModel):
+    """Uma opção de threshold com seu perfil de risco."""
+    profile: Literal['conservative', 'balanced', 'liberal']
+    profile_label: str
+    threshold: float
+    genuine_accept_rate: float
+    impostor_reject_rate: float
+    false_rejection_rate: float
+    false_acceptance_rate: float
+    youden_score: float
+    interpretation: str
+
+
+class ThresholdCurvePoint(BaseModel):
+    """Ponto na curva de métricas × limiar — para gráfico de desempenho."""
+    threshold: float
+    genuine_accept_rate: float
+    impostor_reject_rate: float
+    false_rejection_rate: float
+    false_acceptance_rate: float
+    youden_score: float
+
+
+class HistogramBin(BaseModel):
+    """Bin de histograma para sobreposição das distribuições de distância."""
+    range_start: float
+    range_end: float
+    genuine_count: int
+    impostor_count: int
+
+
+class RocPoint(BaseModel):
+    """Ponto na curva ROC: FAR (eixo X) × TAR/GAR (eixo Y)."""
+    false_acceptance_rate: float
+    genuine_accept_rate: float
+    threshold: float
+
+
+class CalibrationChartData(BaseModel):
+    """Dados prontos para renderização de gráficos de calibração."""
+    threshold_curve: list[ThresholdCurvePoint]
+    histogram: list[HistogramBin]
+    roc_curve: list[RocPoint]
+    eer_threshold: float
+    eer_value: float
 
 
 class RecognitionCalibrateResponse(BaseModel):
-    """
-    Response do endpoint POST /calibrate/recognition.
-
-    Contém análise estatística das distribuições de distância genuína (mesma pessoa)
-    e impostora (pessoas diferentes), com threshold sugerido.
-    """
-    recognition_analysis: ThresholdAnalysis = Field(..., description="Análise do threshold de reconhecimento")
-    suggested_threshold: float = Field(..., description="Threshold de distância L2 sugerido")
-    genuine_distances: list[float] = Field(..., description="Distâncias L2 entre pares da mesma pessoa")
-    impostor_distances: list[float] = Field(..., description="Distâncias L2 entre pares de pessoas diferentes")
-    same_person_valid: int = Field(..., description="Número de fotos válidas da mesma pessoa")
-    other_person_valid: int = Field(..., description="Número de fotos válidas de outras pessoas")
-    genuine_pairs_analyzed: int = Field(..., description="Total de pares genuínos analisados")
-    impostor_pairs_analyzed: int = Field(..., description="Total de pares impostores analisados")
-    genuine_mean: float = Field(..., description="Distância média genuína")
-    impostor_mean: float = Field(..., description="Distância média impostora")
-    overall_interpretation: str = Field(..., description="Resumo em português")
-    warning: Optional[str] = None
+    """Response completo da calibração de reconhecimento facial."""
+    persons_processed: list[PersonSummary]
+    impostor_count: int
+    impostor_failed: int
+    genuine_distribution: DistanceDistribution
+    impostor_distribution: DistanceDistribution
+    dprime: float
+    eer: float
+    auc: float
+    options: list[RecognitionThresholdOption]
+    recommended_profile: Literal['conservative', 'balanced', 'liberal']
+    recommended_threshold: float
+    total_genuine_pairs: int
+    total_impostor_pairs: int
+    confidence: Literal['low', 'medium', 'high']
+    warning: Optional[str]
+    overall_interpretation: str
+    chart_data: CalibrationChartData

@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard de Calibração Biométrica</title>
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <!-- Font Awesome para ícones -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        /* Header */
+        .header {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 25px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        }
+
+        .header h1 {
+            color: #333;
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .header h1 i {
+            color: #667eea;
+            margin-right: 10px;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .metric-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .metric-card h3 {
+            font-size: 14px;
+            opacity: 0.9;
+            margin-bottom: 5px;
+        }
+
+        .metric-card .value {
+            font-size: 28px;
+            font-weight: bold;
+        }
+
+        /* Stats Section */
+        .stats-section {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 25px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-top: 15px;
+        }
+
+        .stat-box {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px;
+            border-left: 4px solid #667eea;
+        }
+
+        .stat-box h4 {
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            margin: 8px 0;
+            font-size: 14px;
+        }
+
+        .stat-label {
+            font-weight: 500;
+            color: #555;
+        }
+
+        .stat-value {
+            color: #333;
+            font-weight: bold;
+        }
+
+        /* Gráficos */
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 25px;
+            margin-bottom: 25px;
+        }
+
+        .chart-card {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        }
+
+        .chart-card h3 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 20px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .chart-card h3 i {
+            color: #667eea;
+            margin-right: 8px;
+        }
+
+        canvas {
+            max-height: 400px;
+            width: 100%;
+        }
+
+        /* Perfis */
+        .profiles-section {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 25px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        }
+
+        .profiles-section h3 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 20px;
+        }
+
+        .profiles-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .profile-card {
+            border: 1px solid #e0e0e0;
+            border-radius: 10px;
+            padding: 15px;
+            transition: transform 0.3s;
+        }
+
+        .profile-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
+        }
+
+        .profile-card.recommended {
+            border: 2px solid #28a745;
+            background: #f8fff9;
+        }
+
+        .profile-card h4 {
+            font-size: 18px;
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        .profile-card .badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .badge.conservative {
+            background: #ffc107;
+            color: #856404;
+        }
+
+        .badge.balanced {
+            background: #28a745;
+            color: white;
+        }
+
+        .badge.liberal {
+            background: #17a2b8;
+            color: white;
+        }
+
+        .profile-stats {
+            margin-top: 10px;
+        }
+
+        .profile-stats p {
+            margin: 5px 0;
+            font-size: 14px;
+        }
+
+        .interpretation {
+            font-size: 12px;
+            color: #666;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        @media (max-width: 768px) {
+            .charts-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .metrics-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><i class="fas fa-chart-line"></i> Dashboard de Calibração Biométrica</h1>
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <h3>d' (Separabilidade)</h3>
+                    <div class="value" id="dprime">6.8</div>
+                </div>
+                <div class="metric-card">
+                    <h3>AUC</h3>
+                    <div class="value" id="auc">1.00</div>
+                </div>
+                <div class="metric-card">
+                    <h3>EER</h3>
+                    <div class="value" id="eer">0.0%</div>
+                </div>
+                <div class="metric-card">
+                    <h3>Pessoas Legítimas</h3>
+                    <div class="value" id="genuineCount">6</div>
+                </div>
+                <div class="metric-card">
+                    <h3>Pares Legítimos</h3>
+                    <div class="value" id="genuinePairs">36</div>
+                </div>
+                <div class="metric-card">
+                    <h3>Pares Impostores</h3>
+                    <div class="value" id="impostorPairs">45</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Estatísticas das Distribuições -->
+        <div class="stats-section">
+            <h3><i class="fas fa-chart-bar"></i> Estatísticas das Distribuições</h3>
+            <div class="stats-grid">
+                <div class="stat-box">
+                    <h4>📊 Distribuição Legítima</h4>
+                    <div class="stat-item">
+                        <span class="stat-label">Média:</span>
+                        <span class="stat-value" id="genuineMean">0.659</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Desvio Padrão:</span>
+                        <span class="stat-value" id="genuineStd">0.043</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Mínimo:</span>
+                        <span class="stat-value" id="genuineMin">0.58</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Máximo:</span>
+                        <span class="stat-value" id="genuineMax">0.74</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Percentil 5:</span>
+                        <span class="stat-value" id="genuineP5">0.5975</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Mediana (P50):</span>
+                        <span class="stat-value" id="genuineP50">0.66</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Percentil 95:</span>
+                        <span class="stat-value" id="genuineP95">0.7225</span>
+                    </div>
+                </div>
+                <div class="stat-box">
+                    <h4>⚠️ Distribuição Impostora</h4>
+                    <div class="stat-item">
+                        <span class="stat-label">Média:</span>
+                        <span class="stat-value" id="impostorMean">1.26</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Desvio Padrão:</span>
+                        <span class="stat-value" id="impostorStd">0.095</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Mínimo:</span>
+                        <span class="stat-value" id="impostorMin">1.08</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Máximo:</span>
+                        <span class="stat-value" id="impostorMax">1.43</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Percentil 5:</span>
+                        <span class="stat-value" id="impostorP5">1.11</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Mediana (P50):</span>
+                        <span class="stat-value" id="impostorP50">1.27</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Percentil 95:</span>
+                        <span class="stat-value" id="impostorP95">1.41</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="charts-grid">
+            <div class="chart-card">
+                <h3><i class="fas fa-chart-line"></i> Distribuição dos Scores (Box Plot Style)</h3>
+                <canvas id="distributionChart"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3><i class="fas fa-chart-bar"></i> Histograma de Distribuição</h3>
+                <canvas id="histogramChart"></canvas>
+            </div>
+        </div>
+
+        <div class="charts-grid">
+            <div class="chart-card">
+                <h3><i class="fas fa-chart-line"></i> Densidade de Probabilidade</h3>
+                <canvas id="densityChart"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3><i class="fas fa-chart-line"></i> Análise de Perfis</h3>
+                <canvas id="profileChart"></canvas>
+            </div>
+        </div>
+
+        <div class="profiles-section">
+            <h3><i class="fas fa-sliders-h"></i> Perfis de Threshold</h3>
+            <div class="profiles-grid" id="profilesGrid"></div>
+        </div>
+
+        <div class="chart-card">
+            <h3><i class="fas fa-info-circle"></i> Recomendação</h3>
+            <div class="interpretation-box" style="padding: 20px; background: #f8f9fa; border-radius: 10px;">
+                <p><strong>Threshold Recomendado:</strong> <span id="recThresholdValue"
+                        style="font-size: 20px; color: #28a745;">0.74</span></p>
+                <p id="recommendationText" style="margin-top: 10px;">Perfil Balanceado com threshold 0.74 oferece 100%
+                    de aceitação de pessoas legítimas e 100% de bloqueio de impostores, garantindo segurança e
+                    conveniência máximas.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Dados fornecidos
+        const data = {
+            "persons_processed": [
+                { "person_id": "pessoa_1", "photo_count": 4, "failed_photos": 0 },
+                { "person_id": "pessoa_2", "photo_count": 4, "failed_photos": 0 },
+                { "person_id": "pessoa_3", "photo_count": 4, "failed_photos": 0 },
+                { "person_id": "pessoa_4", "photo_count": 4, "failed_photos": 0 },
+                { "person_id": "pessoa_5", "photo_count": 4, "failed_photos": 0 },
+                { "person_id": "pessoa_6", "photo_count": 4, "failed_photos": 0 }
+            ],
+            "genuine_distances": [
+                0.61, 0.64, 0.67, 0.70, 0.66, 0.68, 0.59, 0.62, 0.65, 0.69, 0.63, 0.66,
+                0.60, 0.63, 0.68, 0.72, 0.66, 0.69, 0.62, 0.65, 0.70, 0.74, 0.67, 0.71,
+                0.58, 0.61, 0.64, 0.67, 0.63, 0.65, 0.63, 0.66, 0.69, 0.73, 0.68, 0.71
+            ],
+            "impostor_distances": [
+                1.08, 1.12, 1.15, 1.18, 1.20, 1.22, 1.25, 1.27, 1.30, 1.32, 1.35, 1.37, 1.40, 1.42,
+                1.10, 1.14, 1.17, 1.21, 1.24, 1.26, 1.29, 1.31, 1.33, 1.36, 1.38, 1.41, 1.09, 1.13,
+                1.16, 1.19, 1.23, 1.28, 1.34, 1.39, 1.11, 1.18, 1.22, 1.27, 1.30, 1.35, 1.43
+            ],
+            "genuine_distribution": {
+                "count": 36, "mean": 0.659, "std": 0.043, "min": 0.58, "max": 0.74,
+                "p5": 0.5975, "p25": 0.63, "p50": 0.66, "p75": 0.69, "p95": 0.7225
+            },
+            "impostor_distribution": {
+                "count": 45, "mean": 1.26, "std": 0.095, "min": 1.08, "max": 1.43,
+                "p5": 1.11, "p25": 1.20, "p50": 1.27, "p75": 1.34, "p95": 1.41
+            },
+            "metrics": { "dprime": 6.8, "auc": 1.0, "eer": 0.0 },
+            "threshold_analysis": {
+                "recommended_threshold": 0.74,
+                "profiles": [
+                    {
+                        "profile": "conservative",
+                        "threshold": 0.72,
+                        "genuine_accept_rate": 0.92,
+                        "impostor_reject_rate": 1.0,
+                        "false_rejection_rate": 0.08,
+                        "false_acceptance_rate": 0.0,
+                        "youden_score": 0.92
+                    },
+                    {
+                        "profile": "balanced",
+                        "threshold": 0.74,
+                        "genuine_accept_rate": 1.0,
+                        "impostor_reject_rate": 1.0,
+                        "false_rejection_rate": 0.0,
+                        "false_acceptance_rate": 0.0,
+                        "youden_score": 1.0
+                    },
+                    {
+                        "profile": "liberal",
+                        "threshold": 1.10,
+                        "genuine_accept_rate": 1.0,
+                        "impostor_reject_rate": 0.95,
+                        "false_rejection_rate": 0.0,
+                        "false_acceptance_rate": 0.05,
+                        "youden_score": 0.95
+                    }
+                ]
+            }
+        };
+
+        // Atualizar métricas
+        document.getElementById('dprime').textContent = data.metrics.dprime;
+        document.getElementById('auc').textContent = data.metrics.auc;
+        document.getElementById('eer').textContent = (data.metrics.eer * 100).toFixed(1) + '%';
+        document.getElementById('genuineCount').textContent = data.persons_processed.length;
+        document.getElementById('genuinePairs').textContent = data.genuine_distribution.count;
+        document.getElementById('impostorPairs').textContent = data.impostor_distribution.count;
+        document.getElementById('recThresholdValue').textContent = data.threshold_analysis.recommended_threshold;
+
+        // Atualizar estatísticas das distribuições
+        const genuine = data.genuine_distribution;
+        const impostor = data.impostor_distribution;
+
+        document.getElementById('genuineMean').textContent = genuine.mean;
+        document.getElementById('genuineStd').textContent = genuine.std;
+        document.getElementById('genuineMin').textContent = genuine.min;
+        document.getElementById('genuineMax').textContent = genuine.max;
+        document.getElementById('genuineP5').textContent = genuine.p5;
+        document.getElementById('genuineP50').textContent = genuine.p50;
+        document.getElementById('genuineP95').textContent = genuine.p95;
+
+        document.getElementById('impostorMean').textContent = impostor.mean;
+        document.getElementById('impostorStd').textContent = impostor.std;
+        document.getElementById('impostorMin').textContent = impostor.min;
+        document.getElementById('impostorMax').textContent = impostor.max;
+        document.getElementById('impostorP5').textContent = impostor.p5;
+        document.getElementById('impostorP50').textContent = impostor.p50;
+        document.getElementById('impostorP95').textContent = impostor.p95;
+
+        // Gráfico de distribuição (Box Plot style usando scatter)
+        const distCtx = document.getElementById('distributionChart').getContext('2d');
+
+        // Preparar dados para o gráfico de pontos
+        const genuinePoints = data.genuine_distances.map((val, idx) => ({ x: idx, y: val, group: 'Legítimo' }));
+        const impostorPoints = data.impostor_distances.map((val, idx) => ({ x: idx + 40, y: val, group: 'Impostor' }));
+
+        new Chart(distCtx, {
+            type: 'scatter',
+            data: {
+                datasets: [
+                    {
+                        label: 'Legítimos',
+                        data: genuinePoints,
+                        backgroundColor: 'rgba(40, 167, 69, 0.6)',
+                        borderColor: '#28a745',
+                        pointRadius: 5,
+                        pointHoverRadius: 7
+                    },
+                    {
+                        label: 'Impostores',
+                        data: impostorPoints,
+                        backgroundColor: 'rgba(220, 53, 69, 0.6)',
+                        borderColor: '#dc3545',
+                        pointRadius: 5,
+                        pointHoverRadius: 7
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${ctx.raw.y.toFixed(3)}` } },
+                    legend: { position: 'top' }
+                },
+                scales: {
+                    x: { title: { display: true, text: 'Amostras' }, ticks: { stepSize: 10 } },
+                    y: { title: { display: true, text: 'Distância (Score)' }, min: 0.5, max: 1.6 }
+                }
+            }
+        });
+
+        // Criar histograma
+        const histCtx = document.getElementById('histogramChart').getContext('2d');
+
+        // Definir bins para o histograma
+        const minVal = Math.min(...data.genuine_distances, ...data.impostor_distances);
+        const maxVal = Math.max(...data.genuine_distances, ...data.impostor_distances);
+        const binCount = 15;
+        const binWidth = (maxVal - minVal) / binCount;
+
+        const bins = [];
+        for (let i = 0; i < binCount; i++) {
+            bins.push({
+                start: minVal + i * binWidth,
+                end: minVal + (i + 1) * binWidth,
+                genuine: 0,
+                impostor: 0
+            });
+        }
+
+        // Preencher bins
+        data.genuine_distances.forEach(val => {
+            const binIndex = Math.min(Math.floor((val - minVal) / binWidth), binCount - 1);
+            bins[binIndex].genuine++;
+        });
+
+        data.impostor_distances.forEach(val => {
+            const binIndex = Math.min(Math.floor((val - minVal) / binWidth), binCount - 1);
+            bins[binIndex].impostor++;
+        });
+
+        const labels = bins.map(b => `${b.start.toFixed(2)}-${b.end.toFixed(2)}`);
+
+        new Chart(histCtx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [
+                    { label: 'Legítimos', data: bins.map(b => b.genuine), backgroundColor: 'rgba(40, 167, 69, 0.7)', borderColor: '#28a745', borderWidth: 1 },
+                    { label: 'Impostores', data: bins.map(b => b.impostor), backgroundColor: 'rgba(220, 53, 69, 0.7)', borderColor: '#dc3545', borderWidth: 1 }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: { legend: { position: 'top' } },
+                scales: {
+                    x: { title: { display: true, text: 'Intervalo de Distâncias' }, ticks: { rotation: 45, maxRotation: 90 } },
+                    y: { title: { display: true, text: 'Frequência' }, beginAtZero: true }
+                }
+            }
+        });
+
+        // Gráfico de densidade (curvas suavizadas)
+        const densityCtx = document.getElementById('densityChart').getContext('2d');
+
+        // Função para calcular densidade kernel (simplificada)
+        function calculateDensity(dataPoints, points, bandwidth = 0.03) {
+            return points.map(x => {
+                let sum = 0;
+                dataPoints.forEach(d => {
+                    const u = (x - d) / bandwidth;
+                    const k = Math.exp(-0.5 * u * u) / Math.sqrt(2 * Math.PI);
+                    sum += k;
+                });
+                return sum / (dataPoints.length * bandwidth);
+            });
+        }
+
+        const densityPoints = [];
+        for (let x = 0.5; x <= 1.6; x += 0.01) {
+            densityPoints.push(x);
+        }
+
+        const genuineDensity = calculateDensity(data.genuine_distances, densityPoints, 0.03);
+        const impostorDensity = calculateDensity(data.impostor_distances, densityPoints, 0.05);
+
+        new Chart(densityCtx, {
+            type: 'line',
+            data: {
+                datasets: [
+                    { label: 'Densidade - Legítimos', data: densityPoints.map((x, i) => ({ x, y: genuineDensity[i] })), borderColor: '#28a745', backgroundColor: 'rgba(40, 167, 69, 0.1)', borderWidth: 2, fill: true },
+                    { label: 'Densidade - Impostores', data: densityPoints.map((x, i) => ({ x, y: impostorDensity[i] })), borderColor: '#dc3545', backgroundColor: 'rgba(220, 53, 69, 0.1)', borderWidth: 2, fill: true }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: { legend: { position: 'top' } },
+                scales: {
+                    x: { title: { display: true, text: 'Distância' }, min: 0.5, max: 1.6 },
+                    y: { title: { display: true, text: 'Densidade' } }
+                }
+            }
+        });
+
+        // Gráfico de análise de perfis
+        const profileCtx = document.getElementById('profileChart').getContext('2d');
+        const profiles = data.threshold_analysis.profiles;
+
+        new Chart(profileCtx, {
+            type: 'bar',
+            data: {
+                labels: profiles.map(p => p.profile.charAt(0).toUpperCase() + p.profile.slice(1)),
+                datasets: [
+                    { label: 'Genuine Accept Rate', data: profiles.map(p => p.genuine_accept_rate), backgroundColor: 'rgba(40, 167, 69, 0.7)', borderColor: '#28a745', borderWidth: 1 },
+                    { label: 'Impostor Reject Rate', data: profiles.map(p => p.impostor_reject_rate), backgroundColor: 'rgba(23, 162, 184, 0.7)', borderColor: '#17a2b8', borderWidth: 1 },
+                    { label: 'Youden Score', data: profiles.map(p => p.youden_score), backgroundColor: 'rgba(102, 126, 234, 0.7)', borderColor: '#667eea', borderWidth: 1 }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: { legend: { position: 'top' } },
+                scales: { y: { title: { display: true, text: 'Taxa / Score' }, min: 0, max: 1.1 } }
+            }
+        });
+
+        // Perfis
+        const profilesGrid = document.getElementById('profilesGrid');
+        const recommendedProfile = data.threshold_analysis.profiles.find(p => p.threshold === data.threshold_analysis.recommended_threshold);
+
+        data.threshold_analysis.profiles.forEach(opt => {
+            const isRecommended = opt.threshold === data.threshold_analysis.recommended_threshold;
+            const card = document.createElement('div');
+            card.className = `profile-card ${isRecommended ? 'recommended' : ''}`;
+            card.innerHTML = `
+                <h4>${opt.profile.charAt(0).toUpperCase() + opt.profile.slice(1)} ${isRecommended ? '<i class="fas fa-star" style="color: #ffc107;"></i>' : ''}</h4>
+                <span class="badge ${opt.profile}">Threshold: ${opt.threshold}</span>
+                <div class="profile-stats">
+                    <p><strong>Genuine Accept Rate:</strong> ${(opt.genuine_accept_rate * 100).toFixed(1)}%</p>
+                    <p><strong>Impostor Reject Rate:</strong> ${(opt.impostor_reject_rate * 100).toFixed(1)}%</p>
+                    <p><strong>False Rejection Rate:</strong> ${(opt.false_rejection_rate * 100).toFixed(1)}%</p>
+                    <p><strong>False Acceptance Rate:</strong> ${(opt.false_acceptance_rate * 100).toFixed(1)}%</p>
+                    <p><strong>Youden Score:</strong> ${opt.youden_score.toFixed(4)}</p>
+                </div>
+                <div class="interpretation">
+                    ${opt.profile === 'conservative' ? '⚠️ Prioriza segurança: maior bloqueio de impostores, mas pode rejeitar alguns legítimos.' :
+                    opt.profile === 'balanced' ? '⚖️ Melhor equilíbrio entre segurança e conveniência.' :
+                        '🚀 Prioriza conveniência: maior aceitação de legítimos, mas pode aceitar alguns impostores.'}
+                </div>
+            `;
+            profilesGrid.appendChild(card);
+        });
+
+        // Texto de recomendação
+        if (recommendedProfile) {
+            const recText = `Perfil ${recommendedProfile.profile} com threshold ${recommendedProfile.threshold}: ` +
+                `${(recommendedProfile.genuine_accept_rate * 100)}% de aceitação de legítimos e ` +
+                `${(recommendedProfile.impostor_reject_rate * 100)}% de bloqueio de impostores. ` +
+                `Score de Youden: ${recommendedProfile.youden_score.toFixed(4)}.`;
+            document.getElementById('recommendationText').innerHTML = recText;
+        }
+    </script>
+</body>
+
+</html>

@@ -1,8 +1,8 @@
-# FaceID SaaS — Documento Completo de Projeto
+# VisageX — Documento Completo de Projeto
 
 > Versão MVP — Hackathon UMC 2026  
 > Autores: Otávio Vinícius Flauzino de Souza  
-> Última atualização: Abril 2026
+> Última atualização: Maio 2026
 
 ---
 
@@ -11,7 +11,7 @@
 1. [Visão geral](#1-visão-geral)
 2. [Modelo de negócio](#2-modelo-de-negócio)
 3. [Análise competitiva](#3-análise-competitiva)
-4. [Produtos](#4-produtos)
+4. [Produto](#4-produto)
 5. [Arquitetura do sistema](#5-arquitetura-do-sistema)
 6. [Engine de reconhecimento facial](#6-engine-de-reconhecimento-facial)
 7. [Anti-spoofing](#7-anti-spoofing)
@@ -24,65 +24,71 @@
 14. [Rotas da API Node.js](#14-rotas-da-api-nodejs)
 15. [Superfícies do sistema](#15-superfícies-do-sistema)
 16. [Roadmap pós-MVP](#16-roadmap-pós-mvp)
-17. [Considerações legais e trabalhistas](#17-considerações-legais-e-trabalhistas)
+17. [Considerações legais](#17-considerações-legais)
 
 ---
 
 ## 1. Visão geral
 
-O FaceID SaaS é uma plataforma de reconhecimento facial como serviço
-composta por três produtos distintos:
+O VisageX é uma plataforma de chamada escolar automatizada via
+reconhecimento facial como serviço. Multi-tenant, voltado para
+escolas de ensino médio, institutos técnicos e universidades.
+O professor abre a chamada no painel e alunos são reconhecidos
+automaticamente por um totem (tablet ou celular fixo na parede).
+A lista de presença é preenchida em tempo real.
 
-**FacePresença** — sistema de chamada escolar automatizada via
-reconhecimento facial. Multi-tenant, voltado para escolas, institutos
-técnicos e universidades. O professor abre a aula no painel e alunos
-são reconhecidos automaticamente por um totem (tablet ou celular fixo
-na parede). A lista de presença é preenchida em tempo real.
+### Modos de operação por tenant
 
-**FacePonto** — sistema de registro de ponto empresarial via
-reconhecimento facial. Multi-tenant, voltado para PMEs. Funciona em
-modo totem fixo (tablet na parede) ou modo app (celular do funcionário).
-Inclui geolocalização para validação de presença física.
+Cada tenant opera em um de dois modos, configuráveis
+independentemente via `tenant_settings`:
 
-**FaceAPI** — API REST pública para desenvolvedores integrarem
-reconhecimento facial em suas próprias aplicações. Modelo pay-per-use
-por identificação bem-sucedida. Documentação OpenAPI gerada
-automaticamente pelo FastAPI.
+**Com pré-presença (`pre_attendance_enabled = true`):**  
+Alunos podem registrar chegada antes da chamada ser aberta.
+Quando o professor inicia a chamada, as pré-presenças válidas
+(dentro da janela configurada) são consolidadas automaticamente.
+A chamada é encerrada pelo professor ao final da aula.
+
+**Com checkout individual (`individual_checkout_enabled = true`):**  
+A chamada é iniciada pelo professor e consolidada somente ao
+fechamento. Durante a aula, o professor pode liberar saída
+antecipada para alunos individuais (checkout liberado), o que
+registra o horário de saída daquele aluno. A quantidade de aulas
+frequentadas é contabilizada com base nos checkouts e no
+encerramento da sessão.
+
+Os dois modos são independentes entre si e do campo
+`institution_type`. Uma faculdade pode habilitar pré-presença;
+uma escola pode habilitar checkout individual.
+
+### Contagem de aulas
+
+O coordenador ou admin define, por turma no período letivo, a
+quantidade total de aulas previstas (`total_classes_planned`).
+Ao abrir cada sessão, o professor informa quantas aulas aquela
+sessão representa (ex: aula simples = 1, aula dupla = 2).
+O sistema acompanha automaticamente quantas aulas cada aluno
+frequentou, permitindo cálculo de frequência percentual a
+qualquer momento.
 
 ### Diferencial central
 
-Concorrentes vendem hardware proprietário com contrato de fidelidade
-de 12 a 24 meses. O FaceID SaaS elimina completamente o hardware
-dedicado — qualquer tablet ou celular vira um ponto de reconhecimento
-facial em menos de 5 minutos, sem técnico, sem instalação física,
-sem contrato de fidelidade.
+Concorrentes vendem hardware proprietário com contrato de
+fidelidade de 12 a 24 meses. O VisageX elimina completamente o
+hardware dedicado — qualquer tablet ou celular vira um ponto de
+chamada facial em menos de 5 minutos, sem técnico, sem instalação
+física, sem contrato de fidelidade.
 
 ---
 
 ## 2. Modelo de negócio
 
-### Precificação FacePresença
+### Precificação
 
 | Plano     | Limite               | Preço      |
 | --------- | -------------------- | ---------- |
 | Starter   | até 5 turmas ativas  | R$ 89/mês  |
 | Escola    | até 20 turmas ativas | R$ 149/mês |
 | Instituto | turmas ilimitadas    | R$ 249/mês |
-
-### Precificação FacePonto
-
-| Plano      | Limite               | Preço      |
-| ---------- | -------------------- | ---------- |
-| Micro      | até 10 funcionários  | R$ 49/mês  |
-| PME        | até 30 funcionários  | R$ 89/mês  |
-| Empresa    | até 100 funcionários | R$ 179/mês |
-| Enterprise | acima de 100         | negociado  |
-
-### Precificação FaceAPI
-
-- Free tier: 100 identificações/mês
-- Pay-per-use: R$ 0,07 por identificação bem-sucedida
-- Plano Dev: R$ 99/mês com 2.000 identificações inclusas
 
 ### Sem contrato de fidelidade
 
@@ -102,124 +108,73 @@ vantagem comercial sobre concorrentes que exigem 12 a 24 meses.
 
 ## 3. Análise competitiva
 
-### Evo Facial (concorrente hardware)
+### Sistemas existentes no mercado
 
-Vende equipamento físico proprietário por R$ 1.485 à vista ou
-R$ 98/mês em 16 parcelas. Exige ponto de energia dedicado e cabo de
-rede no local de instalação. Software RHiD em nuvem cobrado
-separadamente a partir de R$ 69,90/mês para até 30 funcionários.
-Contrato mínimo de 12 meses. Instalação em até 7 dias úteis com
-visita técnica.
-
-### Mobile/Quiosque (concorrente software)
-
-Sistema sem hardware dedicado com reconhecimento facial via celular.
-Plano Lite até 10 funcionários por R$ 49/mês. Plano até 20
-funcionários por R$ 119/mês. Inclui geolocalização e modo quiosque.
-Não é REP homologado — posicionado como sistema de gestão auxiliar.
+A maioria das soluções de chamada escolar é manual (papel ou
+planilha) ou depende de hardware dedicado com contrato longo.
+Não existe solução consolidada de chamada facial para escolas
+brasileiras sem hardware proprietário.
 
 ### Comparativo
 
-| Critério               | Evo Facial             | Mobile/Quiosque | FaceID SaaS            |
-| ---------------------- | ---------------------- | --------------- | ---------------------- |
-| Hardware próprio       | Obrigatório R$1.485    | Não             | **Não**                |
-| Infraestrutura         | Energia + cabo de rede | Wi-Fi           | **Wi-Fi**              |
-| Contrato mínimo        | 12 meses               | Não informado   | **Sem fidelidade**     |
-| Até 10 funcionários    | —                      | R$ 49/mês       | **R$ 49/mês**          |
-| Até 30 funcionários    | R$ 239–319/mês         | —               | **R$ 89/mês**          |
-| Anti-spoofing          | Não informado          | Não informado   | **Sim (MiniFASNet)**   |
-| Log auditável com foto | Não                    | Não             | **Sim (24h)**          |
-| LGPD documentada       | Não informado          | Não informado   | **Sim**                |
-| API pública            | Não                    | Não             | **Sim (FaceAPI)**      |
-| Chamada escolar        | Não                    | Não             | **Sim (FacePresença)** |
+| Critério            | Sistemas tradicionais | VisageX                |
+| ------------------- | --------------------- | ---------------------- |
+| Hardware próprio    | Obrigatório           | **Não**                |
+| Infraestrutura      | Energia + cabo        | **Wi-Fi**              |
+| Contrato mínimo     | 12–24 meses           | **Sem fidelidade**     |
+| Anti-spoofing       | Não                   | **Sim (MiniFASNet)**   |
+| Log auditável       | Não                   | **Sim (24h)**          |
+| LGPD documentada    | Não                   | **Sim**                |
+| Pré-presença        | Não                   | **Sim (configurável)** |
+| Contagem de aulas   | Manual                | **Automático**         |
+| Checkout individual | Não                   | **Sim (configurável)** |
 
 ### Posicionamento de pitch
 
-"Nossos concorrentes vendem hardware. Nós vendemos inteligência.
-Qualquer tela vira um ponto de reconhecimento facial em 5 minutos,
-sem técnico, sem instalação, sem contrato."
+"Sistemas de chamada atual desperdiçam 5 a 10 minutos de aula
+toda vez. O VisageX faz isso em segundos — qualquer tablet vira
+um ponto de chamada facial sem hardware, sem técnico, sem contrato."
 
 ---
 
-## 4. Produtos
+## 4. Produto
 
-### 4.1 FacePresença
+### VisageX — Chamada Escolar
 
 **Problema:** chamada manual desperdiça 5 a 10 minutos por aula,
 é sujeita a erros, fraudes e inconsistências nos registros.
+Sistemas digitais existentes exigem hardware dedicado e contrato longo.
 
 **Solução:** totem fixo (tablet ou celular) reconhece os alunos
 automaticamente enquanto entram na sala. O professor só precisa
-abrir a aula e revisar ao final.
+abrir a chamada e revisar ao final.
 
-**Fluxo de uso:**
+**Fluxo de uso — com pré-presença (`pre_attendance_enabled = true`):**
 
-- Professor abre a aula no painel web
-- Alunos passam na frente do totem ao entrar
-- Lista de presença preenche em tempo real via SSE
-- Alunos que chegaram antes da aula ser aberta têm presença
-  consolidada automaticamente via pré-presença (Redis)
+- Alunos passam na frente do totem ao chegar (antes ou depois da chamada abrir)
+- Se a chamada ainda não foi aberta, o reconhecimento gera uma pré-presença no Redis
+- Professor abre a chamada no painel web
+- Pré-presenças válidas (dentro da janela configurada) são consolidadas automaticamente
+- Novos reconhecimentos durante a aula atualizam a lista em tempo real via SSE
 - Professor revisa e ajusta manualmente se necessário
-- Professor fecha a aula — ausentes são marcados automaticamente
+- Professor fecha a chamada — ausentes são marcados automaticamente
+
+**Fluxo de uso — com checkout individual (`individual_checkout_enabled = true`):**
+
+- Professor abre a chamada no painel, informa quantas aulas a sessão representa (padrão: 1)
+- Alunos passam na frente do totem ao entrar — presença registrada em tempo real
+- Durante a aula, professor pode liberar checkout individual para alunos que precisam sair
+- Ao encerrar a chamada, o sistema consolida: quem fez checkout registra saída; demais são marcados como presentes até o encerramento
+- Contagem de aulas frequentadas é atualizada automaticamente por aluno
 
 **Diferenciais:**
 
-- Pré-presença: aluno reconhecido antes da aula abrir tem presença
-  consolidada quando o professor abre
+- Pré-presença (configurável por tenant): aluno reconhecido antes da chamada abrir tem presença consolidada automaticamente
+- Checkout individual (configurável por tenant): professor libera saída de aluno específico com registro de horário
+- Contagem de aulas: coordenador/admin define o total previsto por turma; professor informa o peso da sessão ao abrir; sistema acumula por aluno no período
 - Ajuste manual com rastreabilidade de quem alterou e quando
 - Relatório de frequência por aluno, turma e período letivo
 - Nenhum app para instalar — totem é uma PWA no browser do tablet
-
-### 4.2 FacePonto
-
-**Problema:** registro de ponto manual ou com cartão permite fraudes
-(ponto de colega). Hardware dedicado tem custo alto e instalação
-complexa.
-
-**Solução:** reconhecimento facial em qualquer tablet ou celular,
-com anti-spoofing para prevenir fraudes e log auditável com foto
-para conferência.
-
-**Modo totem fixo:**
-
-- Tablet fixo na parede da entrada da empresa
-- Loop automático de captura e reconhecimento
-- Funciona como totem sem app instalado (PWA)
-- Gestor configura o local no painel
-
-**Modo app (futuro pós-MVP):**
-
-- Funcionário instala app no próprio celular
-- Vínculo dispositivo-funcionário feito pelo admin via código temporário
-- Reconhecimento facial + GPS valida presença no local correto
-- Geofence configurável por localização de trabalho
-
-**Diferenciais:**
-
-- Log de auditoria com foto de cada registro (24h)
-- Gestor visualiza feed em tempo real de entradas e saídas
-- Anti-spoofing impede fraude com foto de colega
-- Sem contrato de fidelidade
-
-**Posição legal:**
-Posicionado como sistema de gestão de frequência auxiliar, não como
-REP homologado (Portaria 671/MTE). Indicado para empresas até 20
-funcionários (sem obrigação de REP) ou em empresas com acordo
-coletivo REP-A. Ver seção 17 para detalhes.
-
-### 4.3 FaceAPI
-
-API REST para desenvolvedores com dois endpoints principais:
-
-`POST /api/v1/recognize` — identifica uma pessoa em uma imagem
-contra uma lista de candidatos fornecida pelo cliente.
-
-`POST /api/v1/embeddings/register` — gera e retorna embedding
-criptografado de uma face para armazenamento pelo cliente.
-
-Autenticação por API Key. Rate limiting por plano. Documentação
-Swagger gerada automaticamente. Webhooks para notificação assíncrona
-(pós-MVP).
 
 ---
 
@@ -242,8 +197,8 @@ Internet
 │  Dashboard  │          │  • JWT auth          │
 │  Super Admin│          │  • tenant isolation  │
 │  Totem PWA  │◀────SSE──│  • warm cache logic  │
-│  App Mobile │          │  • pre-attendance    │
-│  (PWA)      │          │  • audit log save    │
+│             │          │  • pre-attendance    │
+│             │          │  • audit log save    │
 └─────────────┘          └──────┬───────┬───────┘
                                 │       │
                     ┌───────────┘       └──────────────┐
@@ -273,7 +228,7 @@ Internet
          │  • AES-256-GCM — decrypt em RAM      │
          │  • comparação NumPy vetorizada       │
          │  • cache em memória (dict Python)    │
-         │  • audit frames em disco (24h)       │
+         │  • fraud frames (liveness_failed)    │
          │                                      │
          │  workers=2 · modelos em memória      │
          │  zero acesso ao PostgreSQL           │
@@ -281,16 +236,18 @@ Internet
                     │
                     ▼
          ┌──────────────────────────────────────┐
-         │     Audit Frames (filesystem)        │
+         │     Fraud Frames (filesystem)        │
          │                                      │
-         │  ./audit_frames/                     │
+         │  ./fraud_frames/                     │
          │    {tenant_id}/                      │
          │      {YYYY-MM-DD}/                   │
-         │        {timestamp}_{status}_{id}.jpg │
+         │        {timestamp_ms}_failed_{id}.jpg│
          │                                      │
-         │  TTL: 24 horas                       │
+         │  Apenas quando: liveness_failed      │
+         │    + save_fraud_frames = true        │
+         │  TTL: fraud_retention_hours (padrão 24h) │
          │  Job de limpeza: diário às 03:00     │
-         │  Acesso: apenas gestor do tenant     │
+         │  Acesso: apenas admin/manager        │
          └──────────────────────────────────────┘
 ```
 
@@ -304,18 +261,18 @@ Isso elimina dependência de banco no caminho crítico de performance.
 **Cache em memória na engine.** Um dicionário Python
 `{tenant_id: {person_id: ndarray}}` mantém embeddings já
 descriptografados em RAM entre requisições. Após o primeiro
-request de uma turma/turno, as requisições seguintes têm zero
-custo de I/O e zero custo de descriptografia.
+request de uma turma, as requisições seguintes têm zero custo
+de I/O e zero custo de descriptografia.
 
 **Redis sem persistência.** Configurado com `--save ""` e
 `--appendonly no`. Dados em Redis são sempre reconstituíveis
 pelo Node — se cair, o Node re-popula. Isso garante que
 embeddings descriptografados nunca tocam disco fora da engine.
 
-**Warm cache proativo.** Quando uma aula abre ou um turno começa,
-o Node popula o cache da engine com os embeddings de todos os
-candidatos antes do primeiro reconhecimento. Elimina latência
-de cache miss no pico de chegada.
+**Warm cache proativo.** Quando uma chamada abre, o Node popula
+o cache da engine com os embeddings de todos os candidatos antes
+do primeiro reconhecimento. Elimina latência de cache miss no
+pico de chegada.
 
 **Workers=2 Uvicorn.** Para o MVP com até 700 usuários em pico
 distribuídos em tenants, 2 workers processando ~13 reconhecimentos
@@ -354,22 +311,74 @@ Deserialização: `np.frombuffer(plaintext, dtype=np.float32).copy()`.
 Não usar base64 — a conversão bytes→base64→bytes é desnecessária
 e adiciona ~33% de tamanho sem benefício.
 
-### Criptografia AES-256-GCM
+### Criptografia: Envelope Encryption por tenant
+
+O sistema usa **envelope encryption** (padrão DEK/KEK):
 
 ```
-Chave: 32 bytes (256 bits) carregada como hex de 64 chars do env
+MASTER_KEY (KEK)
+  └─ 32 bytes, hex 64 chars, carregada do env em ambos os serviços
+  └─ Usada exclusivamente para cifrar/decifrar DEKs
+
+DEK (Data Encryption Key) — uma por tenant
+  └─ 32 bytes gerados com os.urandom(32) na criação do tenant
+  └─ Armazenada criptografada na tabela tenant_keys (jamais em plaintext)
+  └─ Usada para cifrar/decifrar os embeddings do tenant
+```
+
+**Criptografia de cada embedding (AES-256-GCM com DEK do tenant):**
+
+```
 IV: 12 bytes gerados com os.urandom(12) por operação — nunca reutilizar
 Plaintext: 2048 bytes do embedding serializado
 Output AESGCM.encrypt: ciphertext + tag (tag = últimos 16 bytes)
 
-Armazenamento no banco:
-  embedding_iv  BYTEA  — 12 bytes
-  embedding_tag BYTEA  — 16 bytes
-  embedding_ct  BYTEA  — 2048 bytes
+Armazenamento em facial_embeddings:
+  embedding_iv   BYTEA  — 12 bytes
+  embedding_tag  BYTEA  — 16 bytes
+  embedding_ct   BYTEA  — 2048 bytes
+  key_version    INT    — versão da DEK usada (suporte a rotação)
 ```
 
-A tag de autenticação GCM garante integridade — se o ciphertext
-for adulterado no banco, a descriptografia lança `InvalidTag`.
+**Fluxo de uso da DEK:**
+
+```
+1. Criação do tenant (Node):
+   gera DEK = os.urandom(32)
+   iv  = os.urandom(12)
+   (dek_ct, dek_tag) = AESGCM(MASTER_KEY).encrypt(iv, DEK)
+   INSERT tenant_keys (dek_ct, dek_iv=iv, dek_tag, key_version=1)
+   DEK descartada da memória
+
+2. Cadastro de embedding (Node → Engine):
+   Node busca (dek_ct, dek_iv, dek_tag) em tenant_keys
+   Envia para engine junto com a imagem
+   Engine: DEK = AESGCM(MASTER_KEY).decrypt(dek_iv, dek_ct+dek_tag)
+           criptografa embedding com DEK
+           retorna (embedding_iv, embedding_tag, embedding_ct, key_version)
+
+3. Reconhecimento / warm cache (Node → Engine):
+   Node busca DEK encriptada e embeddings do tenant
+   Envia (dek_ct, dek_iv, dek_tag) + candidatos para engine
+   Engine: decifra DEK com MASTER_KEY → cache DEK por tenant_id (TTL 1h)
+           decifra embeddings dos candidatos com DEK
+           compara e retorna resultado
+```
+
+**Cache da DEK na face engine:**
+
+A DEK de cada tenant é mantida em memória no worker após a primeira
+decifragem (dict Python `{tenant_id: (dek_bytes, expires_at)}`).
+O Node invalida o cache via `DELETE /cache/dek/{tenant_id}` ao
+rotacionar a chave. TTL máximo: 1h mesmo sem invalidação ativa.
+
+**Isolamento por tenant:**
+Compromisso de uma DEK não exposta outras tenants nem a MASTER_KEY.
+Rotação de MASTER_KEY exige apenas re-cifrar as DEKs (não todos os
+embeddings). Rotação de DEK de um tenant exige re-cifrar apenas
+os embeddings daquele tenant.
+
+A tag GCM garante integridade — adulteração no banco lança `InvalidTag`.
 Nunca capturar esse erro silenciosamente.
 
 ### Comparação vetorizada
@@ -424,7 +433,8 @@ confidence = max(0.0, 1.0 - (best_distance / 1.5))
 
 8. Comparação vetorizada NumPy
 
-9. Salva audit frame em disco (fire-and-forget, não bloqueia)
+9. Se status='liveness_failed' e save_fraud_frames=true:
+   Salva fraud frame em disco (fire-and-forget, não bloqueia)
 
 10. Retorna resultado
 ```
@@ -439,12 +449,19 @@ Request:
 {
   "tenant_id": "string",
   "image_b64": "string (JPEG base64)",
+  "tenant_dek": {
+    "dek_ct": "hex",
+    "dek_iv": "hex",
+    "dek_tag": "hex",
+    "key_version": 1
+  },
   "candidates": [
     {
       "person_id": 1,
       "embedding_iv": "hex",
       "embedding_tag": "hex",
-      "embedding_ct": "hex"
+      "embedding_ct": "hex",
+      "key_version": 1
     }
   ]
 }
@@ -489,6 +506,7 @@ Response:
   "embedding_iv": "hex",
   "embedding_tag": "hex",
   "embedding_ct": "hex",
+  "key_version": 1,
   "model_version": "arcface_r50_v1"
 }
 ```
@@ -501,8 +519,8 @@ Chamado pelo Node quando usuário é removido ou embedding atualizado.
 **POST /cache/warm**
 
 Recebe lista de candidatos com embeddings criptografados,
-descriptografa e popula cache. Chamado pelo Node ao abrir aula
-ou iniciar turno, antes do primeiro reconhecimento.
+descriptografa e popula cache. Chamado pelo Node ao abrir a
+chamada, antes do primeiro reconhecimento.
 
 **GET /health**
 
@@ -524,7 +542,7 @@ ou iniciar turno, antes do primeiro reconhecimento.
 
 O sistema usa quatro camadas complementares. Nenhuma camada
 isolada é infalível — a combinação cobre os ataques casuais
-que representam 99% dos casos reais em ambiente corporativo.
+que representam 99% dos casos reais em ambiente escolar.
 
 ### Camada 1 — Variação de pixels (frontend, ~5ms)
 
@@ -597,15 +615,16 @@ Não bloqueia sozinha — penaliza o resultado final se:
 podem não ser detectadas. Câmeras com saturação aumentada
 podem gerar falsos positivos.
 
-### Camada 4 — Log auditável com foto (deterrência, ~0ms no caminho crítico)
+### Camada 4 — Fraud frame (deterrência, ~0ms no caminho crítico)
 
-**O que faz:** salva o frame capturado junto com os scores de
-cada registro. O gestor pode auditar visualmente casos suspeitos.
+**O que faz:** quando `status = 'liveness_failed'` e `tenant.save_fraud_frames = true`,
+salva o frame capturado em disco. O gestor pode auditar visualmente
+as tentativas de fraude detectadas.
 
-**Por que funciona:** a maioria das fraudes de ponto são oportunistas.
-Saber que existe um registro fotográfico de cada batida inibe a
-tentativa antes de acontecer. É a camada mais eficaz em termos
-de custo-benefício.
+**Por que funciona:** a maioria das fraudes são oportunistas.
+Saber que existe um registro fotográfico de tentativas bloqueadas
+inibe novas tentativas. Salvar apenas frames de falha de liveness
+reduz o armazenamento a uma fração do volume total.
 
 **Implementação:** fire-and-forget com `asyncio.create_task`.
 Não bloqueia o pipeline de reconhecimento. Se falhar o salvamento,
@@ -646,7 +665,8 @@ Engine Python:
               ArcFace embedding → comparação
                 │
                 ▼
-              [Camada 4] Salva audit frame (async)
+              [Camada 4] Se liveness_failed e save_fraud_frames=true:
+                          salva fraud frame (async)
                 │
                 ▼
               Retorna resultado
@@ -657,54 +677,61 @@ Engine Python:
 
 ---
 
-## 8. Logs de auditoria e LGPD
+## 8. Fraud Frames e LGPD
 
 ### O que é armazenado
 
-Para cada tentativa de reconhecimento (bem-sucedida ou não),
-o sistema salva:
+Para cada tentativa de reconhecimento, o sistema salva sempre
+um registro de log no banco. Imagens em disco são **opcionais
+e restritas a tentativas de fraude**:
 
 **No PostgreSQL (permanente):**
 
 - `recognition_logs`: status, person_id, confidence, liveness_score,
   saturation_mean, processing_ms, device_id, tenant_id, timestamp
-- Referência ao arquivo de imagem: `audit_frame_path` (nullable)
+- `fraud_frame_path` (nullable) — preenchido apenas quando
+  `status = 'liveness_failed'` e `tenant.save_fraud_frames = true`
+- `fraud_frame_exists` — false após exclusão pelo job de limpeza
 
-**No filesystem (temporário — 24h):**
+**No filesystem (temporário — configurável por tenant):**
 
-- Frame JPEG da captura, qualidade 70
-- Organizado em `./audit_frames/{tenant_id}/{YYYY-MM-DD}/`
-- Nome: `{timestamp_ms}_{status}_{person_id_ou_unknown}.jpg`
+- Frame JPEG apenas de tentativas bloqueadas por liveness
+- Organizado em `./fraud_frames/{tenant_id}/{YYYY-MM-DD}/`
+- Nome: `{timestamp_ms}_failed_{recognition_log_id}.jpg`
+- Qualidade JPEG 70
+- Habilitado por tenant: `save_fraud_frames = true` (padrão)
 
-### Por que 24 horas é o prazo correto
+Reconhecimentos bem-sucedidos (`identified`) e falhas sem fraude
+(`not_identified`, `no_face_detected`) **não geram arquivo em disco**.
 
-Um dia cobre o ciclo completo de trabalho — o gestor pode auditar
-qualquer registro do dia antes do encerramento do expediente. É
-o prazo mínimo necessário para a finalidade declarada e o máximo
-defensável sob o princípio de necessidade da LGPD.
+### Por que somente frames de fraude
 
-Manter mais que 24 horas não agrega valor para a finalidade de
-auditoria de fraude diária e aumenta desnecessariamente o risco
-de vazamento.
+Salvar frames de todos os registros cria volume desnecessário e
+aumento do risco de exposição de dados biométricos sem finalidade
+clara. Frames de `liveness_failed` têm finalidade específica e
+defensável: evidenciar a tentativa de fraude para o gestor.
+
+O prazo padrão de 24 horas cobre o ciclo completo do dia letivo.
+Configurável por tenant em `fraud_retention_hours`.
 
 ### Job de limpeza automática
 
 Roda todos os dias às 03:00 (horário do servidor, configurável).
-Deleta todos os arquivos em `./audit_frames/` com mais de 24 horas.
-Atualiza `audit_frame_path` para NULL nos registros correspondentes
-em `recognition_logs`.
+Deleta todos os arquivos em `./fraud_frames/` expirados conforme
+o `fraud_retention_hours` de cada tenant.
+Atualiza `fraud_frame_exists = false` e `fraud_frame_path = NULL`
+nos `recognition_logs` correspondentes.
 
 A exclusão é **comprovável** — o job gera um log de quantos arquivos
-foram deletados por tenant, que fica registrado em
-`audit_cleanup_logs` no PostgreSQL.
+foram deletados por tenant, registrado em `audit_cleanup_logs`.
 
 ### Base legal LGPD
 
 **Base legal principal:** legítimo interesse do controlador
-(empresa cliente / tenant), combinado com execução do contrato
-de trabalho.
+(instituição de ensino / tenant), combinado com o interesse
+legítimo de proteção da integridade dos registros acadêmicos.
 
-**Finalidade:** exclusivamente auditoria de fraude de ponto para
+**Finalidade:** exclusivamente auditoria de fraude de chamada para
 o dia corrente. Não inclui treinamento de modelos, análise
 comportamental, ou qualquer finalidade secundária.
 
@@ -712,30 +739,25 @@ comportamental, ou qualquer finalidade secundária.
 reduzida para 70% JPEG, descarte automático em 24h).
 
 **Transparência:** obrigatório constar na política de privacidade
-do tenant que imagens faciais são capturadas no registro de ponto,
+do tenant que imagens faciais são capturadas na chamada,
 retidas por até 24 horas para fins de auditoria de fraude, e
 descartadas automaticamente.
 
 **Acesso restrito:** apenas usuários com role `admin` ou `manager`
-do tenant podem visualizar os audit frames. O operador do SaaS
-(você) não acessa imagens de tenants. Isso deve estar explícito
+do tenant podem visualizar os fraud frames. O operador do SaaS
+não acessa imagens de tenants. Isso deve estar explícito
 no contrato com o tenant e na política de privacidade.
-
-**Consentimento do funcionário:** não é necessário consentimento
-explícito separado se o uso estiver descrito na política de uso
-do sistema apresentada pelo RH na admissão. Mas precisa estar
-documentado que o funcionário foi informado.
 
 ### O que você (operador) não pode fazer com as imagens
 
 - Usar para treinar ou melhorar modelos de reconhecimento facial
 - Compartilhar com terceiros além do tenant contratante
-- Manter além do prazo de 24 horas
-- Usar para qualquer finalidade além de auditoria de fraude
+- Manter além do prazo configurado em `fraud_retention_hours`
+- Usar para qualquer finalidade além de evidenciar fraudes de liveness
 
 ### Implementação técnica da restrição de acesso
 
-O endpoint de visualização de audit frames verifica:
+O endpoint de visualização de fraud frames verifica:
 
 1. JWT válido
 2. `role IN ('admin', 'manager')`
@@ -762,27 +784,27 @@ e `updated_at TIMESTAMPTZ DEFAULT NOW()` salvo indicação contrária.
 CREATE TABLE plans (
   id              SERIAL PRIMARY KEY,
   name            VARCHAR(100) NOT NULL,
-  product_type    VARCHAR(20) NOT NULL
-                  CHECK (product_type IN ('attendance','timeclock','both','api')),
-  max_users       INT NOT NULL DEFAULT 30,
+  max_classes     INT NOT NULL DEFAULT 20,       -- turmas ativas simultâneas
   price_monthly   NUMERIC(10,2) NOT NULL,
   is_active       BOOLEAN NOT NULL DEFAULT true,
   created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE tenants (
-  id              SERIAL PRIMARY KEY,
-  plan_id         INT NOT NULL REFERENCES plans(id),
-  name            VARCHAR(200) NOT NULL,
-  document        VARCHAR(20),           -- CNPJ ou CPF
-  type            VARCHAR(20) NOT NULL
-                  CHECK (type IN ('school','company')),
-  status          VARCHAR(20) NOT NULL DEFAULT 'trial'
-                  CHECK (status IN ('active','suspended','trial','cancelled')),
-  trial_ends_at   TIMESTAMPTZ,
-  timezone        VARCHAR(50) NOT NULL DEFAULT 'America/Sao_Paulo',
-  created_at      TIMESTAMPTZ DEFAULT NOW(),
-  updated_at      TIMESTAMPTZ DEFAULT NOW()
+  id                    SERIAL PRIMARY KEY,
+  plan_id               INT NOT NULL REFERENCES plans(id),
+  name                  VARCHAR(200) NOT NULL,
+  document              VARCHAR(20),             -- CNPJ ou CPF
+  institution_type      VARCHAR(20) NOT NULL
+                        CHECK (institution_type IN ('school','university')),
+  -- institution_type é apenas classificação cadastral; os modos de operação
+  -- (pré-presença, checkout individual) são controlados em tenant_settings
+  status                VARCHAR(20) NOT NULL DEFAULT 'trial'
+                        CHECK (status IN ('active','suspended','trial','cancelled')),
+  trial_ends_at         TIMESTAMPTZ,
+  timezone              VARCHAR(50) NOT NULL DEFAULT 'America/Sao_Paulo',
+  created_at            TIMESTAMPTZ DEFAULT NOW(),
+  updated_at            TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE tenant_settings (
@@ -791,10 +813,15 @@ CREATE TABLE tenant_settings (
   liveness_threshold          FLOAT NOT NULL DEFAULT 0.85,
   liveness_enabled            BOOLEAN NOT NULL DEFAULT true,
   static_pixel_threshold      FLOAT NOT NULL DEFAULT 3.0,
-  geofence_radius_meters      INT NOT NULL DEFAULT 150,
   allow_manual_override       BOOLEAN NOT NULL DEFAULT true,
+  -- Pré-presença: habilitável em qualquer tipo de instituição
+  pre_attendance_enabled      BOOLEAN NOT NULL DEFAULT false,
   pre_attendance_window_min   INT NOT NULL DEFAULT 30,
-  audit_retention_hours       INT NOT NULL DEFAULT 24,
+  -- Checkout individual: habilitável em qualquer tipo de instituição
+  individual_checkout_enabled BOOLEAN NOT NULL DEFAULT false,
+  -- Fraud frames: salvo apenas quando status='liveness_failed'
+  save_fraud_frames           BOOLEAN NOT NULL DEFAULT true,
+  fraud_retention_hours       INT NOT NULL DEFAULT 24,
   updated_at                  TIMESTAMPTZ DEFAULT NOW()
 );
 ```
@@ -809,18 +836,29 @@ CREATE TABLE users (
   tenant_id       INT NOT NULL REFERENCES tenants(id),
   name            VARCHAR(200) NOT NULL,
   email           VARCHAR(200),
-  password_hash   VARCHAR(255),          -- NULL para funcionários sem acesso ao painel
+  password_hash   VARCHAR(255),          -- NULL para alunos sem acesso ao painel
   role            VARCHAR(20) NOT NULL
                   CHECK (role IN (
-                    'super_admin','admin','manager',
-                    'teacher','employee'
+                    'super_admin','admin','manager','teacher','student'
                   )),
   status          VARCHAR(20) NOT NULL DEFAULT 'active'
                   CHECK (status IN ('active','inactive','pending')),
   document        VARCHAR(20),           -- CPF
+  enrollment_code VARCHAR(50),           -- matrícula institucional (opcional)
   created_at      TIMESTAMPTZ DEFAULT NOW(),
   updated_at      TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE (tenant_id, email)
+);
+
+-- Uma DEK por tenant, cifrada com MASTER_KEY
+CREATE TABLE tenant_keys (
+  tenant_id    INT PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
+  dek_ct       BYTEA NOT NULL,           -- DEK cifrada com MASTER_KEY
+  dek_iv       BYTEA NOT NULL,           -- 12 bytes
+  dek_tag      BYTEA NOT NULL,           -- 16 bytes (tag GCM)
+  key_version  INT NOT NULL DEFAULT 1,   -- incrementado a cada rotação
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE facial_embeddings (
@@ -830,6 +868,7 @@ CREATE TABLE facial_embeddings (
   embedding_iv    BYTEA NOT NULL,        -- 12 bytes
   embedding_tag   BYTEA NOT NULL,        -- 16 bytes
   embedding_ct    BYTEA NOT NULL,        -- 2048 bytes (512 float32)
+  key_version     INT NOT NULL DEFAULT 1,-- versão da DEK usada na cifração
   model_version   VARCHAR(50) NOT NULL DEFAULT 'arcface_r50_v1',
   created_at      TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE (user_id, model_version)
@@ -838,57 +877,35 @@ CREATE TABLE facial_embeddings (
 CREATE TABLE devices (
   id                  SERIAL PRIMARY KEY,
   tenant_id           INT NOT NULL REFERENCES tenants(id),
-  user_id             INT REFERENCES users(id),  -- NULL = totem sem vínculo pessoal
   device_fingerprint  VARCHAR(255) NOT NULL,
-  device_type         VARCHAR(20) NOT NULL
-                      CHECK (device_type IN ('app','totem')),
-  label               VARCHAR(100),              -- "Entrada principal", "Celular João"
+  label               VARCHAR(100),              -- "Sala 12 — Bloco B"
   api_key_hash        VARCHAR(255) NOT NULL,
+  location_id         INT REFERENCES locations(id),
   is_active           BOOLEAN NOT NULL DEFAULT true,
   last_seen_at        TIMESTAMPTZ,
-  bound_at            TIMESTAMPTZ,
   created_at          TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE (tenant_id, device_fingerprint)
-);
-
-CREATE TABLE device_bind_codes (
-  id          SERIAL PRIMARY KEY,
-  tenant_id   INT NOT NULL REFERENCES tenants(id),
-  user_id     INT NOT NULL REFERENCES users(id),
-  code        VARCHAR(6) NOT NULL,
-  expires_at  TIMESTAMPTZ NOT NULL,
-  used        BOOLEAN NOT NULL DEFAULT false,
-  created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 ```
 
 ---
 
-#### Domínio: localização e geofences
+#### Domínio: localização
 
 ```sql
 CREATE TABLE locations (
   id              SERIAL PRIMARY KEY,
   tenant_id       INT NOT NULL REFERENCES tenants(id),
-  name            VARCHAR(100) NOT NULL,
+  name            VARCHAR(100) NOT NULL,   -- "Bloco A", "Campus Centro"
   address         VARCHAR(300),
-  latitude        FLOAT,
-  longitude       FLOAT,
-  radius_meters   INT NOT NULL DEFAULT 150,
   is_active       BOOLEAN NOT NULL DEFAULT true,
   created_at      TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE TABLE user_locations (
-  user_id         INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  location_id     INT NOT NULL REFERENCES locations(id) ON DELETE CASCADE,
-  PRIMARY KEY (user_id, location_id)
 );
 ```
 
 ---
 
-#### Domínio: FacePresença (escolas)
+#### Domínio: estrutura acadêmica
 
 ```sql
 CREATE TABLE academic_periods (
@@ -910,14 +927,17 @@ CREATE TABLE courses (
 );
 
 CREATE TABLE classes (
-  id              SERIAL PRIMARY KEY,
-  tenant_id       INT NOT NULL REFERENCES tenants(id),
-  course_id       INT NOT NULL REFERENCES courses(id),
-  name            VARCHAR(100) NOT NULL,   -- "Turma A — Noturno"
-  teacher_id      INT NOT NULL REFERENCES users(id),
-  room            VARCHAR(50),
-  location_id     INT REFERENCES locations(id),
-  created_at      TIMESTAMPTZ DEFAULT NOW()
+  id                    SERIAL PRIMARY KEY,
+  tenant_id             INT NOT NULL REFERENCES tenants(id),
+  course_id             INT NOT NULL REFERENCES courses(id),
+  name                  VARCHAR(100) NOT NULL,    -- "Turma A — Noturno"
+  teacher_id            INT NOT NULL REFERENCES users(id),
+  room                  VARCHAR(50),
+  location_id           INT REFERENCES locations(id),
+  -- Total de aulas previstas para o período (definido pelo professor/admin)
+  -- Definido pelo coordenador/admin, não pelo professor
+  total_classes_planned INT NOT NULL DEFAULT 0,
+  created_at            TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE class_enrollments (
@@ -927,34 +947,52 @@ CREATE TABLE class_enrollments (
   PRIMARY KEY (class_id, user_id)
 );
 
+-- Acumula quantas aulas cada aluno frequentou por turma no período
+CREATE TABLE student_class_summary (
+  class_id            INT NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+  user_id             INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  classes_attended    INT NOT NULL DEFAULT 0,
+  classes_absent      INT NOT NULL DEFAULT 0,
+  last_updated_at     TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (class_id, user_id)
+);
+
 CREATE TABLE class_sessions (
-  id              BIGSERIAL PRIMARY KEY,
-  tenant_id       INT NOT NULL REFERENCES tenants(id),
-  class_id        INT NOT NULL REFERENCES classes(id),
-  teacher_id      INT NOT NULL REFERENCES users(id),
-  started_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  ended_at        TIMESTAMPTZ,
-  status          VARCHAR(20) NOT NULL DEFAULT 'open'
-                  CHECK (status IN ('open','closed')),
-  created_by      INT NOT NULL REFERENCES users(id)
+  id                  BIGSERIAL PRIMARY KEY,
+  tenant_id           INT NOT NULL REFERENCES tenants(id),
+  class_id            INT NOT NULL REFERENCES classes(id),
+  teacher_id          INT NOT NULL REFERENCES users(id),
+  started_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  ended_at            TIMESTAMPTZ,
+  status              VARCHAR(20) NOT NULL DEFAULT 'open'
+                      CHECK (status IN ('open','closed')),
+  -- Informado pelo professor ao abrir a sessão (ex: aula dupla = 2)
+  classes_worth       INT NOT NULL DEFAULT 1,
+  created_by          INT NOT NULL REFERENCES users(id)
 );
 
 CREATE TABLE attendance_records (
-  id                  BIGSERIAL PRIMARY KEY,
-  tenant_id           INT NOT NULL,
-  class_session_id    BIGINT NOT NULL REFERENCES class_sessions(id),
-  user_id             INT NOT NULL REFERENCES users(id),
-  status              VARCHAR(20) NOT NULL
-                      CHECK (status IN ('present','absent','manual')),
-  recognized_at       TIMESTAMPTZ,
-  confidence          FLOAT,
-  liveness_score      FLOAT,
-  was_pre_attendance  BOOLEAN NOT NULL DEFAULT false,
-  adjusted_by         INT REFERENCES users(id),
-  adjusted_at         TIMESTAMPTZ,
+  id                    BIGSERIAL PRIMARY KEY,
+  tenant_id             INT NOT NULL,
+  class_session_id      BIGINT NOT NULL REFERENCES class_sessions(id),
+  user_id               INT NOT NULL REFERENCES users(id),
+  status                VARCHAR(20) NOT NULL
+                        CHECK (status IN (
+                          'present','absent','manual','early_checkout'
+                        )),
+  -- 'early_checkout': presente mas saiu antes do encerramento (modo faculdade)
+  recognized_at         TIMESTAMPTZ,         -- horário de entrada reconhecida
+  checked_out_at        TIMESTAMPTZ,         -- horário de saída (checkout individual)
+  checkout_released_by  INT REFERENCES users(id), -- professor que liberou saída
+  confidence            FLOAT,
+  liveness_score        FLOAT,
+  was_pre_attendance    BOOLEAN NOT NULL DEFAULT false,
+  adjusted_by           INT REFERENCES users(id),
+  adjusted_at           TIMESTAMPTZ,
   UNIQUE (class_session_id, user_id)
 );
 
+-- Pré-presenças: usada somente quando pre_attendance_enabled = true no tenant_settings
 CREATE TABLE pre_attendances (
   id              BIGSERIAL PRIMARY KEY,
   tenant_id       INT NOT NULL,
@@ -968,53 +1006,6 @@ CREATE TABLE pre_attendances (
   created_at      TIMESTAMPTZ DEFAULT NOW(),
   -- impede duplicata: só a primeira chegada por local por dia conta
   UNIQUE (tenant_id, location_id, user_id, date(recognized_at))
-);
-```
-
----
-
-#### Domínio: FacePonto (empresas)
-
-```sql
-CREATE TABLE work_schedules (
-  id              SERIAL PRIMARY KEY,
-  tenant_id       INT NOT NULL REFERENCES tenants(id),
-  name            VARCHAR(100) NOT NULL,   -- "Comercial 8h-17h"
-  -- [{weekday: 1-7, start_time: "08:00", end_time: "17:00",
-  --   tolerance_minutes: 10}]
-  entries         JSONB NOT NULL,
-  created_at      TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE TABLE user_schedules (
-  user_id             INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  work_schedule_id    INT NOT NULL REFERENCES work_schedules(id),
-  starts_at           DATE NOT NULL,
-  ends_at             DATE,              -- NULL = indefinido
-  PRIMARY KEY (user_id, work_schedule_id, starts_at)
-);
-
-CREATE TABLE punch_records (
-  id                      BIGSERIAL PRIMARY KEY,
-  tenant_id               INT NOT NULL,
-  user_id                 INT NOT NULL REFERENCES users(id),
-  device_id               INT NOT NULL REFERENCES devices(id),
-  location_id             INT REFERENCES locations(id),
-  type                    VARCHAR(20) NOT NULL
-                          CHECK (type IN ('clock_in','clock_out')),
-  punched_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  latitude                FLOAT,
-  longitude               FLOAT,
-  gps_accuracy_meters     FLOAT,
-  geofence_valid          BOOLEAN,
-  recognition_confidence  FLOAT NOT NULL,
-  liveness_score          FLOAT NOT NULL,
-  source                  VARCHAR(20) NOT NULL
-                          CHECK (source IN ('app','totem')),
-  is_manual               BOOLEAN NOT NULL DEFAULT false,
-  manual_reason           TEXT,
-  adjusted_by             INT REFERENCES users(id),
-  adjusted_at             TIMESTAMPTZ
 );
 ```
 
@@ -1037,12 +1028,10 @@ CREATE TABLE recognition_logs (
   liveness_score      FLOAT,
   saturation_mean     FLOAT,
   processing_ms       INT,
-  source_product      VARCHAR(20)
-                      CHECK (source_product IN ('attendance','timeclock','api')),
-  -- path relativo em ./audit_frames/ — NULL após exclusão
-  audit_frame_path    VARCHAR(500),
-  -- true enquanto arquivo existir em disco
-  audit_frame_exists  BOOLEAN NOT NULL DEFAULT false,
+  -- Preenchido apenas quando status='liveness_failed' e tenant.save_fraud_frames=true
+  -- NULL se não salvo ou após exclusão pelo job de limpeza
+  fraud_frame_path    VARCHAR(500),
+  fraud_frame_exists  BOOLEAN NOT NULL DEFAULT false,
   created_at          TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -1070,17 +1059,15 @@ CREATE INDEX ON users (tenant_id, status);
 CREATE INDEX ON facial_embeddings (tenant_id, user_id);
 CREATE INDEX ON class_sessions (tenant_id, status, started_at DESC);
 CREATE INDEX ON attendance_records (tenant_id, class_session_id);
+CREATE INDEX ON attendance_records (class_session_id, status);
 CREATE INDEX ON pre_attendances (tenant_id, location_id, consolidated)
   WHERE consolidated = false;
-
--- Queries de ponto
-CREATE INDEX ON punch_records (tenant_id, user_id, punched_at DESC);
-CREATE INDEX ON punch_records (tenant_id, punched_at DESC);
+CREATE INDEX ON student_class_summary (class_id, user_id);
 
 -- Auditoria
 CREATE INDEX ON recognition_logs (tenant_id, created_at DESC);
-CREATE INDEX ON recognition_logs (tenant_id, audit_frame_exists)
-  WHERE audit_frame_exists = true;
+CREATE INDEX ON recognition_logs (tenant_id, fraud_frame_exists)
+  WHERE fraud_frame_exists = true;
 ```
 
 ---
@@ -1100,7 +1087,7 @@ O JWT do usuário contém:
 {
   "sub": "user_id",
   "tenant_id": "123",
-  "role": "admin",
+  "role": "teacher",
   "exp": 1713480000
 }
 ```
@@ -1133,23 +1120,28 @@ facilita exportação/exclusão completa de dados de um tenant
 
 ## 11. Fluxos principais
 
-### 11.1 Cadastro de usuário com embedding facial
+### 11.1 Cadastro de aluno com embedding facial
 
 ```
-Admin acessa painel → cadastra dados do usuário
+Admin acessa painel → cadastra dados do aluno
     │
     ▼
 Admin faz upload de foto ou captura via totem/webcam
     │
     ▼
-Node envia imagem para POST /embeddings/register na engine
+Node busca DEK cifrada do tenant em tenant_keys
     │
     ▼
-Engine: SCRFD detecta face → ArcFace extrai embedding 512d
-→ AES-GCM criptografa → retorna (iv, tag, ct) em hex
+Node envia imagem + DEK cifrada para POST /embeddings/register na engine
     │
     ▼
-Node salva em facial_embeddings no PostgreSQL
+Engine: decifra DEK com MASTER_KEY (em memória, jamais persistida)
+→ SCRFD detecta face → ArcFace extrai embedding 512d
+→ AES-256-GCM criptografa com DEK do tenant
+→ retorna (iv, tag, ct, key_version) em hex
+    │
+    ▼
+Node salva em facial_embeddings no PostgreSQL (incluindo key_version)
     │
     ▼
 Node invalida cache da engine: DELETE /embeddings/{tenant}/{user}
@@ -1158,10 +1150,11 @@ Node invalida cache da engine: DELETE /embeddings/{tenant}/{user}
 Confirmação ao admin
 ```
 
-### 11.2 Abertura de aula e warm cache (FacePresença)
+### 11.2 Abertura de chamada e warm cache
 
 ```
-Professor clica "Abrir Aula" no painel
+Professor clica "Abrir Chamada" no painel
+→ Informa quantas aulas a sessão representa (classes_worth, padrão: 1)
     │
     ▼
 Node cria class_session no PostgreSQL (status: 'open')
@@ -1170,22 +1163,24 @@ Node cria class_session no PostgreSQL (status: 'open')
 Node busca alunos da turma (class_enrollments JOIN facial_embeddings)
     │
     ▼
-Node envia POST /cache/warm com candidatos + embeddings criptografados
-Engine descriptografa e popula cache em memória
+Node busca DEK cifrada do tenant em tenant_keys
+Node envia POST /cache/warm com DEK cifrada + candidatos + embeddings
+Engine: decifra DEK com MASTER_KEY → cacheia DEK por tenant_id (TTL 1h)
+→ decifra embeddings → popula cache em memória
     │
     ▼
+[Modo Escola — se pre_attendance_enabled = true]:
 Node busca pré-presenças no Redis:
   SCAN prepresenca:{tenant_id}:{location_id}:*
-    │
-    ▼
+
 Para cada pré-presença:
   valida se user está na turma
-  valida se timestamp está dentro da janela (tenant_settings.pre_attendance_window_min)
-  se válida: INSERT attendance_records (was_pre_attendance: true)
+  valida se timestamp está dentro da janela (pre_attendance_window_min)
+  se válida: INSERT attendance_records (was_pre_attendance: true, status: 'present')
   DEL chave do Redis
     │
     ▼
-Emite SSE para o totem: aula aberta, lista de candidatos atualizada
+Emite SSE para o totem: chamada aberta, lista de candidatos atualizada
 ```
 
 ### 11.3 Reconhecimento no totem — loop completo
@@ -1205,23 +1200,24 @@ Totem (browser/PWA):
 Node:
   Valida API Key → extrai tenant_id e device_id
   Identifica location_id do dispositivo
-  Busca candidate_ids (turma ativa ou todos da empresa)
+  Busca candidate_ids (alunos da turma ativa no totem)
   Busca embeddings de facial_embeddings WHERE user_id = ANY(candidate_ids)
-  Chama engine POST /recognize com candidatos
+  Busca DEK cifrada do tenant em tenant_keys
+  Chama engine POST /recognize com DEK cifrada + candidatos
 
 Engine:
   SCRFD → liveness MiniFASNet → HSV → ArcFace → compara cache
-  Salva audit frame (async)
+  Se liveness_failed e save_fraud_frames=true: salva fraud frame (async)
   Retorna resultado
 
 Node:
   Se identified:
     Verifica se já existe registro para esse user nessa session
-    Se não: INSERT attendance_record OU punch_record
+    Se não: INSERT attendance_record (status: 'present', recognized_at: now())
     Emite SSE para painel: {user_id, name, confidence, timestamp}
   Se liveness_failed:
     Salva recognition_log com status liveness_failed
-    Não emite SSE visível (opcional: alerta discreto para gestor)
+    Não emite SSE visível (opcional: alerta discreto para professor)
   Se not_identified:
     Salva recognition_log
     Sem ação
@@ -1231,67 +1227,56 @@ Totem:
   Se outros: reinicia imediatamente
 ```
 
-### 11.4 Pré-presença (FacePresença)
+### 11.4 Pré-presença (Modo Escola)
 
 ```
-Reconhecimento bem-sucedido mas sem class_session ativa:
+Reconhecimento bem-sucedido mas sem class_session ativa
+(apenas se tenant.pre_attendance_enabled = true):
 
-Node verifica: SELECT * FROM class_sessions
-  WHERE tenant_id = $1 AND status = 'open'
-  AND EXISTS (
-    SELECT 1 FROM classes c
-    JOIN class_enrollments ce ON ce.class_id = c.id
-    WHERE c.location_id = $2 AND ce.user_id = $3
-  )
-→ nenhuma sessão ativa encontrada
-
-Node verifica se já existe pré-presença para esse user+location hoje
+Node verifica: nenhuma sessão ativa no location_id do totem
 → SET NX em Redis: prepresenca:{tenant}:{location}:{user_id} = timestamp
 → TTL: pre_attendance_window_min * 60 segundos
 → Se já existe: ignora (preserva timestamp mais antigo)
+→ Se não existia: INSERT pre_attendances no PostgreSQL
 ```
 
-### 11.5 Vínculo de dispositivo
+### 11.5 Checkout individual (`individual_checkout_enabled = true`)
 
 ```
-Admin acessa painel → "Vincular dispositivo"
-→ Seleciona funcionário → gera código de 6 dígitos (válido 5 min)
-→ INSERT device_bind_codes
-
-Funcionário abre app no celular
-→ App gera device_fingerprint local (hash de características do dispositivo)
-→ App exibe tela de código → usuário digita código fornecido pelo admin
-
-App POST /devices/bind {code, device_fingerprint, device_type: 'app'}
-→ Node valida código (não expirado, não usado)
-→ Node cria registro em devices
-→ Node gera API Key exclusiva → retorna ao app
-→ App armazena API Key localmente
-→ Node marca código como used: true
-
-Admin configura geofences permitidas para o funcionário
-```
-
-### 11.6 Bater ponto pelo totem (FacePonto)
-
-```
-Funcionário para na frente do totem
-→ Loop de captura detecta face com variação ≥ 3.0
-→ Envia para engine via Node
+Professor acessa lista de presença em tempo real
+→ Seleciona aluno que precisa sair antes do encerramento
+→ Clica "Liberar Saída"
 
 Node:
-  Valida API Key do totem → obtém location_id
-  Busca TODOS os funcionários ativos do tenant com embedding cadastrado
-  Chama engine
+  POST /api/attendance/records/{id}/checkout
+  Valida que o usuário autenticado é teacher da turma
+  UPDATE attendance_records SET
+    status = 'early_checkout',
+    checked_out_at = NOW(),
+    checkout_released_by = teacher_id
+  Emite SSE para totem: aluno marcado como saída antecipada
+```
 
-Engine:
-  Pipeline completo → retorna identified com person_id
+### 11.6 Encerramento de chamada e contagem de aulas
 
+```
+Professor clica "Encerrar Chamada"
+    │
+    ▼
 Node:
-  Verifica último punch_record do funcionário (clock_in ou clock_out?)
-  Alterna: se último foi clock_in → clock_out, e vice-versa
-  INSERT punch_record
-  Emite SSE para painel do gestor
+  Busca todos os attendance_records da sessão
+  Para cada aluno matriculado na turma:
+    Se sem registro → INSERT attendance_records (status: 'absent')
+    Se status IN ('present','early_checkout','manual') → contabiliza como presente
+  UPDATE class_sessions SET status = 'closed', ended_at = NOW()
+    │
+    ▼
+Node atualiza student_class_summary para cada aluno da turma:
+  classes_attended += session.classes_worth  (se presente)
+  classes_absent   += session.classes_worth  (se ausente)
+    │
+    ▼
+Emite SSE para painel: chamada encerrada, lista final consolidada
 ```
 
 ---
@@ -1379,10 +1364,11 @@ services:
   node-api:
     build: ./backend
     environment:
-      - DATABASE_URL=postgresql://user:pass@postgres:5432/faceid
+      - DATABASE_URL=postgresql://user:pass@postgres:5432/visagex
       - REDIS_URL=redis://redis:6379
       - ENGINE_URL=http://face-engine:8001
       - ENGINE_API_KEY=${ENGINE_API_KEY}
+      - MASTER_KEY=${MASTER_KEY}
       - JWT_SECRET=${JWT_SECRET}
       - NODE_ENV=production
     depends_on:
@@ -1393,14 +1379,14 @@ services:
   face-engine:
     build: ./face_engine
     environment:
-      - AES_KEY=${AES_KEY}
+      - MASTER_KEY=${MASTER_KEY}
       - ENGINE_API_KEY=${ENGINE_API_KEY}
       - RECOGNITION_THRESHOLD=1.10
       - LIVENESS_THRESHOLD=0.85
       - STATIC_PIXEL_THRESHOLD=3.0
       - LIVENESS_MODEL_PATH=./models
     volumes:
-      - audit_frames:/app/audit_frames
+      - fraud_frames:/app/fraud_frames
     # workers=2: dobra throughput, cada worker ~800MB RAM de modelos
     # NÃO aumentar sem migrar cache para Redis
     command: uvicorn main:app --host 0.0.0.0 --port 8001 --workers 2
@@ -1408,7 +1394,7 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      - POSTGRES_DB=faceid
+      - POSTGRES_DB=visagex
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
     volumes:
@@ -1422,24 +1408,25 @@ services:
 
 volumes:
   pgdata:
-  audit_frames:
+  fraud_frames:
 ```
 
-### Job de limpeza de audit frames
+### Job de limpeza de fraud frames
 
 Cron dentro do container node-api, todo dia às 03:00:
 
 ```
-0 3 * * * node /app/jobs/cleanup-audit-frames.js
+0 3 * * * node /app/jobs/cleanup-fraud-frames.js
 ```
 
 O job:
 
-1. Lista todos os arquivos em `./audit_frames/` com mais de 24h
-2. Deleta os arquivos
-3. Atualiza `audit_frame_exists = false` e `audit_frame_path = NULL`
+1. Por tenant, respeita o `fraud_retention_hours` configurado
+2. Lista arquivos em `./fraud_frames/` expirados
+3. Deleta os arquivos
+4. Atualiza `fraud_frame_exists = false` e `fraud_frame_path = NULL`
    nos recognition_logs correspondentes
-4. Insere registro em `audit_cleanup_logs`
+5. Insere registro em `audit_cleanup_logs`
 
 ### Variáveis de ambiente obrigatórias
 
@@ -1454,17 +1441,78 @@ REDIS_URL=
 
 # Engine
 ENGINE_API_KEY=          # string aleatória longa
-AES_KEY=                 # 64 chars hexadecimal (256 bits)
+MASTER_KEY=              # 64 chars hexadecimal (256 bits) — KEK do envelope encryption
+                         # usada por backend (gerar DEKs) e face-engine (decifrar DEKs)
 
 # JWT
 JWT_SECRET=              # string aleatória longa
-JWT_EXPIRES_IN=8h
+JWT_EXPIRES_IN=15m       # access token — curta duração
+JWT_REFRESH_SECRET=      # secret para refresh token (opcional, não usado no MVP atual)
+JWT_REFRESH_EXPIRES_IN_SECONDS=604800  # refresh token — 7 dias em segundos
+
+# Super Admin — Bootstrap via .env (leia seção "Super Admin" abaixo)
+SUPER_ADMIN_EMAIL=       # e-mail único do super admin, ex: admin@visagex.local
+SUPER_ADMIN_PASSWORD=    # senha >= 12 caracteres, gerada UMA ÚNICA VEZ no bootstrap
 
 # Reconhecimento
 RECOGNITION_THRESHOLD=1.10
 LIVENESS_THRESHOLD=0.85
 STATIC_PIXEL_THRESHOLD=3.0
 ```
+
+---
+
+## Super Admin — Modelo Único de Criação
+
+### Princípio: "Uma única conta de administrador, criada via .env"
+
+O VisageX implementa um modelo de Super Admin extremamente restritivo:
+
+- **Existe apenas UMA conta** com role `super_admin` em todo o sistema
+- **Criada durante o bootstrap** da aplicação (ao iniciar `backend/src/index.ts`)
+- **Criada a partir de variáveis de ambiente** (`SUPER_ADMIN_EMAIL` e `SUPER_ADMIN_PASSWORD`)
+- **Nunca pode ser criada via API ou database seed**
+- **Idempotente:** se já existe, o bootstrap não faz nada
+
+### Implementação técnica
+
+1. No boot do backend, `src/index.ts` chama `bootstrapSuperAdmin()` do `src/services/admin.service.ts`
+2. A função verifica se existe um usuário com `role: "super_admin"`
+   - Se **não existe:** cria um, com email e senha vindo de .env
+   - Se **já existe:** log de info e retorna (sem atualizar)
+3. Precisa de um tenant_id (cria-se um tenant administrativo interno: "VisageX Admin")
+4. Senha é hasheada com bcrypt, nunca armazenada em plaintext
+
+### O que NÃO é possível fazer
+
+- ❌ Criar outro super_admin via `POST /api/users` (endpoint não permite)
+- ❌ Promover usuário para super_admin via `PATCH /api/users/:id` (validação impede)
+- ❌ Criar super_admin em migration ou seed SQL (função dedica recusaria)
+- ❌ Alterar o super_admin existente para outro role (constraints do banco)
+
+### Variáveis de ambiente obrigatórias
+
+```env
+# SUPER_ADMIN_EMAIL: qualquer email válido
+# Exemplo: admin@visagex.local (DEV), seu-email@empresa.com (produção)
+SUPER_ADMIN_EMAIL=seu-email-aqui@empresa.com
+
+# SUPER_ADMIN_PASSWORD: >= 12 caracteres, complexa (recomendado: 16+ caracteres aleatórios)
+# Exemplo: gerado com: node -e "console.log(require('crypto').randomBytes(16).toString('hex'))"
+SUPER_ADMIN_PASSWORD=SuaSenhaForte123!@#
+```
+
+### Para alterar a senha do Super Admin
+
+1. Mude o valor de `SUPER_ADMIN_PASSWORD` no `.env`
+2. Reinicie o backend
+3. A função `bootstrapSuperAdmin()` detectará que já existe um super_admin e **não atualizará** (TODO: implementar rotação de senha)
+
+Atualmente, para alterar a senha, é necessário:
+
+- Deletar manualmente o usuário super_admin do banco (`DELETE FROM users WHERE role = 'super_admin'`)
+- Reiniciar o backend (criará novo com nova senha)
+- Ou usar banco de dados diretamente: `UPDATE users SET password_hash = ... WHERE role = 'super_admin'`
 
 ---
 
@@ -1497,8 +1545,7 @@ DELETE /api/users/:id/embedding             -- remove embedding + invalida cache
 
 ── Tenant — dispositivos ─────────────────────────────────
 GET    /api/devices
-POST   /api/devices/bind-code              -- gera código 6 dígitos
-POST   /api/devices/bind                   -- confirma vínculo
+POST   /api/devices
 PATCH  /api/devices/:id
 DELETE /api/devices/:id
 
@@ -1510,59 +1557,51 @@ DELETE /api/locations/:id
 
 ── Tenant — configurações ────────────────────────────────
 GET    /api/settings
-PATCH  /api/settings                       -- thresholds, janela pré-presença, etc.
+PATCH  /api/settings                        -- thresholds, modo operação, etc.
 
-── FacePresença — estrutura acadêmica ────────────────────
+── Estrutura acadêmica ───────────────────────────────────
 GET    /api/attendance/periods
 POST   /api/attendance/periods
+PATCH  /api/attendance/periods/:id
 GET    /api/attendance/courses
 POST   /api/attendance/courses
+PATCH  /api/attendance/courses/:id
 GET    /api/attendance/classes
 POST   /api/attendance/classes
+PATCH  /api/attendance/classes/:id          -- inclui total_classes_planned (apenas admin/manager)
 GET    /api/attendance/classes/:id/students
-POST   /api/attendance/classes/:id/students    -- matrícula
+POST   /api/attendance/classes/:id/students     -- matrícula
 DELETE /api/attendance/classes/:id/students/:userId
 
-── FacePresença — sessões e presenças ────────────────────
+── Sessões e presenças ───────────────────────────────────
 GET    /api/attendance/sessions
-POST   /api/attendance/sessions                -- abre aula (+ warm cache)
+POST   /api/attendance/sessions             -- abre chamada (+ warm cache)
+                                            -- body: { class_id, classes_worth }
+                                            -- classes_worth: informado pelo professor
 GET    /api/attendance/sessions/:id
-PATCH  /api/attendance/sessions/:id/close      -- fecha aula
+PATCH  /api/attendance/sessions/:id/close   -- fecha chamada + consolida ausentes
+                                            -- atualiza student_class_summary
 GET    /api/attendance/sessions/:id/records
-PATCH  /api/attendance/records/:id             -- ajuste manual
+PATCH  /api/attendance/records/:id          -- ajuste manual
+POST   /api/attendance/records/:id/checkout -- libera saída individual (modo faculdade)
 
-── FacePresença — relatórios ─────────────────────────────
-GET    /api/attendance/reports/frequency       -- ?class_id&period_id
-GET    /api/attendance/reports/student/:id     -- histórico do aluno
-
-── FacePonto — escalas ───────────────────────────────────
-GET    /api/timeclock/schedules
-POST   /api/timeclock/schedules
-PATCH  /api/timeclock/schedules/:id
-POST   /api/timeclock/users/:id/schedule       -- vincula escala ao funcionário
-
-── FacePonto — registros ─────────────────────────────────
-GET    /api/timeclock/records                  -- ?user_id&date_from&date_to
-PATCH  /api/timeclock/records/:id              -- ajuste manual com justificativa
-GET    /api/timeclock/feed                     -- SSE: feed em tempo real
-
-── FacePonto — relatórios ────────────────────────────────
-GET    /api/timeclock/reports/daily            -- ?date&location_id
-GET    /api/timeclock/reports/monthly          -- ?month&user_id
-GET    /api/timeclock/reports/export           -- CSV
+── Relatórios ────────────────────────────────────────────
+GET    /api/attendance/reports/frequency    -- ?class_id&period_id
+GET    /api/attendance/reports/student/:id  -- histórico do aluno
+GET    /api/attendance/reports/student/:id/summary
+                                            -- aulas por turma + % frequência
 
 ── Auditoria ─────────────────────────────────────────────
-GET    /api/audit/recognition-logs             -- ?date&status&user_id
-GET    /api/audit/frames/:recognition_log_id   -- serve o JPEG via stream
-                                               -- requer role admin/manager
-                                               -- valida tenant_id
+GET    /api/audit/recognition-logs          -- ?date&status&user_id
+GET    /api/audit/frames/:recognition_log_id -- serve o JPEG via stream
+                                            -- requer role admin/manager
+                                            -- valida tenant_id
 
 ── Dispositivo (autenticado por X-Device-Key) ────────────
-POST   /api/device/recognize                   -- totem solicita reconhecimento
-POST   /api/device/punch                       -- app mobile bate ponto
-GET    /api/device/session/current             -- sessão ativa na sala do totem
-GET    /api/device/stream                      -- SSE: eventos para o totem
-GET    /api/device/heartbeat                   -- atualiza last_seen_at
+POST   /api/device/recognize                -- totem solicita reconhecimento
+GET    /api/device/session/current          -- sessão ativa na sala do totem
+GET    /api/device/stream                   -- SSE: eventos para o totem
+GET    /api/device/heartbeat                -- atualiza last_seen_at
 ```
 
 ---
@@ -1573,14 +1612,14 @@ GET    /api/device/heartbeat                   -- atualiza last_seen_at
 
 Acessível apenas para `role: super_admin`. Mostra:
 
-- Lista de todos os tenants com status, plano, MRR, usuários ativos
+- Lista de todos os tenants com status, plano, usuários ativos
 - Volume de reconhecimentos por tenant (últimos 7 dias)
 - Saúde da engine (GET /health)
 - Gestão de planos e limites
 - Logs de auditoria globais (sem acesso a frames de tenants)
 - Ações: suspender tenant, alterar plano, resetar API Keys
 
-### Tenant Dashboard — FacePresença
+### Tenant Dashboard
 
 Acessível para `admin`, `manager`, `teacher`.
 
@@ -1588,31 +1627,22 @@ Acessível para `admin`, `manager`, `teacher`.
 
 - Cadastro de alunos com foto
 - Gestão de turmas, cursos e períodos letivos
-- Configurações de threshold e janela de pré-presença
-- Relatórios de frequência
+- Definição de `total_classes_planned` por turma (total de aulas previstas no período)
+- Configurações de threshold, modo de operação (escola/faculdade) e janela de pré-presença
+- Relatórios de frequência e contagem de aulas por aluno
 - Log de reconhecimentos do dia
 
 **Teacher (professor):**
 
-- Abre e fecha aulas
+- Abre chamada (informa quantas aulas a sessão representa — padrão 1)
 - Vê lista de presença em tempo real (SSE)
-- Ajusta presenças manualmente
-
-### Tenant Dashboard — FacePonto
-
-Acessível para `admin`, `manager`.
-
-- Cadastro de funcionários com foto
-- Gestão de escalas e localizações/geofences
-- Feed em tempo real de entradas e saídas (SSE)
-- Relatório diário e mensal
-- Gestão de dispositivos vinculados
-- Ajuste manual de ponto com justificativa obrigatória
-- Log de reconhecimentos com acesso a audit frames (últimas 24h)
+- Libera checkout individual de alunos (quando habilitado no tenant)
+- Fecha chamada
+- Ajusta presenças manualmente com rastreabilidade
 
 ### Totem PWA
 
-URL única por tenant + location:
+URL única por tenant + device:
 `https://seudominio.com/totem/{device_token}`
 
 - Abre câmera automaticamente no carregamento
@@ -1622,19 +1652,6 @@ URL única por tenant + location:
 - Indicador de status de conexão SSE
 - Sem login — autenticado pela URL com token do dispositivo
 - Funciona em qualquer browser moderno (Chrome Android recomendado)
-
-### App Mobile (PWA mobile — MVP)
-
-Acessível via browser do celular do funcionário.
-URL: `https://seudominio.com/app`
-
-- Tela de vínculo: insere código fornecido pelo admin
-- Tela de cadastro de selfie
-- Tela principal: botão "Bater Ponto" centralizado
-  - Captura selfie + GPS ao pressionar
-  - Exibe resultado (presente/recusado) com feedback visual
-- Histórico dos últimos 7 registros
-- Sem acesso ao painel de gestão
 
 ---
 
@@ -1646,49 +1663,25 @@ URL: `https://seudominio.com/app`
 - BullMQ para filas assíncronas de reconhecimento
 - Redis para warm cache (substituindo cache em memória da engine)
 - Schema PostgreSQL separado por tenant (isolamento completo)
-- Webhooks para integração com sistemas de RH externos
-- FaceAPI v1 pública com portal de desenvolvedor e documentação
+- Exportação de relatórios em CSV e PDF
+- Integração com sistemas de gestão escolar (TOTVS Educacional, SIE)
 
 ### Fase 3 (6–12 meses)
 
-- Homologação como REP-A (Portaria 671) com advogado trabalhista
-- Integração com folhas de pagamento (Gupy, Totvs, Senior)
-- Relatórios fiscais no formato exigido pelo MTE
 - Anti-spoofing de segunda geração (análise de Fourier + depth sensor)
+- Relatórios de frequência em formato exigido pelo MEC
 - Multi-região (latência < 100ms para qualquer estado brasileiro)
+- API pública para integração com sistemas terceiros
 
 ### Fase 4 (12+ meses)
 
-- FaceAPI enterprise com SLA garantido
 - White-label para revendedores
-- Módulo de controle de acesso (integração com fechaduras inteligentes)
-- Análise de comportamento e detecção de anomalias
+- Módulo de controle de acesso a laboratórios e espaços restritos
+- Análise de comportamento e detecção de anomalias de frequência
 
 ---
 
-## 17. Considerações legais e trabalhistas
-
-### Portaria 671/MTE e REP
-
-A Portaria 671 de 2021 regula o REP (Registrador Eletrônico de Ponto)
-e exige homologação INMETRO para empresas com mais de 20 empregados
-sujeitas ao controle de jornada pela CLT.
-
-O FaceID SaaS **não é posicionado como REP homologado** no MVP.
-É um sistema de gestão de frequência auxiliar — exatamente como
-os concorrentes mobile do mercado operam.
-
-**Segmentos sem restrição:**
-
-- Empresas até 20 funcionários (sem obrigação de REP)
-- Funcionários em regime PJ ou autônomo
-- Empresas com acordo coletivo REP-A
-- Escolas e instituições educacionais (não sujeitas à Portaria 671)
-- Startups e empresas de tecnologia (muitas têm acordo coletivo flexível)
-
-**Segmento com risco (evitar no início):**
-
-- Grandes empresas CLT sem acordo coletivo e com fiscalização ativa do MTE
+## 17. Considerações legais
 
 ### LGPD — dados biométricos
 
@@ -1702,26 +1695,26 @@ Embeddings faciais são dados biométricos sensíveis sob a LGPD.
 - Não usar dados de tenants para treinar modelos sem consentimento explícito
 - Disponibilizar mecanismo de exclusão de dados por solicitação do titular
 
-**Obrigações do controlador (tenant/empresa cliente):**
+**Obrigações do controlador (tenant / instituição de ensino):**
 
-- Informar funcionários sobre captura de dados biométricos
-- Obter consentimento documentado ou ter base legal adequada
-- Incluir o uso do sistema na política de privacidade da empresa
+- Informar alunos sobre captura de dados biométricos na chamada
+- Obter consentimento documentado ou ter base legal adequada (para menores, consentimento dos responsáveis)
+- Incluir o uso do sistema na política de privacidade da instituição
 - Responder solicitações de titulares (acesso, exclusão, portabilidade)
 
 **Contrato com tenants:**
 O contrato de prestação de serviços deve estabelecer claramente
-que o tenant é o controlador dos dados de seus funcionários/alunos
+que o tenant é o controlador dos dados de seus alunos
 e você é o operador. Isso delimita as responsabilidades de cada parte.
 
 ### Consentimento para audit frames
 
-O funcionário precisa ser informado que:
+O aluno (ou responsável legal, se menor) precisa ser informado que:
 
-- Sua imagem facial é capturada a cada registro de ponto
+- Sua imagem facial é capturada a cada chamada
 - A imagem é retida por até 24 horas para fins de auditoria de fraude
 - Após 24 horas a imagem é excluída automaticamente
 - Apenas o gestor responsável pode visualizar as imagens dentro do prazo
 
-Essa informação deve constar em documento assinado pelo funcionário
-no momento do cadastro no sistema (de responsabilidade do tenant).
+Essa informação deve constar em documento assinado no momento
+do cadastro no sistema — de responsabilidade da instituição de ensino.

@@ -12,9 +12,10 @@ class Settings(BaseSettings):
     Configurações da aplicação carregadas de variáveis de ambiente.
     """
 
-    # Criptografia AES-256-GCM
-    aes_key: str
-    """Chave AES em hexadecimal (64 caracteres = 256 bits)"""
+    # Criptografia envelope encryption (DEK/KEK)
+    master_key: str
+    """Chave mestre em hexadecimal (64 caracteres = 256 bits)
+    Usada para descriptografar DEKs de tenants (KMS)"""
 
     # Autenticação
     engine_api_key: str
@@ -38,23 +39,27 @@ class Settings(BaseSettings):
     port: int = 8001
     """Porta de escuta do Uvicorn"""
 
+    # Cache
+    dek_cache_ttl_hours: int = 1
+    """TTL em horas para cache de DEK descritografada por tenant"""
+
     class Config:
         env_file = ".env"
         case_sensitive = False
 
-    def validate_aes_key(self) -> None:
+    def validate_master_key(self) -> None:
         """
-        Valida que aes_key é uma string hexadecimal com exatamente 64 caracteres.
+        Valida que master_key é uma string hexadecimal com exatamente 64 caracteres.
         Levanta ValueError se inválida.
         """
-        if len(self.aes_key) != 64:
-            raise ValueError("AES_KEY deve ter exatamente 64 caracteres hexadecimais (256 bits)")
+        if len(self.master_key) != 64:
+            raise ValueError("MASTER_KEY deve ter exatamente 64 caracteres hexadecimais (256 bits)")
         try:
-            bytes.fromhex(self.aes_key)
+            bytes.fromhex(self.master_key)
         except ValueError:
-            raise ValueError("AES_KEY deve ser uma string hexadecimal válida")
+            raise ValueError("MASTER_KEY deve ser uma string hexadecimal válida")
 
 
 # Instância global de configurações
 settings = Settings()
-settings.validate_aes_key()
+settings.validate_master_key()

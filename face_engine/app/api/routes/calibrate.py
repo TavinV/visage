@@ -7,6 +7,7 @@ sensibilidade e especificidade.
 """
 
 import asyncio
+from itertools import combinations
 from typing import Optional, Literal
 from pathlib import Path
 
@@ -19,7 +20,13 @@ from app.api.schemas import (
     ThresholdAnalysis,
     CalibrateResponse,
     ThresholdConfig,
-    RecognitionSampleResult,
+    PersonSummary,
+    DistanceDistribution,
+    RecognitionThresholdOption,
+    ThresholdCurvePoint,
+    HistogramBin,
+    RocPoint,
+    CalibrationChartData,
     RecognitionCalibrateResponse,
 )
 
@@ -319,9 +326,15 @@ async def _process_image(
 async def calibrate(
     real_images: list[UploadFile] = File(...),
     attack_images: list[UploadFile] = File(...),
+    tenant_id: str = None,  # Opcional para compatibilidade multi-tenant
+    dek_ct: str = None,  # DEK criptografada (hex)
+    dek_iv: str = None,  # IV da DEK (hex)
+    dek_tag: str = None,  # Tag GCM da DEK (hex)
+    dek_key_version: str = "1",  # Versão da chave
 ) -> CalibrateResponse:
     """
     Calibra thresholds para reconhecimento facial processando amostras reais e ataques.
+    Suporta DEK per-tenant criptografada com MASTER_KEY.
 
     Aceita 1-20 imagens de cada tipo, processa para extrair scores brutos de cada
     componente (detection, liveness v1/v2, saturação HSV), e sugere thresholds
@@ -330,11 +343,32 @@ async def calibrate(
     Args:
         real_images: 1-20 imagens de pessoas reais
         attack_images: 1-20 imagens de ataques (fotos de tela, impressas, etc)
+        tenant_id: ID do tenant (opcional)
+        dek_ct: DEK criptografada com MASTER_KEY (hex format)
+        dek_iv: IV de 12 bytes da DEK (hex format)
+        dek_tag: Tag de autenticação GCM (hex format)
+        dek_key_version: Versão da MASTER_KEY usada para cifrar DEK
 
     Returns:
         CalibrateResponse com análise completa e thresholds sugeridos
     """
-    from app.main import liveness_detector, face_detector, face_embedder
+    from app.main import liveness_detector, face_detector, face_embedder, dek_manager
+
+    # Descriptografar DEK se fornecida
+    if tenant_id and dek_ct and dek_iv and dek_tag:
+        try:
+            dek_manager.decrypt_dek(
+                tenant_id=tenant_id,
+                dek_ct_hex=dek_ct,
+                dek_iv_hex=dek_iv,
+                dek_tag_hex=dek_tag,
+                key_version=dek_key_version,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Erro ao descriptografar DEK: {str(exc)}",
+            )
 
     # Validações
     if len(real_images) < 1 or len(attack_images) < 1:
@@ -486,249 +520,709 @@ async def calibrate(
     )
 
 
+
 # ============================================================================
-# CALIBRAÇÃO DE THRESHOLD DE RECONHECIMENTO
+# HELPERS PARA CALIBRAÇÃO DE THRESHOLD DE RECONHECIMENTO
 # ============================================================================
 
-async def _extract_face_embedding(
-    file: UploadFile,
-    label: Literal['same_person', 'other_person'],
-    face_detector,
-    face_embedder,
-) -> tuple[Optional[np.ndarray], RecognitionSampleResult]:
+def _extract_person_id(filename: str) -> str:
     """
-    Detecta face em uma imagem e extrai embedding L2-normalizado.
+    Extrai o person_id do nome do arquivo usando o prefixo antes do último underscore.
 
-    Returns:
-        (embedding ou None, RecognitionSampleResult com status do processamento)
+    Exemplos:
+        "joao_foto1.jpg"  → "joao"
+        "maria_lado.jpg"  → "maria"
+        "pessoa.jpg"      → "pessoa"
     """
-    try:
-        content = await file.read()
-        image_array = cv2.imdecode(
-            np.frombuffer(content, np.uint8),
-            cv2.IMREAD_COLOR,
-        )
-        if image_array is None:
-            return None, RecognitionSampleResult(
-                label=label, face_detected=False, error="Imagem inválida ou não decodificável"
-            )
-
-        all_faces = face_detector.detect_all_faces(image_array, min_det_score=0.50)
-        if len(all_faces) == 0:
-            return None, RecognitionSampleResult(
-                label=label, face_detected=False, error="Nenhuma face detectada"
-            )
-
-        face_data = all_faces[0]
-        embedding = face_embedder.extract_embedding(face_data["embedding"])
-        return embedding, RecognitionSampleResult(label=label, face_detected=True)
-
-    except Exception as exc:
-        return None, RecognitionSampleResult(
-            label=label, face_detected=False, error=f"Erro: {str(exc)[:100]}"
-        )
+    stem = Path(filename).stem
+    parts = stem.rsplit('_', maxsplit=1)
+    return parts[0] if len(parts) > 1 else stem
 
 
-def _generate_interpretation_recognition(
-    threshold: float,
-    genuine_pass_rate: float,
-    impostor_block_rate: float,
-    youden_score: float,
-    confidence: Literal['low', 'medium', 'high'],
-    genuine_distances: list[float],
-    impostor_distances: list[float],
-) -> str:
-    """Gera interpretação em português para calibração de threshold de reconhecimento."""
-    parts = []
+def _euclidean_distance(a: np.ndarray, b: np.ndarray) -> float:
+    """
+    Distância euclidiana entre embeddings normalizados L2.
+    Usa sqrt(2*(1-dot(a,b))) — equivalente e mais estável numericamente.
+    Intervalo: 0.0 (idênticos) a 2.0 (opostos).
+    """
+    similarity = float(np.dot(a, b))
+    return float(np.sqrt(2.0 * (1.0 - np.clip(similarity, -1.0, 1.0))))
 
-    has_overlap = (
-        len(genuine_distances) > 0
-        and len(impostor_distances) > 0
-        and max(genuine_distances) > min(impostor_distances)
+
+def _compute_distribution(distances: list[float]) -> DistanceDistribution:
+    """Calcula estatísticas descritivas de uma lista de distâncias."""
+    arr = np.array(distances, dtype=np.float64)
+    return DistanceDistribution(
+        count=int(len(arr)),
+        mean=float(np.mean(arr)),
+        std=float(np.std(arr)),
+        min=float(np.min(arr)),
+        max=float(np.max(arr)),
+        p5=float(np.percentile(arr, 5)),
+        p25=float(np.percentile(arr, 25)),
+        p50=float(np.percentile(arr, 50)),
+        p75=float(np.percentile(arr, 75)),
+        p95=float(np.percentile(arr, 95)),
     )
 
-    if genuine_pass_rate >= 0.95 and impostor_block_rate >= 0.90:
-        parts.append(
-            f"Excelente separação de identidade. Com threshold {threshold:.3f}, "
-            f"{genuine_pass_rate * 100:.0f}% das fotos da mesma pessoa são reconhecidas "
-            f"e {impostor_block_rate * 100:.0f}% de impostores são bloqueados."
+
+def _compute_dprime(
+    genuine_dist: DistanceDistribution,
+    impostor_dist: DistanceDistribution,
+) -> float:
+    """
+    d-prime (d'): métrica de separabilidade entre distribuições.
+
+    Valores de referência:
+      < 1.0  → separação fraca
+      1.0–2.0 → separação razoável
+      2.0–3.0 → boa separação
+      > 3.0  → excelente separação
+    """
+    pooled_std = float(np.sqrt(
+        (genuine_dist.std ** 2 + impostor_dist.std ** 2) / 2.0
+    ))
+    if pooled_std == 0.0:
+        return 0.0
+    return float((impostor_dist.mean - genuine_dist.mean) / pooled_std)
+
+
+def _compute_rates(
+    threshold: float,
+    genuine_distances: list[float],
+    impostor_distances: list[float],
+) -> tuple[float, float, float, float, float]:
+    """
+    Calcula taxas de aceitação/rejeição para um dado threshold.
+
+    Returns:
+        (genuine_accept_rate, impostor_reject_rate,
+         false_rejection_rate, false_acceptance_rate, youden_score)
+    """
+    genuine_accept = sum(1 for d in genuine_distances if d <= threshold)
+    impostor_reject = sum(1 for d in impostor_distances if d > threshold)
+
+    gar = genuine_accept / len(genuine_distances)
+    irr = impostor_reject / len(impostor_distances)
+    frr = 1.0 - gar
+    far = 1.0 - irr
+    youden = gar + irr - 1.0
+
+    return gar, irr, frr, far, youden
+
+
+def _interpret_threshold_option(
+    profile: Literal['conservative', 'balanced', 'liberal'],
+    threshold: float,
+    gar: float,
+    irr: float,
+    frr: float,
+    far: float,
+    youden: float,
+) -> str:
+    """Gera interpretação em português para uma opção de threshold."""
+    if profile == 'conservative':
+        base = (
+            f"Threshold conservador ({threshold:.2f}): {gar:.0%} das verificações legítimas "
+            f"são aceitas e {irr:.0%} dos impostores são bloqueados."
         )
-    elif genuine_pass_rate < 0.80:
-        parts.append(
-            f"Threshold restritivo — apenas {genuine_pass_rate * 100:.0f}% das fotos da "
-            f"mesma pessoa seriam reconhecidas. A pessoa pode ter dificuldade de ser identificada. "
-            f"Considere fotos com melhor qualidade ou iluminação mais uniforme."
+        extras = []
+        if frr > 0.15:
+            extras.append(
+                f" ⚠️ Taxa alta de rejeição de pessoas legítimas ({frr:.0%}) — "
+                "alguns usuários podem ter dificuldade para se identificar."
+            )
+        if far > 0.05:
+            extras.append(
+                f" ⚠️ Ainda permite {far:.0%} de impostores — considere "
+                "combinar com anti-spoofing rigoroso."
+            )
+        return base + "".join(extras)
+
+    elif profile == 'balanced':
+        base = (
+            f"Threshold balanceado ({threshold:.2f}): melhor equilíbrio entre segurança "
+            f"e conveniência. {gar:.0%} de aceitação legítima e {irr:.0%} de "
+            "bloqueio de impostores."
         )
-    elif impostor_block_rate < 0.80:
-        parts.append(
-            f"Separação fraca entre identidades — apenas {impostor_block_rate * 100:.0f}% de "
-            f"impostores seriam bloqueados. Use fotos mais diversas de outras pessoas para calibrar."
+        extras = []
+        if youden > 0.7:
+            extras.append(" Boa separação entre os grupos.")
+        elif youden < 0.4:
+            extras.append(
+                " ⚠️ Separação fraca — os grupos têm distribuições "
+                "próximas neste ambiente."
+            )
+        return base + "".join(extras)
+
+    else:  # liberal
+        base = (
+            f"Threshold liberal ({threshold:.2f}): prioriza conveniência. {gar:.0%} "
+            f"de aceitação legítima, mas permite {far:.0%} de impostores."
         )
+        extras = []
+        if far > 0.10:
+            extras.append(
+                " ⚠️ Taxa de falsa aceitação elevada — recomendado apenas "
+                "em ambientes de baixo risco ou combinado com outras camadas de segurança."
+            )
+        return base + "".join(extras)
+
+
+def _compute_threshold_options(
+    genuine_distances: list[float],
+    impostor_distances: list[float],
+    genuine_dist: DistanceDistribution,
+    impostor_dist: DistanceDistribution,
+) -> list[RecognitionThresholdOption]:
+    """Calcula as três opções de threshold: conservador, balanceado e liberal."""
+    # Conservador: percentil 95 das distâncias genuínas
+    conservative = genuine_dist.p95
+
+    # Balanceado: índice de Youden — maximiza sensitividade + especificidade - 1
+    all_values = sorted(set(genuine_distances + impostor_distances))
+    best_youden = -1.0
+    balanced = conservative
+
+    for t in all_values:
+        genuine_accept = sum(1 for d in genuine_distances if d <= t) / len(genuine_distances)
+        impostor_reject = sum(1 for d in impostor_distances if d > t) / len(impostor_distances)
+        youden = genuine_accept + impostor_reject - 1.0
+        if youden > best_youden:
+            best_youden = youden
+            balanced = t
+
+    # Liberal: percentil 5 das distâncias impostoras
+    liberal = impostor_dist.p5
+
+    # Garantir ordenação: conservative <= balanced <= liberal
+    conservative = min(conservative, balanced, liberal)
+    liberal = max(conservative, balanced, liberal)
+    balanced = sorted([conservative, balanced, liberal])[1]
+
+    options: list[RecognitionThresholdOption] = []
+    profiles: list[tuple[Literal['conservative', 'balanced', 'liberal'], str, float]] = [
+        ('conservative', 'Conservador', conservative),
+        ('balanced', 'Balanceado', balanced),
+        ('liberal', 'Liberal', liberal),
+    ]
+
+    for profile, label, threshold in profiles:
+        gar, irr, frr, far, youden = _compute_rates(threshold, genuine_distances, impostor_distances)
+        interpretation = _interpret_threshold_option(profile, threshold, gar, irr, frr, far, youden)
+        options.append(RecognitionThresholdOption(
+            profile=profile,
+            profile_label=label,
+            threshold=round(threshold, 4),
+            genuine_accept_rate=round(gar, 4),
+            impostor_reject_rate=round(irr, 4),
+            false_rejection_rate=round(frr, 4),
+            false_acceptance_rate=round(far, 4),
+            youden_score=round(youden, 4),
+            interpretation=interpretation,
+        ))
+
+    return options
+
+
+def _recommend_profile(
+    dprime: float,
+) -> Literal['conservative', 'balanced', 'liberal']:
+    """
+    Determina o perfil recomendado com base na separabilidade (d-prime).
+
+    d' >= 2.0: boa separação → recomenda conservador
+    1.0 <= d' < 2.0: separação razoável → recomenda balanceado
+    d' < 1.0: separação fraca → recomenda liberal
+    """
+    if dprime >= 2.0:
+        return 'conservative'
+    elif dprime >= 1.0:
+        return 'balanced'
     else:
-        parts.append(
-            f"Boa separação de identidade. Com threshold {threshold:.3f}, "
-            f"{genuine_pass_rate * 100:.0f}% de reconhecimentos corretos e "
-            f"{impostor_block_rate * 100:.0f}% de impostores bloqueados."
-        )
+        return 'liberal'
 
-    if has_overlap:
-        parts.append(
-            " As distribuições de distância se sobrepõem levemente — isso é normal "
-            "em condições variadas de captura."
-        )
 
+def _compute_warning_recognition(
+    dprime: float,
+    genuine_dist: DistanceDistribution,
+    n_persons: int,
+    confidence: Literal['low', 'medium', 'high'],
+) -> Optional[str]:
+    """Gera aviso baseado nas condições da calibração de reconhecimento."""
+    if dprime < 0.5:
+        return (
+            f"Separação muito fraca entre pessoas legítimas e impostores (d'={dprime:.2f}). "
+            "Os grupos têm distribuições de distância muito similares. Capture mais fotos "
+            "variadas ou verifique se as imagens de impostores são suficientemente "
+            "diferentes das legítimas."
+        )
+    if genuine_dist.std > 0.3:
+        return (
+            f"Alta variabilidade nas fotos legítimas (desvio padrão={genuine_dist.std:.3f}). "
+            "Fotos com iluminação, ângulo ou qualidade muito diferentes podem estar "
+            "distorcendo a calibração. Tente usar fotos mais homogêneas."
+        )
+    if n_persons < 3:
+        return (
+            f"Calibração baseada em apenas {n_persons} pessoas legítimas. Recomendado "
+            "usar pelo menos 5 pessoas diferentes para uma calibração representativa do tenant."
+        )
     if confidence == 'low':
-        parts.append(" ⚠️ Poucas amostras — resultado indicativo.")
+        return (
+            "Poucos pares de distância calculados. Capture mais fotos (mínimo 3 fotos por "
+            "pessoa, mínimo 5 pessoas diferentes) para maior precisão."
+        )
+    return None
 
-    return "".join(parts)
 
+def _build_overall_interpretation(
+    n_persons: int,
+    n_impostors: int,
+    dprime: float,
+    eer: float,
+    auc: float,
+    recommended: RecognitionThresholdOption,
+    confidence: Literal['low', 'medium', 'high'],
+) -> str:
+    """Gera diagnóstico completo da calibração de reconhecimento em português."""
+    if dprime >= 3.0:
+        quality = "excelente"
+        ability = "distinguir facilmente"
+    elif dprime >= 2.0:
+        quality = "boa"
+        ability = "distinguir bem"
+    elif dprime >= 1.0:
+        quality = "razoável"
+        ability = "distinguir razoavelmente"
+    else:
+        quality = "fraca"
+        ability = "distinguir com dificuldade"
+
+    if auc >= 0.95:
+        auc_label = "excelente (AUC={:.3f})".format(auc)
+    elif auc >= 0.85:
+        auc_label = "boa (AUC={:.3f})".format(auc)
+    elif auc >= 0.70:
+        auc_label = "razoável (AUC={:.3f})".format(auc)
+    else:
+        auc_label = "fraca (AUC={:.3f})".format(auc)
+
+    eer_pct = eer * 100
+    if eer_pct <= 5:
+        eer_label = "muito baixa ({:.1f}%) — sistema altamente preciso".format(eer_pct)
+    elif eer_pct <= 10:
+        eer_label = "baixa ({:.1f}%) — sistema preciso".format(eer_pct)
+    elif eer_pct <= 20:
+        eer_label = "moderada ({:.1f}%) — desempenho aceitável".format(eer_pct)
+    else:
+        eer_label = "alta ({:.1f}%) — separação insuficiente".format(eer_pct)
+
+    gar = recommended.genuine_accept_rate
+    irr = recommended.impostor_reject_rate
+    frr = recommended.false_rejection_rate
+    far = recommended.false_acceptance_rate
+
+    confidence_note = ""
+    if confidence == 'low':
+        confidence_note = (
+            " ⚠️ Confiança baixa por número reduzido de pares — os valores acima são indicativos."
+        )
+    elif confidence == 'medium':
+        confidence_note = " Confiança média — resultados confiáveis mas recomenda-se mais amostras."
+
+    return (
+        f"Calibração concluída com {n_persons} pessoas legítimas e {n_impostors} impostores "
+        f"({recommended.genuine_accept_rate.__class__.__name__} omitido — ver métricas abaixo).\n\n"
+        f"Separabilidade entre os grupos: {quality} (d'={dprime:.2f}). "
+        f"A curva ROC é {auc_label} e a taxa de erro de equilíbrio (EER) é {eer_label}. "
+        f"Isso indica que o sistema consegue {ability} pessoas legítimas de impostores neste ambiente.\n\n"
+        f"Threshold recomendado: {recommended.threshold:.4f} (perfil {recommended.profile_label}) — "
+        f"{gar:.0%} de aceitação de pessoas legítimas, {irr:.0%} de bloqueio de impostores, "
+        f"FRR={frr:.0%} (legítimos rejeitados), FAR={far:.0%} (impostores aceitos).\n\n"
+        f"Para aplicar, envie esse valor como 'recognition' no campo 'thresholds' "
+        f"das requisições de reconhecimento.{confidence_note}"
+    )
+
+
+# ============================================================================
+# HELPERS DE GRÁFICOS E MÉTRICAS AVANÇADAS
+# ============================================================================
+
+def _compute_eer(
+    genuine_distances: list[float],
+    impostor_distances: list[float],
+) -> tuple[float, float]:
+    """
+    Calcula o Equal Error Rate (EER) — ponto onde FAR ≈ FRR.
+
+    Returns:
+        (eer_value, eer_threshold)
+    """
+    all_min = min(min(genuine_distances), min(impostor_distances))
+    all_max = max(max(genuine_distances), max(impostor_distances))
+    candidates = np.linspace(all_min, all_max, 1000)
+
+    min_diff = float('inf')
+    eer_value = 0.5
+    eer_threshold = float(candidates[len(candidates) // 2])
+
+    for t in candidates:
+        far = sum(1 for d in impostor_distances if d <= t) / len(impostor_distances)
+        frr = sum(1 for d in genuine_distances if d > t) / len(genuine_distances)
+        diff = abs(far - frr)
+        if diff < min_diff:
+            min_diff = diff
+            eer_value = (far + frr) / 2.0
+            eer_threshold = float(t)
+
+    return round(eer_value, 4), round(eer_threshold, 4)
+
+
+def _build_threshold_curve(
+    genuine_distances: list[float],
+    impostor_distances: list[float],
+    n_points: int = 100,
+) -> list[ThresholdCurvePoint]:
+    """Constrói curva de métricas em função do threshold — 100 pontos uniformes."""
+    all_min = min(min(genuine_distances), min(impostor_distances))
+    all_max = max(max(genuine_distances), max(impostor_distances))
+    thresholds = np.linspace(all_min, all_max, n_points)
+
+    points: list[ThresholdCurvePoint] = []
+    for t in thresholds:
+        gar, irr, frr, far, youden = _compute_rates(float(t), genuine_distances, impostor_distances)
+        points.append(ThresholdCurvePoint(
+            threshold=round(float(t), 4),
+            genuine_accept_rate=round(gar, 4),
+            impostor_reject_rate=round(irr, 4),
+            false_rejection_rate=round(frr, 4),
+            false_acceptance_rate=round(far, 4),
+            youden_score=round(youden, 4),
+        ))
+    return points
+
+
+def _build_roc_and_auc(
+    threshold_curve: list[ThresholdCurvePoint],
+) -> tuple[list[RocPoint], float]:
+    """
+    Constrói curva ROC (FAR × TAR) e calcula AUC pela regra trapezoidal.
+
+    Returns:
+        (roc_points, auc)
+    """
+    sorted_pts = sorted(threshold_curve, key=lambda p: p.false_acceptance_rate)
+    roc_points = [
+        RocPoint(
+            false_acceptance_rate=p.false_acceptance_rate,
+            genuine_accept_rate=p.genuine_accept_rate,
+            threshold=p.threshold,
+        )
+        for p in sorted_pts
+    ]
+
+    auc = 0.0
+    for i in range(1, len(roc_points)):
+        dx = roc_points[i].false_acceptance_rate - roc_points[i - 1].false_acceptance_rate
+        avg_y = (roc_points[i].genuine_accept_rate + roc_points[i - 1].genuine_accept_rate) / 2.0
+        auc += dx * avg_y
+
+    return roc_points, round(float(auc), 4)
+
+
+def _build_histogram(
+    genuine_distances: list[float],
+    impostor_distances: list[float],
+    n_bins: int = 25,
+) -> list[HistogramBin]:
+    """Constrói histograma com bins sobrepostos para as duas distribuições."""
+    all_min = min(min(genuine_distances), min(impostor_distances))
+    all_max = max(max(genuine_distances), max(impostor_distances))
+    margin = (all_max - all_min) * 0.05
+    bin_min = all_min - margin
+    bin_max = all_max + margin
+    bin_width = (bin_max - bin_min) / n_bins
+
+    bins: list[HistogramBin] = []
+    for i in range(n_bins):
+        start = bin_min + i * bin_width
+        end = start + bin_width
+        genuine_count = sum(1 for d in genuine_distances if start <= d < end)
+        impostor_count = sum(1 for d in impostor_distances if start <= d < end)
+        bins.append(HistogramBin(
+            range_start=round(start, 4),
+            range_end=round(end, 4),
+            genuine_count=genuine_count,
+            impostor_count=impostor_count,
+        ))
+    return bins
+
+
+async def _extract_embeddings_from_files(
+    files: list[UploadFile],
+    detector,
+    embedder,
+) -> tuple[list[list[float]], int]:
+    """
+    Processa uma lista de UploadFile e extrai embeddings L2-normalizados.
+
+    Returns:
+        (embeddings_extraídos, count_falhas)
+        Imagens sem face detectada são ignoradas e contadas em falhas.
+        Nunca lança exceção por imagem individual.
+    """
+    async def _process_one(file: UploadFile) -> Optional[list[float]]:
+        try:
+            content = await file.read()
+            image_array = cv2.imdecode(
+                np.frombuffer(content, np.uint8),
+                cv2.IMREAD_COLOR,
+            )
+            if image_array is None:
+                return None
+            all_faces = detector.detect_all_faces(image_array, min_det_score=0.60)
+            if len(all_faces) == 0:
+                return None
+            face_data = all_faces[0]
+            embedding = embedder.extract_embedding(face_data["embedding"])
+            return [float(x) for x in embedding.tolist()]
+        except Exception:
+            return None
+
+    results = await asyncio.gather(*[_process_one(f) for f in files])
+    embeddings: list[list[float]] = [r for r in results if r is not None]
+    failures = sum(1 for r in results if r is None)
+    return embeddings, failures
+
+
+# ============================================================================
+# ROTA POST /calibrate/recognition
+# ============================================================================
 
 @router.post("/calibrate/recognition", response_model=RecognitionCalibrateResponse)
 async def calibrate_recognition(
-    same_person_images: list[UploadFile] = File(...),
-    other_person_images: list[UploadFile] = File(...),
+    legitimate_images: list[UploadFile] = File(...),
+    impostor_images: list[UploadFile] = File(...),
+    tenant_id: str = None,  # Opcional para compatibilidade multi-tenant
+    dek_ct: str = None,  # DEK criptografada (hex)
+    dek_iv: str = None,  # IV da DEK (hex)
+    dek_tag: str = None,  # Tag GCM da DEK (hex)
+    dek_key_version: str = "1",  # Versão da chave
 ) -> RecognitionCalibrateResponse:
     """
-    Calibra o threshold de reconhecimento analisando distribuições de distância L2.
+    Calibra o threshold de reconhecimento facial para um tenant.
+    Suporta DEK per-tenant criptografada com MASTER_KEY.
 
-    **Abordagem:**
-    - Computa todas as distâncias L2 entre pares da mesma pessoa (distribuição genuína)
-    - Computa todas as distâncias L2 entre a mesma pessoa e outras pessoas (distribuição impostora)
-    - Encontra o threshold que maximiza a métrica ponderada: 0.7 × taxa_reconhecimento + 0.3 × taxa_bloqueio
+    Processa fotos de pessoas legítimas (agrupadas por prefixo de nome) e fotos
+    de impostores, calcula distribuições de distância euclidiana entre embeddings
+    ArcFace e sugere três perfis de threshold: conservador, balanceado e liberal.
 
-    Isso é mais robusto do que comparar contra um embedding fixo, pois considera
-    a variação natural das fotos da mesma pessoa.
+    O agrupamento usa o prefixo antes do último underscore do nome do arquivo:
+    "joao_foto1.jpg" e "joao_foto2.jpg" pertencem à mesma pessoa "joao".
 
     Args:
-        same_person_images: 2-20 fotos da mesma pessoa a ser reconhecida
-        other_person_images: 1-20 fotos de pessoas diferentes (impostores)
+        legitimate_images: 4-20 fotos das pessoas legítimas do tenant
+        impostor_images: 3-20 fotos de impostores (pessoas fora do tenant)
+        tenant_id: ID do tenant (opcional)
+        dek_ct: DEK criptografada com MASTER_KEY (hex format)
+        dek_iv: IV de 12 bytes da DEK (hex format)
+        dek_tag: Tag de autenticação GCM (hex format)
+        dek_key_version: Versão da MASTER_KEY usada para cifrar DEK
 
     Returns:
-        RecognitionCalibrateResponse com threshold sugerido e estatísticas de distância
+        RecognitionCalibrateResponse com distribuições, d-prime e três opções de threshold
     """
-    from app.main import face_detector, face_embedder
+    from app.main import face_detector, face_embedder, dek_manager
 
-    if len(same_person_images) < 2:
+    # Descriptografar DEK se fornecida
+    if tenant_id and dek_ct and dek_iv and dek_tag:
+        try:
+            dek_manager.decrypt_dek(
+                tenant_id=tenant_id,
+                dek_ct_hex=dek_ct,
+                dek_iv_hex=dek_iv,
+                dek_tag_hex=dek_tag,
+                key_version=dek_key_version,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Erro ao descriptografar DEK: {str(exc)}",
+            )
+
+    VALID_CONTENT_TYPES = {"image/jpeg", "image/png", "image/jpg"}
+
+    # Passo 1: Validação básica
+    if len(legitimate_images) < 4:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Mínimo 2 fotos da mesma pessoa para calcular pares genuínos",
+            detail="Mínimo 4 imagens legítimas (2 pessoas × 2 fotos cada).",
         )
-    if len(other_person_images) < 1:
+    if len(legitimate_images) > 20:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Mínimo 1 foto de outra pessoa para calcular distâncias impostoras",
+            detail="Máximo 20 imagens legítimas.",
         )
-    if len(same_person_images) > 20 or len(other_person_images) > 20:
+    if len(impostor_images) < 3:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Máximo 20 imagens de cada tipo",
+            detail="Mínimo 3 imagens de impostores.",
         )
-
-    # Extrair embeddings em paralelo
-    same_tasks = [
-        _extract_face_embedding(img, 'same_person', face_detector, face_embedder)
-        for img in same_person_images
-    ]
-    other_tasks = [
-        _extract_face_embedding(img, 'other_person', face_detector, face_embedder)
-        for img in other_person_images
-    ]
-
-    same_results = await asyncio.gather(*same_tasks)
-    other_results = await asyncio.gather(*other_tasks)
-
-    same_embeddings = [emb for emb, _ in same_results if emb is not None]
-    other_embeddings = [emb for emb, _ in other_results if emb is not None]
-
-    same_valid = len(same_embeddings)
-    other_valid = len(other_embeddings)
-
-    if same_valid < 2:
+    if len(impostor_images) > 20:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Apenas {same_valid} foto(s) válida(s) da mesma pessoa. Precisamos de pelo menos 2.",
+            detail="Máximo 20 imagens de impostores.",
         )
-    if other_valid < 1:
+
+    for file in legitimate_images + impostor_images:
+        if file.content_type not in VALID_CONTENT_TYPES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Arquivo '{file.filename}' tem tipo inválido '{file.content_type}'. "
+                    "Apenas JPEG e PNG são aceitos."
+                ),
+            )
+
+    # Passo 2: Agrupar imagens legítimas por pessoa via prefixo de nome
+    person_files: dict[str, list[UploadFile]] = {}
+    for file in legitimate_images:
+        person_id = _extract_person_id(file.filename or "unknown")
+        person_files.setdefault(person_id, []).append(file)
+
+    if len(person_files) < 2:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Nenhuma face detectada nas fotos de outras pessoas.",
+            detail=(
+                "Imagens legítimas devem representar pelo menos 2 pessoas diferentes. "
+                "Use prefixos diferentes no nome dos arquivos: pessoa1_foto1.jpg, pessoa2_foto1.jpg"
+            ),
         )
 
-    # Distâncias genuínas: todos os pares (i, j) da mesma pessoa, i < j
-    genuine_distances = [
-        float(np.linalg.norm(same_embeddings[i] - same_embeddings[j]))
-        for i in range(len(same_embeddings))
-        for j in range(i + 1, len(same_embeddings))
-    ]
+    # Passo 3: Extrair embeddings por pessoa (estrutura interna com embeddings)
+    persons_internal: list[dict] = []
+    for person_id, files in person_files.items():
+        embs, failed = await _extract_embeddings_from_files(files, face_detector, face_embedder)
+        persons_internal.append({
+            "person_id": person_id,
+            "embeddings": embs,
+            "photo_count": len(embs),
+            "failed_photos": failed,
+        })
 
-    # Distâncias impostoras: cada embedding da mesma pessoa vs cada outro
-    impostor_distances = [
-        float(np.linalg.norm(same_emb - other_emb))
-        for same_emb in same_embeddings
-        for other_emb in other_embeddings
-    ]
+    # Extrair embeddings de impostores
+    impostor_embeddings, impostor_failed = await _extract_embeddings_from_files(
+        impostor_images, face_detector, face_embedder
+    )
+    impostor_count = len(impostor_embeddings)
 
-    # Threshold ótimo com métrica ponderada (direction=lower_is_real: passa se dist <= threshold)
-    threshold, genuine_pass_rate, impostor_block_rate, youden_score = \
-        _find_optimal_threshold(genuine_distances, impostor_distances, 'lower_is_real')
+    # Passo 4: Calcular distâncias intra-classe (genuine)
+    genuine_distances: list[float] = []
+    for person in persons_internal:
+        if len(person["embeddings"]) >= 2:
+            for emb_a, emb_b in combinations(person["embeddings"], 2):
+                dist = _euclidean_distance(np.array(emb_a), np.array(emb_b))
+                genuine_distances.append(dist)
 
-    confidence_level = _confidence_level(same_valid, other_valid)
+    # Passo 5: Calcular distâncias inter-classe (impostor)
+    all_legit_embeddings = [emb for person in persons_internal for emb in person["embeddings"]]
+    impostor_distances: list[float] = []
+    for imp_emb in impostor_embeddings:
+        for legit_emb in all_legit_embeddings:
+            dist = _euclidean_distance(np.array(imp_emb), np.array(legit_emb))
+            impostor_distances.append(dist)
 
-    interpretation = _generate_interpretation_recognition(
-        threshold,
-        genuine_pass_rate,
-        impostor_block_rate,
-        youden_score,
-        confidence_level,
-        genuine_distances,
-        impostor_distances,
+    # Passo 6: Validar que há dados suficientes
+    if len(genuine_distances) < 1:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Nenhum par legítimo calculado. Certifique-se de que pelo menos "
+                "2 pessoas têm 2 ou mais fotos com face detectada."
+            ),
+        )
+    if len(impostor_distances) < 3:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Menos de 3 distâncias de impostores calculadas. Verifique se "
+                "as fotos de impostores têm faces detectáveis."
+            ),
+        )
+
+    # Passo 7: Calcular distribuições e d-prime
+    genuine_dist = _compute_distribution(genuine_distances)
+    impostor_dist = _compute_distribution(impostor_distances)
+    dprime = _compute_dprime(genuine_dist, impostor_dist)
+
+    # Passo 8: Calcular as três opções de threshold
+    options = _compute_threshold_options(
+        genuine_distances, impostor_distances, genuine_dist, impostor_dist
     )
 
-    recognition_analysis = ThresholdAnalysis(
-        metric="recognition",
-        suggested_value=round(float(threshold), 3),
-        real_pass_rate=genuine_pass_rate,
-        attack_block_rate=impostor_block_rate,
-        youden_score=youden_score,
-        confidence=confidence_level,
-        interpretation=interpretation,
+    # Passo 9-10: Determinar recomendação
+    recommended_profile = _recommend_profile(dprime)
+    recommended = next(o for o in options if o.profile == recommended_profile)
+
+    # Passo 11: Confidence e warning
+    min_pairs = min(len(genuine_distances), len(impostor_distances))
+    if min_pairs < 3:
+        confidence: Literal['low', 'medium', 'high'] = 'low'
+    elif min_pairs < 10:
+        confidence = 'medium'
+    else:
+        confidence = 'high'
+
+    n_persons = len(persons_internal)
+    warning = _compute_warning_recognition(dprime, genuine_dist, n_persons, confidence)
+
+    # Métricas avançadas: EER, curva ROC, AUC
+    eer_value, eer_threshold = _compute_eer(genuine_distances, impostor_distances)
+    threshold_curve = _build_threshold_curve(genuine_distances, impostor_distances)
+    roc_curve, auc = _build_roc_and_auc(threshold_curve)
+    histogram = _build_histogram(genuine_distances, impostor_distances)
+
+    chart_data = CalibrationChartData(
+        threshold_curve=threshold_curve,
+        histogram=histogram,
+        roc_curve=roc_curve,
+        eer_threshold=eer_threshold,
+        eer_value=eer_value,
     )
 
-    genuine_mean = float(np.mean(genuine_distances)) if genuine_distances else 0.0
-    impostor_mean = float(np.mean(impostor_distances)) if impostor_distances else 0.0
-
-    warning = None
-    if same_valid < 3:
-        warning = (
-            f"Apenas {same_valid} foto(s) válida(s) — use pelo menos 5 fotos para maior precisão. "
-            "Inclua variações de ângulo e iluminação."
-        )
-    elif youden_score < 0.3:
-        warning = (
-            "As distribuições de distância genuína e impostora se sobrepõem muito. "
-            "Tente capturar fotos com mais variações de ângulo/iluminação da mesma pessoa, "
-            "e use fotos de outras pessoas mais distintas."
-        )
-
-    overall_interpretation = (
-        f"Calibração de reconhecimento concluída com {same_valid} fotos válidas da mesma pessoa "
-        f"e {other_valid} de outras pessoas. "
-        f"Distância média genuine: {genuine_mean:.3f} | Distância média impostora: {impostor_mean:.3f}. "
-        f"Threshold sugerido: {threshold:.3f} "
-        f"({genuine_pass_rate * 100:.0f}% reconhecidos, {impostor_block_rate * 100:.0f}% impostores bloqueados)."
+    # Passo 12: Diagnóstico geral enriquecido
+    overall = _build_overall_interpretation(
+        n_persons, impostor_count, dprime, eer_value, auc, recommended, confidence
     )
+
+    # Montar resumo das pessoas sem embeddings
+    persons_summary = [
+        PersonSummary(
+            person_id=p["person_id"],
+            photo_count=p["photo_count"],
+            failed_photos=p["failed_photos"],
+        )
+        for p in persons_internal
+    ]
 
     return RecognitionCalibrateResponse(
-        recognition_analysis=recognition_analysis,
-        suggested_threshold=round(float(threshold), 3),
-        genuine_distances=[round(d, 4) for d in genuine_distances],
-        impostor_distances=[round(d, 4) for d in impostor_distances],
-        same_person_valid=same_valid,
-        other_person_valid=other_valid,
-        genuine_pairs_analyzed=len(genuine_distances),
-        impostor_pairs_analyzed=len(impostor_distances),
-        genuine_mean=round(genuine_mean, 4),
-        impostor_mean=round(impostor_mean, 4),
-        overall_interpretation=overall_interpretation,
+        persons_processed=persons_summary,
+        impostor_count=impostor_count,
+        impostor_failed=impostor_failed,
+        genuine_distribution=genuine_dist,
+        impostor_distribution=impostor_dist,
+        dprime=round(dprime, 4),
+        eer=eer_value,
+        auc=auc,
+        options=options,
+        recommended_profile=recommended_profile,
+        recommended_threshold=recommended.threshold,
+        total_genuine_pairs=len(genuine_distances),
+        total_impostor_pairs=len(impostor_distances),
+        confidence=confidence,
         warning=warning,
+        overall_interpretation=overall,
+        chart_data=chart_data,
     )
+

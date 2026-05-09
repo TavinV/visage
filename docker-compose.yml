@@ -1,0 +1,88 @@
+services:
+
+  # ── PostgreSQL 16 ──────────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: visage-db
+    env_file:
+      - ./db/.env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # SQL de init — executado pelo Postgres na primeira inicialização
+      - ./db/init.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── Redis 7 ────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: visage-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── Face Engine (Python/FastAPI) ───────────────────────────────────────────
+  face-engine:
+    build:
+      context: ./face_engine
+      dockerfile: Dockerfile
+    container_name: visage-face-engine
+    env_file:
+      - ./face_engine/.env
+    ports:
+      - "8001:8001"
+    volumes:
+      # modelos ONNX — read-only para evitar sobrescrita acidental
+      - ./face_engine/models:/app/models:ro
+      # frames de fraude (liveness_failed) — volume nomeado persistente
+      - fraud_frames:/app/fraud_frames
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4G
+        reservations:
+          cpus: "1"
+          memory: 2G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  postgres_data:
+    driver: local
+  fraud_frames:
+    driver: local
+  fraud_frames:
+    driver: local
+
+networks:
+  default:
+    name: visage-network

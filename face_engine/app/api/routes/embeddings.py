@@ -35,9 +35,14 @@ async def register_embedding(
     tenant_id: str = Form(...),
     person_id: int = Form(...),
     files: list[UploadFile] = File(...),
+    dek_ct: str = Form(None),  # DEK criptografada (hex)
+    dek_iv: str = Form(None),  # IV da DEK (hex)
+    dek_tag: str = Form(None),  # Tag GCM da DEK (hex)
+    dek_key_version: str = Form(default="1"),  # Versão da chave
 ) -> RegisterEmbeddingResponse:
     """
     Registra novo embedding para uma pessoa usando múltiplas imagens.
+    Suporta DEK per-tenant criptografada com MASTER_KEY.
 
     Recebe 5 imagens da mesma pessoa, extrai embedding de cada uma,
     calcula a média dos embeddings e retorna para o Node.js persistir.
@@ -47,6 +52,10 @@ async def register_embedding(
         tenant_id: ID do tenant
         person_id: ID da pessoa
         files: Lista de até 5 arquivos de imagem em multipart/form-data
+        dek_ct: DEK criptografada com MASTER_KEY (hex format)
+        dek_iv: IV de 12 bytes da DEK (hex format)
+        dek_tag: Tag de autenticação GCM (hex format)
+        dek_key_version: Versão da MASTER_KEY usada para cifrar DEK
 
     Returns:
         RegisterEmbeddingResponse com IV, tag e ciphertext em hex,
@@ -58,6 +67,26 @@ async def register_embedding(
     """
     from app.core.config import settings
     from app.utils.crypto import EmbeddingCrypto
+    from app.main import dek_manager
+    
+    # ------------------------------------------------------------------
+    # Descriptografar DEK se fornecida
+    # ------------------------------------------------------------------
+    if dek_ct and dek_iv and dek_tag:
+        try:
+            dek_manager.decrypt_dek(
+                tenant_id=tenant_id,
+                dek_ct_hex=dek_ct,
+                dek_iv_hex=dek_iv,
+                dek_tag_hex=dek_tag,
+                key_version=dek_key_version,
+            )
+        except Exception as exc:
+            from fastapi import HTTPException, status
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Erro ao descriptografar DEK: {str(exc)}",
+            )
     from app.engine.detector import FaceDetector
     from app.engine.embedder import FaceEmbedder
     from app.main import face_detector, face_embedder
