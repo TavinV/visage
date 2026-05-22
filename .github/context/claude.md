@@ -25,6 +25,7 @@
 15. [Superfícies do sistema](#15-superfícies-do-sistema)
 16. [Roadmap pós-MVP](#16-roadmap-pós-mvp)
 17. [Considerações legais](#17-considerações-legais)
+18. [Fluxo de cadastro com QR Code](#18-fluxo-de-cadastro-com-qr-code)
 
 ---
 
@@ -69,6 +70,30 @@ sessão representa (ex: aula simples = 1, aula dupla = 2).
 O sistema acompanha automaticamente quantas aulas cada aluno
 frequentou, permitindo cálculo de frequência percentual a
 qualquer momento.
+
+### Fluxo de cadastro de alunos (QR Code + Totem)
+
+O cadastro biométrico dos alunos ocorre em duas etapas separadas,
+sem necessidade de intervenção do admin para a fase facial:
+
+**Etapa 1 — Secretaria/Admin cadastra dados básicos:**
+Admin cadastra matrícula, nome e dados institucionais do aluno.
+O sistema gera um `EnrollmentToken` (token criptograficamente seguro,
+uso único, com expiração configurável) e produz um QR Code.
+O QR Code é exibido no painel para impressão ou envio ao aluno.
+
+**Etapa 2 — Aluno vai ao totem (modo cadastro):**
+O aluno escaneia o QR Code em qualquer totem da instituição.
+O totem entra em `registration_mode` e guia o aluno por:
+a) Exibição e aceite formal do regulamento de uso de dados biométricos
+(consentimento registrado em `biometric_consents` — LGPD)
+b) Captura multi-frame com liveness check em cada frame
+(threshold mais rigoroso que o de reconhecimento)
+c) Geração do embedding consolidado (média dos frames válidos)
+d) Token invalidado (uso único) — aluno pronto para ser reconhecido
+
+Cada aluno possui um campo `facial_status` que reflete seu estado:
+`none` → `consent_given` → `registered` (ou `consent_refused` / `revoked`)
 
 ### Diferencial central
 
@@ -148,6 +173,16 @@ Sistemas digitais existentes exigem hardware dedicado e contrato longo.
 **Solução:** totem fixo (tablet ou celular) reconhece os alunos
 automaticamente enquanto entram na sala. O professor só precisa
 abrir a chamada e revisar ao final.
+
+**Fluxo de cadastro de alunos (QR Code + Totem):**
+
+1. Admin/secretaria cadastra dados básicos do aluno no painel
+2. Sistema gera QR Code único e de uso único (token com expiração)
+3. QR Code é exibido no painel para impressão/envio ao aluno
+4. Aluno vai a qualquer totem, aciona o modo de cadastro e escaneia o QR
+5. Totem exibe o regulamento LGPD — aluno aceita formalmente (consentimento registrado)
+6. Captura multi-frame com liveness check rigoroso em todos os frames
+7. Embedding consolidado salvo — aluno disponível para reconhecimento
 
 **Fluxo de uso — com pré-presença (`pre_attendance_enabled = true`):**
 
@@ -407,9 +442,11 @@ confidence = max(0.0, 1.0 - (best_distance / 1.5))
 ```
 1. Decodificar JPEG/PNG via OpenCV
    → HTTP 400 se inválido
+   Imagem esperada: 320×320 JPEG (pré-recortada pelo browser)
 
-2. Redimensionar para máximo 640px no maior lado
-   → preserva aspect ratio
+2. Sem redimensionamento necessidade para SCRFD
+   → crop 320×320 já está dentro do limite interno do SCRFD
+   → redimensionamento ocorre apenas se imagem > 640px (fallback)
 
 3. SCRFD detecta faces
    → retorna no_face_detected se ausente
@@ -549,12 +586,19 @@ que representam 99% dos casos reais em ambiente escolar.
 **O que detecta:** imagens estáticas — fotos impressas e telas
 que não variam entre frames.
 
-**Como funciona:** o frontend captura 3 frames com 250ms de
-intervalo (total 500ms), sem nenhum roundtrip de rede. Compara
-a diferença absoluta média de pixels entre o frame 1 e o frame 3
-numa versão reduzida a 160×120 pixels em escala de cinza. Se a
-diferença for menor que o threshold (3.0), descarta silenciosamente
-e continua o loop. Se passar, envia o frame do meio para a engine.
+**Como funciona:** o frontend exibe uma máscara oval centralizada
+sobre o feed da câmera, guiando o posicionamento do rosto. O crop
+usado em todo o pipeline é o bounding box da oval acrescido de 25%
+de padding em cada direção — nunca o frame completo. Isso reduz a
+área processada pelo SCRFD em ~4×.
+
+O frontend captura 3 crops com 250ms de intervalo (total 500ms),
+sem nenhum roundtrip de rede. Compara a diferença absoluta média de
+pixels entre o crop 1 e o crop 3 numa versão reduzida a 160×120
+pixels em escala de cinza. Se a diferença for menor que o threshold
+(3.0), descarta silenciosamente e continua o loop. Se passar, envia
+o crop central redimensionado para **320×320px** à engine como JPEG
+com qualidade 80.
 
 **Threshold:** 3.0 (diferença média por pixel em escala 0–255).
 Calibrar empiricamente no ambiente real. Típico:
@@ -562,6 +606,15 @@ Calibrar empiricamente no ambiente real. Típico:
 - foto impressa: 0.1–0.5
 - tela estática: 0.5–1.5
 - pessoa real: 3.0–15.0
+
+**Parâmetros do crop:**
+
+- Máscara: oval centrada, altura ≈ 60% da viewport
+- Padding: 25% do raio da oval em cada direção
+- Resolução de envio: 320×320px (Canvas API → `toBlob('image/jpeg', 0.8)`)
+- Face Detection API (Chrome/Edge): usada para feedback dinâmico de
+  distância (oval muda de cor quando o rosto está no tamanho correto);
+  não bloqueia o pipeline se indisponível
 
 **Limitação:** vídeo em loop passa por essa camada.
 
@@ -635,20 +688,24 @@ Ver seção 8 para detalhes completos do sistema de auditoria.
 ### Fluxo encadeado das camadas
 
 ```
-Frontend (tablet/celular):
-  Captura frame 1 → aguarda 250ms
-  Captura frame 2 → aguarda 250ms
-  Captura frame 3
+Frontend (browser — Canvas API):
+  Exibe máscara oval sobre o feed da câmera
+  Crop do bounding box da oval + 25% padding
+  Captura crop 1 → aguarda 250ms
+  Captura crop 2 → aguarda 250ms
+  Captura crop 3
     │
     ▼
-  [Camada 1] Variação de pixels (5ms)
+  [Camada 1] Variação de pixels sobre crop 160×120 (5ms)
     ├── < 3.0 → descarta silencioso → reinicia loop
-    └── ≥ 3.0 → envia frame 2 para engine
+    └── ≥ 3.0 → redimensiona crop 2 para 320×320
+                 → serializa JPEG 80%
+                 → envia para engine
 
-Engine Python:
+Engine Python (recebe 320×320 JPEG):
     │
     ▼
-  SCRFD detecta face
+  SCRFD detecta face (área já pré-recortada — ~4× mais rápido)
     ├── sem face → no_face_detected
     └── face detectada
           │
@@ -673,7 +730,7 @@ Engine Python:
 ```
 
 **Latência total para reconhecimento legítimo:**
-~500ms captura + ~200ms engine = ~700ms ponta a ponta.
+~500ms captura + ~150ms engine (crop 320×320) = ~650ms ponta a ponta.
 
 ---
 
@@ -808,21 +865,26 @@ CREATE TABLE tenants (
 );
 
 CREATE TABLE tenant_settings (
-  tenant_id                   INT PRIMARY KEY REFERENCES tenants(id),
-  recognition_threshold       FLOAT NOT NULL DEFAULT 1.10,
-  liveness_threshold          FLOAT NOT NULL DEFAULT 0.85,
-  liveness_enabled            BOOLEAN NOT NULL DEFAULT true,
-  static_pixel_threshold      FLOAT NOT NULL DEFAULT 3.0,
-  allow_manual_override       BOOLEAN NOT NULL DEFAULT true,
+  tenant_id                     INT PRIMARY KEY REFERENCES tenants(id),
+  recognition_threshold         FLOAT NOT NULL DEFAULT 1.10,
+  liveness_threshold            FLOAT NOT NULL DEFAULT 0.85,
+  liveness_enabled              BOOLEAN NOT NULL DEFAULT true,
+  static_pixel_threshold        FLOAT NOT NULL DEFAULT 3.0,
+  allow_manual_override         BOOLEAN NOT NULL DEFAULT true,
   -- Pré-presença: habilitável em qualquer tipo de instituição
-  pre_attendance_enabled      BOOLEAN NOT NULL DEFAULT false,
-  pre_attendance_window_min   INT NOT NULL DEFAULT 30,
+  pre_attendance_enabled        BOOLEAN NOT NULL DEFAULT false,
+  pre_attendance_window_min     INT NOT NULL DEFAULT 30,
   -- Checkout individual: habilitável em qualquer tipo de instituição
-  individual_checkout_enabled BOOLEAN NOT NULL DEFAULT false,
+  individual_checkout_enabled   BOOLEAN NOT NULL DEFAULT false,
   -- Fraud frames: salvo apenas quando status='liveness_failed'
-  save_fraud_frames           BOOLEAN NOT NULL DEFAULT true,
-  fraud_retention_hours       INT NOT NULL DEFAULT 24,
-  updated_at                  TIMESTAMPTZ DEFAULT NOW()
+  save_fraud_frames             BOOLEAN NOT NULL DEFAULT true,
+  fraud_retention_hours         INT NOT NULL DEFAULT 24,
+  -- Cadastro via QR Code
+  enrollment_token_expiry_hours INT NOT NULL DEFAULT 72,     -- validade do QR Code
+  require_consent_before_facial BOOLEAN NOT NULL DEFAULT true, -- bloqueia facial sem aceite LGPD
+  enrollment_multi_frame_count  INT NOT NULL DEFAULT 3,       -- frames capturados no cadastro
+  liveness_threshold_enrollment FLOAT NOT NULL DEFAULT 0.90,  -- threshold mais rigoroso no cadastro
+  updated_at                    TIMESTAMPTZ DEFAULT NOW()
 );
 ```
 
@@ -845,6 +907,15 @@ CREATE TABLE users (
                   CHECK (status IN ('active','inactive','pending')),
   document        VARCHAR(20),           -- CPF
   enrollment_code VARCHAR(50),           -- matrícula institucional (opcional)
+  -- Estado do cadastro biométrico (desnormalizado para queries rápidas)
+  facial_status   VARCHAR(20) NOT NULL DEFAULT 'none'
+                  CHECK (facial_status IN (
+                    'none',             -- sem QR Code gerado
+                    'consent_given',    -- aceitou regulamento, cadastro facial pendente
+                    'registered',       -- embedding facial salvo e ativo
+                    'consent_refused',  -- recusou o regulamento no totem
+                    'revoked'           -- consentimento revogado posteriormente
+                  )),
   created_at      TIMESTAMPTZ DEFAULT NOW(),
   updated_at      TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE (tenant_id, email)
@@ -872,6 +943,38 @@ CREATE TABLE facial_embeddings (
   model_version   VARCHAR(50) NOT NULL DEFAULT 'arcface_r50_v1',
   created_at      TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE (user_id, model_version)
+);
+
+-- Tokens de QR Code para cadastro biométrico dos alunos (uso único)
+CREATE TABLE enrollment_tokens (
+  id              BIGSERIAL PRIMARY KEY,
+  tenant_id       INT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  user_id         INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  -- token_hash = SHA-256(token_bruto_hex) — nunca armazenar o token em plaintext
+  token_hash      VARCHAR(255) NOT NULL UNIQUE,
+  status          VARCHAR(20) NOT NULL DEFAULT 'pending'
+                  CHECK (status IN ('pending','used','expired','revoked')),
+  expires_at      TIMESTAMPTZ NOT NULL,   -- NOW() + enrollment_token_expiry_hours
+  used_at         TIMESTAMPTZ,            -- quando foi consumido
+  used_by_device  VARCHAR(255),           -- fingerprint do totem que consumiu
+  created_by_id   INT NOT NULL REFERENCES users(id),
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Consentimentos formais de uso de dados biométricos (LGPD)
+-- Deve existir um registro ativo antes de qualquer embedding ser salvo
+CREATE TABLE biometric_consents (
+  id                    BIGSERIAL PRIMARY KEY,
+  tenant_id             INT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  user_id               INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  consent_text_version  VARCHAR(20) NOT NULL, -- ex: 'v1.0' (versão do texto exibido)
+  consented_at          TIMESTAMPTZ NOT NULL,
+  device_fingerprint    VARCHAR(255) NOT NULL, -- totem onde ocorreu
+  ip_address            VARCHAR(45) NOT NULL,  -- IPv4 ou IPv6
+  is_active             BOOLEAN NOT NULL DEFAULT true,
+  revoked_at            TIMESTAMPTZ,
+  revoked_by_id         INT REFERENCES users(id),
+  created_at            TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE devices (
@@ -1056,6 +1159,7 @@ CREATE INDEX ON devices (tenant_id, is_active);
 
 -- Queries de presença
 CREATE INDEX ON users (tenant_id, status);
+CREATE INDEX ON users (tenant_id, facial_status);
 CREATE INDEX ON facial_embeddings (tenant_id, user_id);
 CREATE INDEX ON class_sessions (tenant_id, status, started_at DESC);
 CREATE INDEX ON attendance_records (tenant_id, class_session_id);
@@ -1063,6 +1167,15 @@ CREATE INDEX ON attendance_records (class_session_id, status);
 CREATE INDEX ON pre_attendances (tenant_id, location_id, consolidated)
   WHERE consolidated = false;
 CREATE INDEX ON student_class_summary (class_id, user_id);
+
+-- Cadastro QR Code (hot path de validação de token)
+CREATE UNIQUE INDEX ON enrollment_tokens (token_hash);
+CREATE INDEX ON enrollment_tokens (tenant_id, user_id);
+CREATE INDEX ON enrollment_tokens (tenant_id, status);
+
+-- Consentimentos biométricos
+CREATE INDEX ON biometric_consents (tenant_id, user_id);
+CREATE INDEX ON biometric_consents (tenant_id, is_active) WHERE is_active = true;
 
 -- Auditoria
 CREATE INDEX ON recognition_logs (tenant_id, created_at DESC);
@@ -1120,7 +1233,115 @@ facilita exportação/exclusão completa de dados de um tenant
 
 ## 11. Fluxos principais
 
-### 11.1 Cadastro de aluno com embedding facial
+### 11.1 Cadastro de aluno com QR Code (enrollment flow)
+
+```
+[Etapa 1 — Admin no painel]
+
+Admin acessa painel → cadastra dados básicos do aluno
+(nome, matrícula, e-mail, CPF, etc.) → facial_status = 'none'
+    │
+    ▼
+POST /api/students/:id/enrollment-token
+Node: gera token bruto = crypto.randomBytes(32) → hex string (64 chars)
+      token_hash = SHA-256(token_bruto)
+      INSERT enrollment_tokens (token_hash, status='pending',
+        expires_at = NOW() + enrollment_token_expiry_hours)
+      Retorna QR Code como SVG/PNG contendo a URL:
+        https://seudominio.com/totem/enroll?token={token_bruto}
+Admin imprime/envia ao aluno
+
+[Etapa 2 — Aluno no totem]
+
+Aluno aperta botão "Cadastrar" no totem (ou scanneia QR Code)
+O totem entra em registration_mode
+    │
+    ▼
+POST /api/enrollment/validate-token  (autenticado por X-Device-Key)
+  body: { token: "{token_bruto}" }
+Node: token_hash = SHA-256(token)
+      SELECT * FROM enrollment_tokens WHERE token_hash = ? AND status = 'pending'
+      Se expirado → retorna 410 GONE { error: 'token expirado', code: 'token_expired' }
+      Se usado/revogado → retorna 409 CONFLICT
+      Se não encontrado → retorna 404
+      UPDATE enrollment_tokens SET status = 'used', used_at = NOW(),
+        used_by_device = device_fingerprint
+        WHERE token_hash = ? AND status = 'pending' -- transação atômica
+      Cria sessão de cadastro no Redis:
+        enrollment_session:{session_id} = {
+          userId, tenantId, deviceFingerprint,
+          consentGiven: false, framesCaptures: 0,
+          embeddings: [], createdAt
+        }
+        TTL: 10 minutos
+      Retorna { sessionId, studentName, studentEnrollmentCode }
+Totem exibe: "Cadastrando: [NOME DO ALUNO]"
+    │
+    ▼
+Totem exibe regulamento LGPD (versão configurada por tenant/global)
+Aluno lê e toca "Aceitar" ou "Recusar"
+    │
+    ├── [RECUSOU]
+    │   POST /api/enrollment/refuse
+    │   Node: UPDATE users SET facial_status = 'consent_refused'
+    │         DEL enrollment_session:{session_id} do Redis
+    │   Totem exibe mensagem informativa → volta ao modo normal
+    │
+    └── [ACEITOU]
+        POST /api/enrollment/consent
+          body: { sessionId, consentTextVersion }
+        Node: INSERT biometric_consents (tenant_id, user_id,
+                consent_text_version, consented_at, device_fingerprint, ip_address)
+              UPDATE users SET facial_status = 'consent_given'
+              Atualiza sessão Redis: consentGiven = true
+              Retorna { ok: true }
+            │
+            ▼
+        Totem exibe instrução: "Olhe para a câmera"
+        Loop de captura multi-frame (enrollment_multi_frame_count frames):
+          Para cada frame:
+            1. Variação de pixels (mesma Camada 1 do reconhecimento)
+            2. POST /api/enrollment/frame  (autenticado por X-Device-Key + sessionId)
+               body: { sessionId, frameB64 }
+               Node → Engine POST /enroll/frame
+               Engine: SCRFD detecta face (det_score ≥ 0.85)
+                       MiniFASNet liveness (threshold = liveness_threshold_enrollment)
+                       ArcFace extrai embedding 512d
+                       Retorna { embedding_iv, embedding_tag, embedding_ct, liveness_score }
+               Se liveness falhar → Node responde { ok: false, reason: 'liveness_failed' }
+                 Totem exibe alerta → reinicia captura deste frame (não avança)
+               Se ok → Node armazena embedding na sessão Redis (framesCaptures++)
+          Quando framesCaptures == enrollment_multi_frame_count:
+            POST /api/enrollment/finalize  { sessionId }
+            Node → Engine POST /enroll/finalize
+              body: { embeddings: [...] }  -- lista dos N embeddings em ciphertext
+            Engine: decifra todos com DEK do tenant
+                    calcula média vetorial → normaliza L2
+                    re-criptografa embedding consolidado com DEK
+                    retorna embedding final criptografado
+            Node: INSERT facial_embeddings (embedding_iv, embedding_tag, embedding_ct)
+                  UPDATE users SET facial_status = 'registered'
+                  DEL enrollment_session:{session_id}
+                  DELETE /embeddings/{tenantId}/{userId} na engine (invalida cache)
+        Totem exibe confirmação: "[NOME] cadastrado com sucesso!" → modo normal
+```
+
+### 11.2 Regeneração de QR Code
+
+```
+Admin acessa painel → seleciona aluno → clica "Reenviar QR Code"
+    │
+    ▼
+POST /api/students/:id/enrollment-token  (mesma rota, idempotente)
+Node: UPDATE enrollment_tokens SET status = 'revoked'
+      WHERE user_id = ? AND status = 'pending'   -- revoga tokens anteriores
+      Gera novo token bruto e novo token_hash
+      INSERT enrollment_tokens (novo token)
+      Retorna novo QR Code
+Admin imprime/reenvia ao aluno
+```
+
+### 11.3 Cadastro de aluno com embedding facial (admin direto — legado)
 
 ```
 Admin acessa painel → cadastra dados do aluno
@@ -1150,7 +1371,7 @@ Node invalida cache da engine: DELETE /embeddings/{tenant}/{user}
 Confirmação ao admin
 ```
 
-### 11.2 Abertura de chamada e warm cache
+### 11.4 Abertura de chamada e warm cache
 
 ```
 Professor clica "Abrir Chamada" no painel
@@ -1183,7 +1404,7 @@ Para cada pré-presença:
 Emite SSE para o totem: chamada aberta, lista de candidatos atualizada
 ```
 
-### 11.3 Reconhecimento no totem — loop completo
+### 11.5 Reconhecimento no totem — loop completo
 
 ```
 Totem (browser/PWA):
@@ -1227,7 +1448,7 @@ Totem:
   Se outros: reinicia imediatamente
 ```
 
-### 11.4 Pré-presença (Modo Escola)
+### 11.6 Pré-presença (Modo Escola)
 
 ```
 Reconhecimento bem-sucedido mas sem class_session ativa
@@ -1240,7 +1461,7 @@ Node verifica: nenhuma sessão ativa no location_id do totem
 → Se não existia: INSERT pre_attendances no PostgreSQL
 ```
 
-### 11.5 Checkout individual (`individual_checkout_enabled = true`)
+### 11.7 Checkout individual (`individual_checkout_enabled = true`)
 
 ```
 Professor acessa lista de presença em tempo real
@@ -1257,7 +1478,7 @@ Node:
   Emite SSE para totem: aluno marcado como saída antecipada
 ```
 
-### 11.6 Encerramento de chamada e contagem de aulas
+### 11.8 Encerramento de chamada e contagem de aulas
 
 ```
 Professor clica "Encerrar Chamada"
@@ -1534,14 +1755,26 @@ POST   /api/admin/plans
 GET    /api/admin/recognition-logs          -- logs globais
 GET    /api/admin/health                    -- saúde da engine
 
-── Tenant — usuários ─────────────────────────────────────
+── Tenant — usuários e cadastro biométrico ───────────────
 GET    /api/users
 POST   /api/users
 GET    /api/users/:id
 PATCH  /api/users/:id
 DELETE /api/users/:id
-POST   /api/users/:id/photo                 -- cadastra embedding
+POST   /api/users/:id/photo                 -- cadastra embedding (admin direto — legado)
 DELETE /api/users/:id/embedding             -- remove embedding + invalida cache
+
+── Cadastro via QR Code (enrollment) ────────────────────
+POST   /api/students/:id/enrollment-token   -- gera ou regenera QR Code (admin/manager)
+GET    /api/students/:id/enrollment-token   -- retorna status do token atual
+DELETE /api/students/:id/enrollment-token   -- revoga token ativo (admin/manager)
+
+── Enrollment — autenticados por X-Device-Key + sessionId ─
+POST   /api/enrollment/validate-token       -- valida token escaneado, abre sessão Redis
+POST   /api/enrollment/consent              -- registra aceite formal do regulamento LGPD
+POST   /api/enrollment/refuse               -- registra recusa; facial_status=consent_refused
+POST   /api/enrollment/frame                -- envia frame para liveness + captura parcial
+POST   /api/enrollment/finalize             -- consolida embedding e fecha sessão
 
 ── Tenant — dispositivos ─────────────────────────────────
 GET    /api/devices
@@ -1645,13 +1878,31 @@ Acessível para `admin`, `manager`, `teacher`.
 URL única por tenant + device:
 `https://seudominio.com/totem/{device_token}`
 
+**Modo reconhecimento (padrão):**
+
 - Abre câmera automaticamente no carregamento
-- Mostra instrução: "Olhe para a câmera"
+- Exibe máscara oval centralizada sobre o feed para guiar posicionamento
+- Feedback dinâmico de distância via Face Detection API (Chrome/Edge):
+  oval cinza → verde quando rosto está no tamanho correto
 - Loop automático de captura (sem interação do usuário)
+- Crop do bounding box da oval (+ 25% padding) → 320×320 JPEG 80% enviado à engine
 - Exibe nome e foto do reconhecido por 3 segundos
 - Indicador de status de conexão SSE
+
+**Modo cadastro (registration_mode):**
+
+- Ativado quando aluno escaneia QR Code válido no totem
+- Exibe nome do aluno e campo de confirmação antes de prosseguir
+- Tela 1: exibe texto integral do regulamento LGPD com botões "Aceitar" / "Recusar"
+- Tela 2: captura multi-frame guiada com barra de progresso (N frames configuráveis)
+- Feedback visual por frame: verde (liveness ok) / vermelho (reliveness, repetir)
+- Tela 3: confirmação de sucesso → volta ao modo reconhecimento automaticamente
+
+**Geral:**
+
 - Sem login — autenticado pela URL com token do dispositivo
 - Funciona em qualquer browser moderno (Chrome Android recomendado)
+- Sessão de cadastro expira em 10 minutos no Redis; totem retorna ao modo normal
 
 ---
 
@@ -1687,6 +1938,21 @@ URL única por tenant + device:
 
 Embeddings faciais são dados biométricos sensíveis sob a LGPD.
 
+**Consentimento formal obrigatório:**
+O VisageX implementa consentimento formal registrado em banco de dados
+(`biometric_consents`) antes de qualquer captura de embedding.
+O consentimento é coletado diretamente do titular (aluno) no totem,
+com exibição integral do regulamento. Versão do texto exibido é registrada
+para rastreabilidade em caso de atualização do regulamento.
+Se `require_consent_before_facial = true` (padrão), o sistema bloqueia
+o cadastro facial sem consentimento registrado.
+
+**Revogação de consentimento:**
+Admin pode revogar o consentimento de um aluno (`is_active = false` em
+`biometric_consents`). A revogação deve ser acompanhada de exclusão imediata
+do embedding (`DELETE facial_embeddings`) e atualização de `facial_status = 'revoked'`.
+O sistema não pode usar embeddings de alunos com consentimento revogado.
+
 **Obrigações do operador (você):**
 
 - Documentar finalidade, base legal e prazo de retenção de cada dado
@@ -1697,8 +1963,9 @@ Embeddings faciais são dados biométricos sensíveis sob a LGPD.
 
 **Obrigações do controlador (tenant / instituição de ensino):**
 
+- Coletar consentimento formal antes do cadastro biométrico (via fluxo QR Code)
+- Guardar versão do texto de regulamento exibido ao aluno
 - Informar alunos sobre captura de dados biométricos na chamada
-- Obter consentimento documentado ou ter base legal adequada (para menores, consentimento dos responsáveis)
 - Incluir o uso do sistema na política de privacidade da instituição
 - Responder solicitações de titulares (acesso, exclusão, portabilidade)
 
@@ -1716,5 +1983,99 @@ O aluno (ou responsável legal, se menor) precisa ser informado que:
 - Após 24 horas a imagem é excluída automaticamente
 - Apenas o gestor responsável pode visualizar as imagens dentro do prazo
 
-Essa informação deve constar em documento assinado no momento
-do cadastro no sistema — de responsabilidade da instituição de ensino.
+Essa informação deve constar no regulamento exibido no totem no momento
+do cadastro biométrico. O aceite é registrado em `biometric_consents`.
+
+---
+
+## 18. Fluxo de cadastro com QR Code
+
+### Segurança do token
+
+| Camada          | Mecanismo                                                              |
+| --------------- | ---------------------------------------------------------------------- |
+| Espaço de chave | `crypto.randomBytes(32)` → $2^{256}$ combinações                       |
+| Armazenamento   | Apenas `SHA-256(token)` no banco — token bruto descartado              |
+| Uso único       | `UPDATE ... WHERE status='pending' RETURNING` em transação atômica     |
+| Expiração       | Configurável por tenant (`enrollment_token_expiry_hours`, padrão 72h)  |
+| Revogação       | Admin pode revogar antes da expiração; novo token gerado na mesma rota |
+| Isolamento      | Token vinculado a `tenant_id` — impossível usar em outro tenant        |
+
+### Anti-fraude no cadastro
+
+| Camada             | Proteção                                                                             |
+| ------------------ | ------------------------------------------------------------------------------------ |
+| Token pessoal      | QR Code exibe nome do aluno no totem — substituição visível                          |
+| Liveness rigoroso  | `liveness_threshold_enrollment` ≥ `liveness_threshold` (padrão 0.90 vs 0.85)         |
+| Multi-frame        | Todos os N frames devem passar em liveness antes de avançar                          |
+| det_score ≥ 0.85   | Mais rigoroso que reconhecimento (0.75) — rejeita capturas de baixa qualidade        |
+| Sessão temporária  | Sessão Redis TTL 10 min — totem não pode acumular tentativas                         |
+| Fraud frame        | Frame salvo em disco se liveness falhar no cadastro (mesma lógica do reconhecimento) |
+| Auditoria completa | Toda tentativa de uso de token logada com device_fingerprint e IP                    |
+
+### Estados do `facial_status`
+
+```
+none
+ │
+ ├── admin gera QR Code ──────────────────────────► (ainda 'none' até totem)
+ │
+ ▼
+ aluno escaneia QR e recusa regulamento ──────────► consent_refused
+ │
+ aluno escaneia QR e aceita regulamento ──────────► consent_given
+                                                       │
+                                                       ▼
+                                              captura multi-frame OK
+                                                       │
+                                                       ▼
+                                                  registered
+                                                       │
+                                        admin/aluno revoga consentimento
+                                                       │
+                                                       ▼
+                                                   revoked
+```
+
+### Configurações em `tenant_settings`
+
+| Campo                           | Padrão | Descrição                                                  |
+| ------------------------------- | ------ | ---------------------------------------------------------- |
+| `enrollment_token_expiry_hours` | 72     | Validade do QR Code em horas                               |
+| `require_consent_before_facial` | true   | Bloqueia embedding sem aceite LGPD                         |
+| `enrollment_multi_frame_count`  | 3      | Frames capturados e consolidados                           |
+| `liveness_threshold_enrollment` | 0.90   | Threshold liveness no cadastro (vs 0.85 no reconhecimento) |
+
+### Sessão Redis de cadastro
+
+Chave: `enrollment_session:{uuid_v4}`  
+TTL: 600 segundos (10 minutos)  
+Conteúdo:
+
+```json
+{
+  "userId": 42,
+  "tenantId": 7,
+  "deviceFingerprint": "abc123...",
+  "tokenHash": "sha256...",
+  "consentGiven": false,
+  "framesCaptured": 0,
+  "encryptedEmbeddings": [],
+  "createdAt": "2026-05-09T14:00:00Z"
+}
+```
+
+### Contratos de engine para enrollment
+
+**POST /enroll/frame**
+
+Recebe imagem de um único frame. Aplica SCRFD + liveness + ArcFace.
+Threshold liveness configurável (mais rigoroso). Retorna embedding
+criptografado **ou** erro de liveness.
+
+**POST /enroll/finalize**
+
+Recebe lista de N embeddings criptografados (já passaram em liveness).
+Decifra todos com DEK do tenant, calcula média vetorial, normaliza L2,
+re-criptografa e retorna embedding consolidado. Node persiste em
+`facial_embeddings` e invalida cache da engine.

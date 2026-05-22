@@ -8,7 +8,7 @@ import { config } from "./lib/config";
 import { logger } from "./lib/logger";
 import { connectRedis, disconnectRedis } from "./lib/redis";
 import { disconnectPrisma, prisma } from "./lib/prisma";
-import { bootstrapSuperAdmin } from "./services/admin.service";
+import { adminService } from "./services/admin.service";
 
 async function bootstrap() {
   try {
@@ -17,7 +17,8 @@ async function bootstrap() {
 
     logger.info("Starting VisageX Backend Server...");
 
-    // Conectar Redis
+    // Conectar Redis PRIMEIRO (antes de criar a app)
+    // O middleware de rate limiting precisa do Redis pronto na importação
     await connectRedis();
     logger.info("Redis connected");
 
@@ -30,12 +31,12 @@ async function bootstrap() {
     // Se já existe um super_admin no banco, esta função retorna sem fazer nada (idempotente).
     // Não há API endpoint para criar, deletar ou promover super_admin.
     try {
-      await bootstrapSuperAdmin(config.superAdminEmail, config.superAdminPassword, config.superAdminName);
+      await adminService.bootstrapSuperAdmin(config.superAdminEmail, config.superAdminPassword, config.superAdminName);
     } catch (error) {
       logger.warn({ error }, "Super admin bootstrap skipped or failed");
     }
 
-    // Criar e iniciar app
+    // Criar e iniciar app (Redis e banco já estão prontos)
     const app = createApp();
     const port = config.port;
 

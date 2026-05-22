@@ -8,6 +8,55 @@ Este arquivo registra todas as mudanças **estruturais** do projeto que afetam a
 
 ## Mudanças em andamento
 
+### Otimização de Performance — Crop de Face no Browser
+
+- **Data:** 15 de maio de 2026
+- **Status:** Documentado e confirmado
+- **Descrição:** Decisão arquitetural de pré-recortar a região do rosto no browser antes de enviar à engine Python, reduzindo a área processada pelo SCRFD em ~4× e eliminando a necessidade de redimensionamento na engine. pgvector foi avaliado e descartado — a estratégia de filtro por sala/turno já resolve o problema de escala sem custo de privacidade adicional.
+- **Impactos:**
+  - **Frontend:**
+    - Máscara oval centralizada sobre o feed da câmera (guia posicionamento do rosto)
+    - Feedback dinâmico via Face Detection API (Chrome/Edge): oval cinza → verde quando rosto está no tamanho certo; degradação elegante em browsers sem suporte
+    - Pipeline de captura passa a operar sobre o crop (bounding box da oval + 25% padding), não o frame completo
+    - Crop redimensionado para 320×320px e serializado como JPEG 80% antes do envio
+    - A comparação de variação de pixels (Camada 1 anti-spoofing) também opera sobre o crop
+  - **Engine Python:**
+    - Recebe imagem 320×320 em vez do frame completo (sem alteração de código — compatível)
+    - SCRFD processa área menor → latência estimada reduz de ~200ms para ~150ms
+    - Redimensionamento interno do SCRFD se torna no-op (imagem já dentro do limite)
+  - **Backend Node.js:** Sem impacto
+  - **Banco de dados:** Sem impacto
+- **Motivo:** Eliminar o bottleneck real do pipeline (SCRFD varrendo frame completo) sem adicionar complexidade ao backend Python ou ao modelo de segurança. pgvector descartado por exigir embeddings em plaintext no PostgreSQL, o que contradiz o modelo de envelope encryption com DEK por tenant.
+
+### Fluxo de Cadastro com QR Code — Enrollment Flow
+
+- **Data:** 9 de maio de 2026
+- **Status:** Em progresso
+- **Migration:** `20260509211744_enrollment_qrcode_and_consent`
+- **Descrição:** Novo fluxo de dois estágios para cadastro biométrico de alunos. Etapa 1: admin cadastra dados básicos e gera QR Code (token uso único com expiração). Etapa 2: aluno vai ao totem, aceita regulamento LGPD formalmente e realiza captura multi-frame com liveness check rigoroso — embedding consolidado salvo automaticamente.
+- **Impactos:**
+  - **Banco de dados:**
+    - Nova tabela `enrollment_tokens`: tokens QR Code com hash SHA-256, uso único, expiração configurável, status rastreável (`pending | used | expired | revoked`)
+    - Nova tabela `biometric_consents`: registro formal de consentimento LGPD com versão do texto, device_fingerprint, IP e suporte a revogação
+    - Campo `facial_status` adicionado em `users`: `none | consent_given | registered | consent_refused | revoked`
+    - 4 novos campos em `tenant_settings`: `enrollment_token_expiry_hours` (72h), `require_consent_before_facial` (true), `enrollment_multi_frame_count` (3), `liveness_threshold_enrollment` (0.90)
+  - **Backend:**
+    - Novas rotas de gerenciamento de token: `POST/GET/DELETE /api/students/:id/enrollment-token`
+    - Novas rotas de enrollment no totem: `POST /api/enrollment/validate-token | /consent | /refuse | /frame | /finalize`
+    - Sessão de cadastro temporária no Redis (TTL 10 min) com estado multi-step: `enrollment_session:{uuid}`
+    - Token validado atomicamente com `UPDATE ... WHERE status='pending' RETURNING` (sem race condition)
+    - Token armazenado como SHA-256 — token bruto descartado após gerar QR, nunca persistido
+  - **Face Engine:**
+    - Novos endpoints `POST /enroll/frame` e `POST /enroll/finalize`
+    - `POST /enroll/frame`: SCRFD (det_score ≥ 0.85) + liveness com threshold configurável + ArcFace → retorna embedding criptografado
+    - `POST /enroll/finalize`: recebe N embeddings, calcula média vetorial, normaliza L2, re-criptografa e retorna embedding consolidado
+    - Threshold de liveness no cadastro separado e mais rigoroso (padrão 0.90 vs 0.85 no reconhecimento)
+  - **Frontend:**
+    - Nova tela de cadastro no Totem PWA (`registration_mode`): QR scan → exibição do nome do aluno → regulamento → captura multi-frame com feedback visual → confirmação
+    - Novo painel admin para visualizar `facial_status` de cada aluno e gerenciar tokens (gerar, revogar, reimprimir)
+  - **LGPD:** Consentimento formal do titular (aluno) registrado em banco antes de qualquer embedding. Suporte a revogação com exclusão de embedding. Versão do texto do regulamento rastreada.
+- **Motivo:** Eliminar necessidade de o admin fotografar o aluno presencialmente; garantir consentimento explícito e rastreável do titular conforme LGPD; aumentar segurança do cadastro com liveness multi-frame e token de uso único.
+
 ### Autenticação com Access Token + Refresh Token
 
 - **Data:** 9 de maio de 2026

@@ -1,6 +1,6 @@
 -- CreateTable
 CREATE TABLE "plans" (
-    "id" SERIAL NOT NULL,
+    "id" TEXT NOT NULL,
     "name" VARCHAR(100) NOT NULL,
     "maxClasses" INTEGER NOT NULL DEFAULT 20,
     "priceMonthly" DECIMAL(19,2) NOT NULL,
@@ -12,8 +12,8 @@ CREATE TABLE "plans" (
 
 -- CreateTable
 CREATE TABLE "tenants" (
-    "id" SERIAL NOT NULL,
-    "planId" INTEGER NOT NULL,
+    "id" TEXT NOT NULL,
+    "planId" TEXT NOT NULL,
     "name" VARCHAR(200) NOT NULL,
     "document" VARCHAR(20),
     "institutionType" VARCHAR(20) NOT NULL,
@@ -28,7 +28,7 @@ CREATE TABLE "tenants" (
 
 -- CreateTable
 CREATE TABLE "tenant_settings" (
-    "tenantId" INTEGER NOT NULL,
+    "tenantId" TEXT NOT NULL,
     "recognitionThreshold" DOUBLE PRECISION NOT NULL DEFAULT 1.10,
     "livenessThreshold" DOUBLE PRECISION NOT NULL DEFAULT 0.85,
     "livenessEnabled" BOOLEAN NOT NULL DEFAULT true,
@@ -39,6 +39,10 @@ CREATE TABLE "tenant_settings" (
     "individualCheckoutEnabled" BOOLEAN NOT NULL DEFAULT false,
     "saveFraudFrames" BOOLEAN NOT NULL DEFAULT true,
     "fraudRetentionHours" INTEGER NOT NULL DEFAULT 24,
+    "enrollmentTokenExpiryHours" INTEGER NOT NULL DEFAULT 72,
+    "requireConsentBeforeFacial" BOOLEAN NOT NULL DEFAULT true,
+    "enrollmentMultiFrameCount" INTEGER NOT NULL DEFAULT 3,
+    "livenessThresholdEnrollment" DOUBLE PRECISION NOT NULL DEFAULT 0.90,
     "updatedAt" TIMESTAMPTZ NOT NULL,
 
     CONSTRAINT "tenant_settings_pkey" PRIMARY KEY ("tenantId")
@@ -46,7 +50,7 @@ CREATE TABLE "tenant_settings" (
 
 -- CreateTable
 CREATE TABLE "tenant_keys" (
-    "tenantId" INTEGER NOT NULL,
+    "tenantId" TEXT NOT NULL,
     "dekCt" BYTEA NOT NULL,
     "dekIv" BYTEA NOT NULL,
     "dekTag" BYTEA NOT NULL,
@@ -59,8 +63,8 @@ CREATE TABLE "tenant_keys" (
 
 -- CreateTable
 CREATE TABLE "users" (
-    "id" SERIAL NOT NULL,
-    "tenantId" INTEGER NOT NULL,
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
     "name" VARCHAR(200) NOT NULL,
     "email" VARCHAR(200),
     "passwordHash" VARCHAR(255),
@@ -68,6 +72,7 @@ CREATE TABLE "users" (
     "status" VARCHAR(20) NOT NULL DEFAULT 'active',
     "document" VARCHAR(20),
     "enrollmentCode" VARCHAR(50),
+    "facialStatus" VARCHAR(20) NOT NULL DEFAULT 'none',
     "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMPTZ NOT NULL,
 
@@ -76,9 +81,9 @@ CREATE TABLE "users" (
 
 -- CreateTable
 CREATE TABLE "facial_embeddings" (
-    "id" BIGSERIAL NOT NULL,
-    "tenantId" INTEGER NOT NULL,
-    "userId" INTEGER NOT NULL,
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
     "embeddingIv" BYTEA NOT NULL,
     "embeddingTag" BYTEA NOT NULL,
     "embeddingCt" BYTEA NOT NULL,
@@ -91,12 +96,12 @@ CREATE TABLE "facial_embeddings" (
 
 -- CreateTable
 CREATE TABLE "devices" (
-    "id" SERIAL NOT NULL,
-    "tenantId" INTEGER NOT NULL,
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
     "deviceFingerprint" VARCHAR(255) NOT NULL,
     "label" VARCHAR(100),
     "apiKeyHash" VARCHAR(255) NOT NULL,
-    "locationId" INTEGER,
+    "locationId" TEXT,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "lastSeenAt" TIMESTAMPTZ,
     "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -106,8 +111,8 @@ CREATE TABLE "devices" (
 
 -- CreateTable
 CREATE TABLE "locations" (
-    "id" SERIAL NOT NULL,
-    "tenantId" INTEGER NOT NULL,
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
     "name" VARCHAR(100) NOT NULL,
     "address" VARCHAR(300),
     "isActive" BOOLEAN NOT NULL DEFAULT true,
@@ -118,8 +123,8 @@ CREATE TABLE "locations" (
 
 -- CreateTable
 CREATE TABLE "academic_periods" (
-    "id" SERIAL NOT NULL,
-    "tenantId" INTEGER NOT NULL,
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
     "name" VARCHAR(100) NOT NULL,
     "startsAt" DATE NOT NULL,
     "endsAt" DATE NOT NULL,
@@ -131,9 +136,9 @@ CREATE TABLE "academic_periods" (
 
 -- CreateTable
 CREATE TABLE "courses" (
-    "id" SERIAL NOT NULL,
-    "tenantId" INTEGER NOT NULL,
-    "academicPeriodId" INTEGER NOT NULL,
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "academicPeriodId" TEXT NOT NULL,
     "name" VARCHAR(200) NOT NULL,
     "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -142,13 +147,13 @@ CREATE TABLE "courses" (
 
 -- CreateTable
 CREATE TABLE "classes" (
-    "id" SERIAL NOT NULL,
-    "tenantId" INTEGER NOT NULL,
-    "courseId" INTEGER NOT NULL,
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "courseId" TEXT NOT NULL,
     "name" VARCHAR(100) NOT NULL,
-    "teacherId" INTEGER NOT NULL,
+    "teacherId" TEXT NOT NULL,
     "room" VARCHAR(50),
-    "locationId" INTEGER,
+    "locationId" TEXT,
     "totalClassesPlanned" INTEGER NOT NULL DEFAULT 0,
     "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -157,8 +162,8 @@ CREATE TABLE "classes" (
 
 -- CreateTable
 CREATE TABLE "class_enrollments" (
-    "classId" INTEGER NOT NULL,
-    "userId" INTEGER NOT NULL,
+    "classId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
     "enrolledAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "class_enrollments_pkey" PRIMARY KEY ("classId","userId")
@@ -166,8 +171,8 @@ CREATE TABLE "class_enrollments" (
 
 -- CreateTable
 CREATE TABLE "student_class_summary" (
-    "classId" INTEGER NOT NULL,
-    "userId" INTEGER NOT NULL,
+    "classId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
     "classesAttended" INTEGER NOT NULL DEFAULT 0,
     "classesAbsent" INTEGER NOT NULL DEFAULT 0,
     "lastUpdatedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -177,11 +182,11 @@ CREATE TABLE "student_class_summary" (
 
 -- CreateTable
 CREATE TABLE "class_sessions" (
-    "id" BIGSERIAL NOT NULL,
-    "tenantId" INTEGER NOT NULL,
-    "classId" INTEGER NOT NULL,
-    "teacherId" INTEGER NOT NULL,
-    "createdById" INTEGER NOT NULL,
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "classId" TEXT NOT NULL,
+    "teacherId" TEXT NOT NULL,
+    "createdById" TEXT NOT NULL,
     "startedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "endedAt" TIMESTAMPTZ,
     "status" VARCHAR(20) NOT NULL DEFAULT 'open',
@@ -193,18 +198,18 @@ CREATE TABLE "class_sessions" (
 
 -- CreateTable
 CREATE TABLE "attendance_records" (
-    "id" BIGSERIAL NOT NULL,
-    "tenantId" INTEGER NOT NULL,
-    "classSessionId" BIGINT NOT NULL,
-    "userId" INTEGER NOT NULL,
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "classSessionId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
     "status" VARCHAR(20) NOT NULL,
     "recognizedAt" TIMESTAMPTZ,
     "checkedOutAt" TIMESTAMPTZ,
-    "checkoutReleasedById" INTEGER,
+    "checkoutReleasedById" TEXT,
     "confidence" DOUBLE PRECISION,
     "livenessScore" DOUBLE PRECISION,
     "wasPreAttendance" BOOLEAN NOT NULL DEFAULT false,
-    "adjustedById" INTEGER,
+    "adjustedById" TEXT,
     "adjustedAt" TIMESTAMPTZ,
     "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -213,10 +218,10 @@ CREATE TABLE "attendance_records" (
 
 -- CreateTable
 CREATE TABLE "pre_attendances" (
-    "id" BIGSERIAL NOT NULL,
-    "tenantId" INTEGER NOT NULL,
-    "locationId" INTEGER NOT NULL,
-    "userId" INTEGER NOT NULL,
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "locationId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
     "recognizedAt" TIMESTAMPTZ NOT NULL,
     "confidence" DOUBLE PRECISION NOT NULL,
     "livenessScore" DOUBLE PRECISION NOT NULL,
@@ -229,10 +234,10 @@ CREATE TABLE "pre_attendances" (
 
 -- CreateTable
 CREATE TABLE "recognition_logs" (
-    "id" BIGSERIAL NOT NULL,
-    "tenantId" INTEGER NOT NULL,
-    "deviceId" INTEGER,
-    "userId" INTEGER,
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "deviceId" TEXT,
+    "userId" TEXT,
     "status" VARCHAR(30) NOT NULL,
     "confidence" DOUBLE PRECISION,
     "livenessScore" DOUBLE PRECISION,
@@ -247,7 +252,7 @@ CREATE TABLE "recognition_logs" (
 
 -- CreateTable
 CREATE TABLE "audit_cleanup_logs" (
-    "id" SERIAL NOT NULL,
+    "id" TEXT NOT NULL,
     "runAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "filesDeleted" INTEGER NOT NULL DEFAULT 0,
     "bytesFreed" BIGINT NOT NULL DEFAULT 0,
@@ -255,6 +260,39 @@ CREATE TABLE "audit_cleanup_logs" (
     "errorMessage" TEXT,
 
     CONSTRAINT "audit_cleanup_logs_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "enrollment_tokens" (
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "tokenHash" VARCHAR(255) NOT NULL,
+    "status" VARCHAR(20) NOT NULL DEFAULT 'pending',
+    "expiresAt" TIMESTAMPTZ NOT NULL,
+    "usedAt" TIMESTAMPTZ,
+    "usedByDevice" VARCHAR(255),
+    "createdById" TEXT NOT NULL,
+    "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "enrollment_tokens_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "biometric_consents" (
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "consentTextVersion" VARCHAR(20) NOT NULL,
+    "consentedAt" TIMESTAMPTZ NOT NULL,
+    "deviceFingerprint" VARCHAR(255) NOT NULL,
+    "ipAddress" VARCHAR(45) NOT NULL,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "revokedAt" TIMESTAMPTZ,
+    "revokedById" TEXT,
+    "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "biometric_consents_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex
@@ -295,6 +333,21 @@ CREATE INDEX "recognition_logs_tenantId_createdAt_idx" ON "recognition_logs"("te
 
 -- CreateIndex
 CREATE INDEX "recognition_logs_tenantId_fraudFrameExists_idx" ON "recognition_logs"("tenantId", "fraudFrameExists");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "enrollment_tokens_tokenHash_key" ON "enrollment_tokens"("tokenHash");
+
+-- CreateIndex
+CREATE INDEX "enrollment_tokens_tenantId_userId_idx" ON "enrollment_tokens"("tenantId", "userId");
+
+-- CreateIndex
+CREATE INDEX "enrollment_tokens_tenantId_status_idx" ON "enrollment_tokens"("tenantId", "status");
+
+-- CreateIndex
+CREATE INDEX "biometric_consents_tenantId_userId_idx" ON "biometric_consents"("tenantId", "userId");
+
+-- CreateIndex
+CREATE INDEX "biometric_consents_tenantId_isActive_idx" ON "biometric_consents"("tenantId", "isActive");
 
 -- AddForeignKey
 ALTER TABLE "tenants" ADD CONSTRAINT "tenants_planId_fkey" FOREIGN KEY ("planId") REFERENCES "plans"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -397,3 +450,21 @@ ALTER TABLE "recognition_logs" ADD CONSTRAINT "recognition_logs_deviceId_fkey" F
 
 -- AddForeignKey
 ALTER TABLE "recognition_logs" ADD CONSTRAINT "recognition_logs_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "enrollment_tokens" ADD CONSTRAINT "enrollment_tokens_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "enrollment_tokens" ADD CONSTRAINT "enrollment_tokens_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "enrollment_tokens" ADD CONSTRAINT "enrollment_tokens_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "biometric_consents" ADD CONSTRAINT "biometric_consents_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "biometric_consents" ADD CONSTRAINT "biometric_consents_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "biometric_consents" ADD CONSTRAINT "biometric_consents_revokedById_fkey" FOREIGN KEY ("revokedById") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;

@@ -7,7 +7,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 // ============================================================================
@@ -15,28 +14,28 @@ datasource db {
 // ============================================================================
 
 model Plan {
-  id             Int     @id @default(autoincrement())
-  name           String  @db.VarChar(100)
-  maxClasses     Int     @default(20) // turmas ativas simultâneas
-  priceMonthly   Decimal @db.Decimal(19, 2)
-  isActive       Boolean @default(true)
-  tenants        Tenant[]
-  createdAt      DateTime @default(now()) @db.Timestamptz()
+  id           String   @id @default(uuid())
+  name         String   @db.VarChar(100)
+  maxClasses   Int      @default(20) // turmas ativas simultâneas
+  priceMonthly Decimal  @db.Decimal(19, 2)
+  isActive     Boolean  @default(true)
+  tenants      Tenant[]
+  createdAt    DateTime @default(now()) @db.Timestamptz()
 
   @@map("plans")
 }
 
 model Tenant {
-  id                Int      @id @default(autoincrement())
-  planId            Int
-  plan              Plan     @relation(fields: [planId], references: [id])
-  name              String   @db.VarChar(200)
-  document          String?  @db.VarChar(20) // CNPJ ou CPF
-  institutionType   String   @db.VarChar(20) // 'school' | 'university'
-  status            String   @default("trial") @db.VarChar(20) // 'active' | 'suspended' | 'trial' | 'cancelled'
-  trialEndsAt       DateTime? @db.Timestamptz()
-  timezone          String   @default("America/Sao_Paulo") @db.VarChar(50)
-  
+  id              String    @id @default(uuid())
+  planId          String
+  plan            Plan      @relation(fields: [planId], references: [id])
+  name            String    @db.VarChar(200)
+  document        String?   @db.VarChar(20) // CNPJ ou CPF
+  institutionType String    @db.VarChar(20) // 'school' | 'university'
+  status          String    @default("trial") @db.VarChar(20) // 'active' | 'suspended' | 'trial' | 'cancelled'
+  trialEndsAt     DateTime? @db.Timestamptz()
+  timezone        String    @default("America/Sao_Paulo") @db.VarChar(50)
+
   // Relations
   settings          TenantSettings?
   keys              TenantKeys?
@@ -51,50 +50,59 @@ model Tenant {
   attendanceRecords AttendanceRecord[]
   preAttendances    PreAttendance[]
   recognitionLogs   RecognitionLog[]
+  enrollmentTokens  EnrollmentToken[]
+  biometricConsents BiometricConsent[]
+  auditLogs         AuditLog[]
 
-  createdAt         DateTime @default(now()) @db.Timestamptz()
-  updatedAt         DateTime @updatedAt @db.Timestamptz()
+  createdAt DateTime @default(now()) @db.Timestamptz()
+  updatedAt DateTime @updatedAt @db.Timestamptz()
 
   @@map("tenants")
 }
 
 model TenantSettings {
-  tenantId                  Int      @id
-  tenant                    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  
-  recognitionThreshold      Float    @default(1.10)
-  livenessThreshold         Float    @default(0.85)
-  livenessEnabled           Boolean  @default(true)
-  staticPixelThreshold      Float    @default(3.0)
-  allowManualOverride       Boolean  @default(true)
-  
+  tenantId String @id
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  recognitionThreshold Float   @default(1.10)
+  livenessThreshold    Float   @default(0.85)
+  livenessEnabled      Boolean @default(true)
+  staticPixelThreshold Float   @default(3.0)
+  allowManualOverride  Boolean @default(true)
+
   // Pré-presença
-  preAttendanceEnabled      Boolean  @default(false)
-  preAttendanceWindowMin    Int      @default(30)
-  
+  preAttendanceEnabled   Boolean @default(false)
+  preAttendanceWindowMin Int     @default(30)
+
   // Checkout individual
-  individualCheckoutEnabled Boolean  @default(false)
-  
+  individualCheckoutEnabled Boolean @default(false)
+
   // Fraud frames
-  saveFraudFrames           Boolean  @default(true)
-  fraudRetentionHours       Int      @default(24)
-  
-  updatedAt                 DateTime @updatedAt @db.Timestamptz()
+  saveFraudFrames     Boolean @default(true)
+  fraudRetentionHours Int     @default(24)
+
+  // Cadastro via QR Code
+  enrollmentTokenExpiryHours  Int     @default(72) // validade do QR Code em horas
+  requireConsentBeforeFacial  Boolean @default(true) // bloqueia facial sem aceite LGPD
+  enrollmentMultiFrameCount   Int     @default(3) // frames capturados no cadastro
+  livenessThresholdEnrollment Float   @default(0.90) // threshold mais rigoroso no cadastro
+
+  updatedAt DateTime @updatedAt @db.Timestamptz()
 
   @@map("tenant_settings")
 }
 
 model TenantKeys {
-  tenantId    Int      @id
-  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  
-  dekCt       Bytes    // DEK cifrada com MASTER_KEY
-  dekIv       Bytes    // 12 bytes
-  dekTag      Bytes    // 16 bytes (tag GCM)
-  keyVersion  Int      @default(1)
-  
-  createdAt   DateTime @default(now()) @db.Timestamptz()
-  updatedAt   DateTime @updatedAt @db.Timestamptz()
+  tenantId String @id
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  dekCt      Bytes // DEK cifrada com MASTER_KEY
+  dekIv      Bytes // 12 bytes
+  dekTag     Bytes // 16 bytes (tag GCM)
+  keyVersion Int   @default(1)
+
+  createdAt DateTime @default(now()) @db.Timestamptz()
+  updatedAt DateTime @updatedAt @db.Timestamptz()
 
   @@map("tenant_keys")
 }
@@ -104,32 +112,41 @@ model TenantKeys {
 // ============================================================================
 
 model User {
-  id                Int      @id @default(autoincrement())
-  tenantId          Int
-  tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  
-  name              String   @db.VarChar(200)
-  email             String?  @db.VarChar(200)
-  passwordHash      String?  @db.VarChar(255) // NULL para alunos sem acesso ao painel
-  role              String   @db.VarChar(20) // 'super_admin' | 'admin' | 'manager' | 'teacher' | 'student'
-  status            String   @default("active") @db.VarChar(20) // 'active' | 'inactive' | 'pending'
-  document          String?  @db.VarChar(20) // CPF
-  enrollmentCode    String?  @db.VarChar(50) // matrícula institucional (opcional)
-  
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name           String  @db.VarChar(200)
+  email          String? @db.VarChar(200)
+  passwordHash   String? @db.VarChar(255) // NULL para alunos sem acesso ao painel
+  role           String  @db.VarChar(20) // 'super_admin' | 'admin' | 'manager' | 'teacher' | 'student'
+  status         String  @default("active") @db.VarChar(20) // 'active' | 'inactive' | 'pending'
+  document       String? @db.VarChar(20) // CPF
+  enrollmentCode String? @db.VarChar(50) // matrícula institucional (opcional)
+
+  // Estado do cadastro biométrico (desnormalizado para queries rápidas)
+  // 'none' | 'consent_given' | 'registered' | 'consent_refused' | 'revoked'
+  facialStatus String @default("none") @db.VarChar(20)
+
   // Relations
-  facialEmbeddings  FacialEmbedding[]
-  taughtClasses     Class[] @relation("TeacherClasses")
-  createdClassSessions ClassSession[] @relation("CreatedBy")
-  taughtClassSessions  ClassSession[] @relation("TeacherClass")
-  classEnrollments  ClassEnrollment[]
-  attendanceRecords AttendanceRecord[]
-  checkoutReleased  AttendanceRecord[] @relation("CheckoutReleasedBy")
-  adjustedRecords   AttendanceRecord[] @relation("AdjustedBy")
-  preAttendances    PreAttendance[]
-  recognitionLogs   RecognitionLog[]
-  
-  createdAt         DateTime @default(now()) @db.Timestamptz()
-  updatedAt         DateTime @updatedAt @db.Timestamptz()
+  facialEmbeddings        FacialEmbedding[]
+  taughtClasses           Class[]            @relation("TeacherClasses")
+  createdClassSessions    ClassSession[]     @relation("CreatedBy")
+  taughtClassSessions     ClassSession[]     @relation("TeacherClass")
+  classEnrollments        ClassEnrollment[]
+  attendanceRecords       AttendanceRecord[]
+  checkoutReleased        AttendanceRecord[] @relation("CheckoutReleasedBy")
+  adjustedRecords         AttendanceRecord[] @relation("AdjustedBy")
+  preAttendances          PreAttendance[]
+  recognitionLogs         RecognitionLog[]
+  enrollmentTokens        EnrollmentToken[]  @relation("UserEnrollmentTokens")
+  createdEnrollmentTokens EnrollmentToken[]  @relation("TokenCreatedBy")
+  biometricConsents       BiometricConsent[] @relation("UserBiometricConsents")
+  revokedConsents         BiometricConsent[] @relation("ConsentRevokedBy")
+
+  createdAt DateTime   @default(now()) @db.Timestamptz()
+  updatedAt DateTime   @updatedAt @db.Timestamptz()
+  auditLogs AuditLog[]
 
   @@unique([tenantId, email])
   @@map("users")
@@ -140,42 +157,42 @@ model User {
 // ============================================================================
 
 model FacialEmbedding {
-  id              BigInt   @id @default(autoincrement())
-  tenantId        Int
-  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  
-  userId          Int
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  embeddingIv     Bytes    // 12 bytes
-  embeddingTag    Bytes    // 16 bytes (tag GCM)
-  embeddingCt     Bytes    // 2048 bytes (512 float32)
-  keyVersion      Int      @default(1)
-  modelVersion    String   @default("arcface_r50_v1") @db.VarChar(50)
-  
-  createdAt       DateTime @default(now()) @db.Timestamptz()
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  embeddingIv  Bytes // 12 bytes
+  embeddingTag Bytes // 16 bytes (tag GCM)
+  embeddingCt  Bytes // 2048 bytes (512 float32)
+  keyVersion   Int    @default(1)
+  modelVersion String @default("arcface_r50_v1") @db.VarChar(50)
+
+  createdAt DateTime @default(now()) @db.Timestamptz()
 
   @@unique([userId, modelVersion])
   @@map("facial_embeddings")
 }
 
 model Device {
-  id                Int      @id @default(autoincrement())
-  tenantId          Int
-  tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  
-  deviceFingerprint String   @db.VarChar(255)
-  label             String?  @db.VarChar(100)
-  apiKeyHash        String   @db.VarChar(255)
-  locationId        Int?
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  deviceFingerprint String    @db.VarChar(255)
+  label             String?   @db.VarChar(100)
+  apiKeyHash        String    @db.VarChar(255)
+  locationId        String?
   location          Location? @relation(fields: [locationId], references: [id])
-  
-  isActive          Boolean  @default(true)
-  lastSeenAt        DateTime? @db.Timestamptz()
-  
-  recognitionLogs   RecognitionLog[]
-  
-  createdAt         DateTime @default(now()) @db.Timestamptz()
+
+  isActive   Boolean   @default(true)
+  lastSeenAt DateTime? @db.Timestamptz()
+
+  recognitionLogs RecognitionLog[]
+
+  createdAt DateTime @default(now()) @db.Timestamptz()
 
   @@unique([tenantId, deviceFingerprint])
   @@index([apiKeyHash])
@@ -188,19 +205,19 @@ model Device {
 // ============================================================================
 
 model Location {
-  id              Int      @id @default(autoincrement())
-  tenantId        Int
-  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  
-  name            String   @db.VarChar(100)
-  address         String?  @db.VarChar(300)
-  isActive        Boolean  @default(true)
-  
-  classes         Class[]
-  devices         Device[]
-  preAttendances  PreAttendance[]
-  
-  createdAt       DateTime @default(now()) @db.Timestamptz()
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name     String  @db.VarChar(100)
+  address  String? @db.VarChar(300)
+  isActive Boolean @default(true)
+
+  classes        Class[]
+  devices        Device[]
+  preAttendances PreAttendance[]
+
+  createdAt DateTime @default(now()) @db.Timestamptz()
 
   @@map("locations")
 }
@@ -210,88 +227,88 @@ model Location {
 // ============================================================================
 
 model AcademicPeriod {
-  id              Int      @id @default(autoincrement())
-  tenantId        Int
-  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  
-  name            String   @db.VarChar(100) // "2026/1"
-  startsAt        DateTime @db.Date()
-  endsAt          DateTime @db.Date()
-  isActive        Boolean  @default(true)
-  
-  courses         Course[]
-  
-  createdAt       DateTime @default(now()) @db.Timestamptz()
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name     String   @db.VarChar(100) // "2026/1"
+  startsAt DateTime @db.Date()
+  endsAt   DateTime @db.Date()
+  isActive Boolean  @default(true)
+
+  courses Course[]
+
+  createdAt DateTime @default(now()) @db.Timestamptz()
 
   @@map("academic_periods")
 }
 
 model Course {
-  id                  Int      @id @default(autoincrement())
-  tenantId            Int
-  tenant              Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  
-  academicPeriodId    Int
-  academicPeriod      AcademicPeriod @relation(fields: [academicPeriodId], references: [id])
-  
-  name                String   @db.VarChar(200)
-  
-  classes             Class[]
-  
-  createdAt           DateTime @default(now()) @db.Timestamptz()
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  academicPeriodId String
+  academicPeriod   AcademicPeriod @relation(fields: [academicPeriodId], references: [id])
+
+  name String @db.VarChar(200)
+
+  classes Class[]
+
+  createdAt DateTime @default(now()) @db.Timestamptz()
 
   @@map("courses")
 }
 
 model Class {
-  id                  Int      @id @default(autoincrement())
-  tenantId            Int
-  tenant              Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  
-  courseId            Int
-  course              Course   @relation(fields: [courseId], references: [id])
-  
-  name                String   @db.VarChar(100)
-  teacherId           Int
-  teacher             User     @relation("TeacherClasses", fields: [teacherId], references: [id])
-  
-  room                String?  @db.VarChar(50)
-  locationId          Int?
-  location            Location? @relation(fields: [locationId], references: [id])
-  
-  totalClassesPlanned Int      @default(0)
-  
-  enrollments         ClassEnrollment[]
-  classSessions       ClassSession[]
-  studentSummaries    StudentClassSummary[]
-  
-  createdAt           DateTime @default(now()) @db.Timestamptz()
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  courseId String
+  course   Course @relation(fields: [courseId], references: [id])
+
+  name      String @db.VarChar(100)
+  teacherId String
+  teacher   User   @relation("TeacherClasses", fields: [teacherId], references: [id])
+
+  room       String?   @db.VarChar(50)
+  locationId String?
+  location   Location? @relation(fields: [locationId], references: [id])
+
+  totalClassesPlanned Int @default(0)
+
+  enrollments      ClassEnrollment[]
+  classSessions    ClassSession[]
+  studentSummaries StudentClassSummary[]
+
+  createdAt DateTime @default(now()) @db.Timestamptz()
 
   @@map("classes")
 }
 
 model ClassEnrollment {
-  classId    Int
-  class      Class     @relation(fields: [classId], references: [id], onDelete: Cascade)
-  
-  userId     Int
-  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  enrolledAt DateTime  @default(now()) @db.Timestamptz()
+  classId String
+  class   Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  enrolledAt DateTime @default(now()) @db.Timestamptz()
 
   @@id([classId, userId])
   @@map("class_enrollments")
 }
 
 model StudentClassSummary {
-  classId         Int
-  class           Class     @relation(fields: [classId], references: [id], onDelete: Cascade)
-  
-  userId          Int
-  
-  classesAttended Int       @default(0)
-  classesAbsent   Int       @default(0)
-  lastUpdatedAt   DateTime  @default(now()) @updatedAt @db.Timestamptz()
+  classId String
+  class   Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  userId String
+
+  classesAttended Int      @default(0)
+  classesAbsent   Int      @default(0)
+  lastUpdatedAt   DateTime @default(now()) @updatedAt @db.Timestamptz()
 
   @@id([classId, userId])
   @@index([userId])
@@ -303,58 +320,58 @@ model StudentClassSummary {
 // ============================================================================
 
 model ClassSession {
-  id                BigInt    @id @default(autoincrement())
-  tenantId          Int
-  tenant            Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  
-  classId           Int
-  class             Class     @relation(fields: [classId], references: [id])
-  
-  teacherId         Int
-  teacher           User      @relation("TeacherClass", fields: [teacherId], references: [id])
-  
-  createdById       Int
-  createdBy         User      @relation("CreatedBy", fields: [createdById], references: [id])
-  
-  startedAt         DateTime  @default(now()) @db.Timestamptz()
-  endedAt           DateTime? @db.Timestamptz()
-  status            String    @default("open") @db.VarChar(20) // 'open' | 'closed'
-  classesWorth      Int       @default(1)
-  
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  classId String
+  class   Class  @relation(fields: [classId], references: [id])
+
+  teacherId String
+  teacher   User   @relation("TeacherClass", fields: [teacherId], references: [id])
+
+  createdById String
+  createdBy   User   @relation("CreatedBy", fields: [createdById], references: [id])
+
+  startedAt    DateTime  @default(now()) @db.Timestamptz()
+  endedAt      DateTime? @db.Timestamptz()
+  status       String    @default("open") @db.VarChar(20) // 'open' | 'closed'
+  classesWorth Int       @default(1)
+
   attendanceRecords AttendanceRecord[]
-  
-  createdAt         DateTime  @default(now()) @db.Timestamptz()
+
+  createdAt DateTime @default(now()) @db.Timestamptz()
 
   @@map("class_sessions")
 }
 
 model AttendanceRecord {
-  id                BigInt    @id @default(autoincrement())
-  tenantId          Int
-  tenant            Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  
-  classSessionId    BigInt
-  classSession      ClassSession @relation(fields: [classSessionId], references: [id])
-  
-  userId            Int
-  user              User      @relation(fields: [userId], references: [id])
-  
-  status            String    @db.VarChar(20) // 'present' | 'absent' | 'manual' | 'early_checkout'
-  recognizedAt      DateTime? @db.Timestamptz()
-  checkedOutAt      DateTime? @db.Timestamptz()
-  
-  checkoutReleasedById Int?
-  checkoutReleasedBy   User? @relation("CheckoutReleasedBy", fields: [checkoutReleasedById], references: [id])
-  
-  confidence        Float?
-  livenessScore     Float?
-  wasPreAttendance  Boolean   @default(false)
-  
-  adjustedById      Int?
-  adjustedBy        User?     @relation("AdjustedBy", fields: [adjustedById], references: [id])
-  adjustedAt        DateTime? @db.Timestamptz()
-  
-  createdAt         DateTime  @default(now()) @db.Timestamptz()
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  classSessionId String
+  classSession   ClassSession @relation(fields: [classSessionId], references: [id])
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  status       String    @db.VarChar(20) // 'present' | 'absent' | 'manual' | 'early_checkout'
+  recognizedAt DateTime? @db.Timestamptz()
+  checkedOutAt DateTime? @db.Timestamptz()
+
+  checkoutReleasedById String?
+  checkoutReleasedBy   User?   @relation("CheckoutReleasedBy", fields: [checkoutReleasedById], references: [id])
+
+  confidence       Float?
+  livenessScore    Float?
+  wasPreAttendance Boolean @default(false)
+
+  adjustedById String?
+  adjustedBy   User?     @relation("AdjustedBy", fields: [adjustedById], references: [id])
+  adjustedAt   DateTime? @db.Timestamptz()
+
+  createdAt DateTime @default(now()) @db.Timestamptz()
 
   @@unique([classSessionId, userId])
   @@index([tenantId, classSessionId])
@@ -363,23 +380,23 @@ model AttendanceRecord {
 }
 
 model PreAttendance {
-  id              BigInt    @id @default(autoincrement())
-  tenantId        Int
-  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  
-  locationId      Int
-  location        Location  @relation(fields: [locationId], references: [id])
-  
-  userId          Int
-  user            User      @relation(fields: [userId], references: [id])
-  
-  recognizedAt    DateTime  @db.Timestamptz()
-  confidence      Float
-  livenessScore   Float
-  expires_at      DateTime  @db.Timestamptz()
-  consolidated   Boolean   @default(false)
-  
-  createdAt       DateTime  @default(now()) @db.Timestamptz()
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id])
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  recognizedAt  DateTime @db.Timestamptz()
+  confidence    Float
+  livenessScore Float
+  expires_at    DateTime @db.Timestamptz()
+  consolidated  Boolean  @default(false)
+
+  createdAt DateTime @default(now()) @db.Timestamptz()
 
   @@unique([tenantId, locationId, userId, recognizedAt(sort: Desc)])
   @@index([tenantId, locationId, consolidated])
@@ -391,26 +408,26 @@ model PreAttendance {
 // ============================================================================
 
 model RecognitionLog {
-  id              BigInt    @id @default(autoincrement())
-  tenantId        Int
-  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  
-  deviceId        Int?
-  device          Device?   @relation(fields: [deviceId], references: [id])
-  
-  userId          Int?
-  user            User?     @relation(fields: [userId], references: [id])
-  
-  status          String    @db.VarChar(30) // 'identified' | 'not_identified' | 'liveness_failed' | 'no_face_detected'
-  confidence      Float?
-  livenessScore   Float?
-  saturationMean  Float?
-  processingMs    Int?
-  
-  fraudFramePath  String?   @db.VarChar(500)
-  fraudFrameExists Boolean  @default(false)
-  
-  createdAt       DateTime  @default(now()) @db.Timestamptz()
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  deviceId String?
+  device   Device? @relation(fields: [deviceId], references: [id])
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id])
+
+  status         String @db.VarChar(30) // 'identified' | 'not_identified' | 'liveness_failed' | 'no_face_detected'
+  confidence     Float?
+  livenessScore  Float?
+  saturationMean Float?
+  processingMs   Int?
+
+  fraudFramePath   String? @db.VarChar(500)
+  fraudFrameExists Boolean @default(false)
+
+  createdAt DateTime @default(now()) @db.Timestamptz()
 
   @@index([tenantId, createdAt(sort: Desc)])
   @@index([tenantId, fraudFrameExists])
@@ -418,12 +435,85 @@ model RecognitionLog {
 }
 
 model AuditCleanupLog {
-  id              Int       @id @default(autoincrement())
-  runAt           DateTime  @default(now()) @db.Timestamptz()
-  filesDeleted    Int       @default(0)
-  bytesFreed      BigInt    @default(0)
+  id               String   @id @default(uuid())
+  runAt            DateTime @default(now()) @db.Timestamptz()
+  filesDeleted     Int      @default(0)
+  bytesFreed       BigInt   @default(0)
   tenantsProcessed Int      @default(0)
-  errorMessage    String?   @db.Text
+  errorMessage     String?  @db.Text
 
   @@map("audit_cleanup_logs")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String   @db.VarChar(100)
+  details   String?  @db.Text
+  createdAt DateTime @default(now()) @db.Timestamptz()
+
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@map("audit_logs")
+}
+
+// ============================================================================
+// Enrollment — Cadastro via QR Code
+// ============================================================================
+
+model EnrollmentToken {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation("UserEnrollmentTokens", fields: [userId], references: [id], onDelete: Cascade)
+
+  // SHA-256 do token bruto — nunca armazenar o token em plaintext
+  tokenHash String @unique @db.VarChar(255)
+
+  // 'pending' | 'used' | 'expired' | 'revoked'
+  status String @default("pending") @db.VarChar(20)
+
+  expiresAt    DateTime  @db.Timestamptz()
+  usedAt       DateTime? @db.Timestamptz()
+  usedByDevice String?   @db.VarChar(255) // fingerprint do totem que consumiu
+
+  createdById String
+  createdBy   User   @relation("TokenCreatedBy", fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now()) @db.Timestamptz()
+
+  @@index([tenantId, userId])
+  @@index([tenantId, status])
+  @@map("enrollment_tokens")
+}
+
+model BiometricConsent {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation("UserBiometricConsents", fields: [userId], references: [id], onDelete: Cascade)
+
+  // Versão do texto do regulamento exibido (ex: 'v1.0') — rastreabilidade LGPD
+  consentTextVersion String   @db.VarChar(20)
+  consentedAt        DateTime @db.Timestamptz()
+  deviceFingerprint  String   @db.VarChar(255)
+  ipAddress          String   @db.VarChar(45) // IPv4 ou IPv6
+
+  isActive  Boolean   @default(true)
+  revokedAt DateTime? @db.Timestamptz()
+
+  revokedById String?
+  revokedBy   User?   @relation("ConsentRevokedBy", fields: [revokedById], references: [id])
+
+  createdAt DateTime @default(now()) @db.Timestamptz()
+
+  @@index([tenantId, userId])
+  @@index([tenantId, isActive])
+  @@map("biometric_consents")
 }

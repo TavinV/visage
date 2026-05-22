@@ -56,6 +56,15 @@ export const config = {
   fraudFramesStoragePath: getEnv("FRAUD_FRAMES_STORAGE_PATH", "./fraud_frames"),
   fraudRetentionHours: parseInt(getEnv("FRAUD_RETENTION_HOURS", "24"), 10),
 
+  // SMTP
+  smtpHost: getEnv("SMTP_HOST", "localhost"),
+  smtpPort: parseInt(getEnv("SMTP_PORT", "587"), 10),
+  smtpSecure: getEnvOptional("SMTP_SECURE", "false") === "true",
+  smtpUser: getEnvOptional("SMTP_USER"),
+  smtpPassword: getEnvOptional("SMTP_PASSWORD"),
+  smtpFromEmail: getEnv("SMTP_FROM_EMAIL", "no-reply@visagex.com"),
+  smtpFromName: getEnv("SMTP_FROM_NAME", "VisageX"),
+
   // Features
   debug: getEnvOptional("DEBUG", "false") === "true",
 };

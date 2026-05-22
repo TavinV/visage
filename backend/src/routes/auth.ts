@@ -4,7 +4,7 @@
 
 import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
-import { login, refreshAccessToken, logout } from "../services/auth.service";
+import { authService } from "../services/auth.service";
 import { validate } from "../middleware/validate";
 import { EmailSchema } from "../types";
 
@@ -36,7 +36,7 @@ router.post(
   validate(LoginSchema),
   async (req: Request<{}, {}, LoginRequest>, res: Response, next: NextFunction) => {
     try {
-      const result = await login(req.body);
+      const result = await authService.login(req.body);
       res.json({ data: result });
     } catch (error) {
       next(error);
@@ -53,7 +53,7 @@ router.post(
   validate(RefreshSchema),
   async (req: Request<{}, {}, RefreshRequest>, res: Response, next: NextFunction) => {
     try {
-      const result = await refreshAccessToken(req.body.refreshToken);
+      const result = await authService.refresh(req.body.refreshToken);
       res.json({ data: result });
     } catch (error) {
       next(error);
@@ -70,7 +70,7 @@ router.post(
   validate(LogoutSchema),
   async (req: Request<{}, {}, LogoutRequest>, res: Response, next: NextFunction) => {
     try {
-      await logout(req.body.refreshToken);
+      await authService.logout(req.body.refreshToken);
       res.status(204).send();
     } catch (error) {
       next(error);

@@ -1,25 +1,32 @@
-/**
- * Tenants Service
- * Lógica de negócio para criar e gerenciar tenants
+﻿/**
+ * TenantsService
+ * Lógica de negócio para criar e gerenciar tenants.
+ * Estende BaseService para paginação, ordenação e busca padronizadas.
  */
 
-import { prisma } from "../lib/prisma";
-import { logger } from "../lib/logger";
+import { BaseService, ListParams, PaginatedResult } from "./base.service";
 import { generateKey, generateIV } from "../utils/crypto";
-import { ConflictError, NotFoundError, ValidationError } from "../utils/errors";
+import { NotFoundError, ValidationError } from "../utils/errors";
 import { config } from "../lib/config";
+import { emailService } from "./email.service";
 import crypto from "crypto";
+import bcryptjs from "bcryptjs";
+
+// ── DTOs ─────────────────────────────────────────────────────────────────────
 
 export interface CreateTenantInput {
   name: string;
   document?: string;
   institutionType: "school" | "university";
-  planId: number;
-  email?: string;
+  planId: string;
+  adminUser: {
+    name: string;
+    email: string;
+  };
 }
 
-export interface CreateTenantOutput {
-  id: number;
+export interface TenantOutput {
+  id: string;
   name: string;
   document?: string;
   institutionType: string;
@@ -27,41 +34,94 @@ export interface CreateTenantOutput {
   createdAt: Date;
 }
 
-/**
- * Cria um novo tenant com DEK cifrada
- */
-export async function createTenant(
-  input: CreateTenantInput
-): Promise<CreateTenantOutput> {
-  try {
-    // Validar plano
-    const plan = await prisma.plan.findUnique({
-      where: { id: input.planId },
+export interface ListTenantsParams extends ListParams {
+  status?: string;
+  institutionType?: "school" | "university";
+}
+
+export interface UpdateTenantInput {
+  name?: string;
+  document?: string;
+  institutionType?: "school" | "university";
+  planId?: string;
+  timezone?: string;
+  status?: "trial" | "active" | "suspended" | "cancelled";
+}
+
+// ── Serviço ───────────────────────────────────────────────────────────────────
+
+class TenantsService extends BaseService {
+  private static readonly SORT_FIELDS = [
+    "name",
+    "createdAt",
+    "status",
+    "institutionType",
+  ] as const;
+
+  /**
+   * Lista tenants com paginação, ordenação e busca por nome (super_admin only).
+   */
+  async list(params: ListTenantsParams = {}): Promise<PaginatedResult<object>> {
+    const { take, skip, page, limit } = this.buildPagination(params);
+    const orderBy =
+      this.buildOrderBy(params.sortBy, params.sortOrder, TenantsService.SORT_FIELDS) ??
+      { createdAt: "desc" };
+    const searchOr = this.buildSearchFilter(params.search, ["name", "document"]);
+
+    const where = {
+      ...(params.status && { status: params.status }),
+      ...(params.institutionType && { institutionType: params.institutionType }),
+      ...(searchOr && { OR: searchOr }),
+    };
+
+    const [tenants, total] = await this.prisma.$transaction([
+      this.prisma.tenant.findMany({
+        where,
+        take,
+        skip,
+        orderBy,
+        include: {
+          plan: true,
+          _count: { select: { users: true } },
+        },
+      }),
+      this.prisma.tenant.count({ where }),
+    ]);
+
+    return this.buildPaginatedResult(tenants, total, page, limit);
+  }
+
+  /**
+   * Busca tenant por ID. Lança NotFoundError se não existir.
+   */
+  async findById(tenantId: string): Promise<object> {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      include: { plan: true, settings: true },
     });
+    if (!tenant) throw new NotFoundError("Tenant not found");
+    return tenant;
+  }
 
-    if (!plan) {
-      throw new NotFoundError("Plan not found");
-    }
+  /**
+   * Cria novo tenant com DEK cifrada (super_admin only).
+   * Realiza em uma única transação: tenant + tenant_keys + tenant_settings.
+   */
+  async create(input: CreateTenantInput): Promise<TenantOutput> {
+    const plan = await this.prisma.plan.findUnique({ where: { id: input.planId } });
+    if (!plan) throw new NotFoundError("Plan not found");
+    if (!plan.isActive) throw new ValidationError("Plan is not active");
 
-    if (!plan.isActive) {
-      throw new ValidationError("Plan is not active");
-    }
-
-    // Gerar DEK
-    const dek = generateKey(32); // 32 bytes = 256 bits
+    // Gerar e cifrar DEK com MASTER_KEY (AES-256-GCM)
+    const dek = generateKey(32);
     const masterKey = Buffer.from(config.masterKey, "hex");
-
-    // Cifrar DEK com MASTER_KEY usando AES-256-GCM
     const iv = generateIV();
     const cipher = crypto.createCipheriv("aes-256-gcm", masterKey, iv);
     const encryptedData = cipher.update(dek);
     cipher.final();
     const tag = cipher.getAuthTag();
-    const ciphertext = encryptedData;
 
-    // Criar tenant em transação
-    const tenant = await prisma.$transaction(async (tx) => {
-      // Criar tenant
+    const tenant = await this.prisma.$transaction(async (tx) => {
       const newTenant = await tx.tenant.create({
         data: {
           name: input.name,
@@ -69,101 +129,198 @@ export async function createTenant(
           institutionType: input.institutionType,
           planId: input.planId,
           status: "trial",
-          trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // 14 dias
+          trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
         },
       });
 
-      // Criar tenant_keys
       await tx.tenantKeys.create({
         data: {
           tenantId: newTenant.id,
-          dekCt: ciphertext,
-          dekIv: iv,
-          dekTag: tag,
+          dekCt: new Uint8Array(encryptedData),
+          dekIv: new Uint8Array(iv),
+          dekTag: new Uint8Array(tag),
           keyVersion: 1,
         },
       });
 
-      // Criar tenant_settings
       await tx.tenantSettings.create({
+        data: { tenantId: newTenant.id },
+      });
+
+      // Criar usuário admin inicial do tenant
+      const adminPassword = this.generateSecurePassword();
+      const passwordHash = await bcryptjs.hash(adminPassword, 12);
+
+      await tx.user.create({
         data: {
           tenantId: newTenant.id,
+          name: input.adminUser.name,
+          email: input.adminUser.email,
+          role: "admin",
+          passwordHash,
+          status: "active",
         },
       });
 
-      return newTenant;
+      return { tenant: newTenant, adminPassword };
     });
 
-    logger.info(
-      { tenantId: tenant.id, name: tenant.name },
-      "Tenant created successfully"
+    this.logger.info(
+      { tenantId: tenant.tenant.id, name: tenant.tenant.name },
+      "Tenant created",
     );
 
-    return {
-      id: tenant.id,
-      name: tenant.name,
-      document: tenant.document || undefined,
-      institutionType: tenant.institutionType,
-      status: tenant.status,
-      createdAt: tenant.createdAt,
-    };
-  } catch (error) {
-    if (
-      error instanceof ConflictError ||
-      error instanceof NotFoundError ||
-      error instanceof ValidationError
-    ) {
-      throw error;
+    // Enviar credenciais iniciais ao admin por email (fora da transação)
+    try {
+      await emailService.send({
+        to: input.adminUser.email,
+        templateId: "admin-credentials",
+        context: {
+          name: input.adminUser.name,
+          institutionName: input.name,
+          email: input.adminUser.email,
+          temporaryPassword: tenant.adminPassword,
+          dashboardUrl: config.apiUrl,
+        },
+      });
+    } catch (err) {
+      // Email failure não deve reverter a criação do tenant
+      this.logger.warn(
+        { tenantId: tenant.tenant.id, email: input.adminUser.email, err },
+        "Failed to send admin credentials email",
+      );
     }
 
-    logger.error({ error }, "Error creating tenant");
-    throw error;
-  }
-}
-
-/**
- * Busca tenant por ID
- */
-export async function getTenantById(tenantId: number) {
-  const tenant = await prisma.tenant.findUnique({
-    where: { id: tenantId },
-    include: {
-      plan: true,
-      settings: true,
-    },
-  });
-
-  if (!tenant) {
-    throw new NotFoundError("Tenant not found");
+    return {
+      id: tenant.tenant.id,
+      name: tenant.tenant.name,
+      document: tenant.tenant.document ?? undefined,
+      institutionType: tenant.tenant.institutionType,
+      status: tenant.tenant.status,
+      createdAt: tenant.tenant.createdAt,
+    };
   }
 
-  return tenant;
-}
+  /**
+   * Gera senha segura de 16 caracteres usando crypto.randomBytes.
+   */
+  private generateSecurePassword(): string {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%";
+    const bytes = crypto.randomBytes(16);
+    return Array.from(bytes)
+      .map((b) => chars[b % chars.length])
+      .join("");
+  }
 
-/**
- * Lista todos os tenants (super admin only)
- */
-export async function listTenants(limit: number = 50, offset: number = 0) {
-  const tenants = await prisma.tenant.findMany({
-    take: limit,
-    skip: offset,
-    include: {
-      plan: true,
-      _count: {
-        select: { users: true },
+  /**
+   * Atualiza um tenant existente (super_admin only).
+   */
+  async update(tenantId: string, input: UpdateTenantInput): Promise<TenantOutput> {
+    const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId } });
+    if (!tenant) throw new NotFoundError("Tenant not found");
+
+    // Se planId foi alterado, validar que o novo plano existe
+    if (input.planId && input.planId !== tenant.planId) {
+      const newPlan = await this.prisma.plan.findUnique({ where: { id: input.planId } });
+      if (!newPlan) throw new NotFoundError("Plan not found");
+      if (!newPlan.isActive) throw new ValidationError("Plan is not active");
+    }
+    
+    const updated = await this.prisma.tenant.update({
+      where: { id: tenantId },
+      data: {
+        ...(input.status && { status: input.status }),
+        ...(input.name && { name: input.name }),
+        ...(input.document !== undefined && { document: input.document }),
+        ...(input.institutionType && { institutionType: input.institutionType }),
+        ...(input.planId && { planId: input.planId }),
+        ...(input.timezone && { timezone: input.timezone }),
       },
-    },
-    orderBy: { createdAt: "desc" },
-  });
+    });
 
-  const total = await prisma.tenant.count();
+    this.logger.info({ tenantId }, "Tenant updated");
 
-  return {
-    data: tenants,
-    pagination: {
-      total,
-      limit,
-      offset,
-    },
-  };
+    return {
+      id: updated.id,
+      name: updated.name,
+      document: updated.document ?? undefined,
+      institutionType: updated.institutionType,
+      status: updated.status,
+      createdAt: updated.createdAt,
+    };
+  }
+
+  /**
+   * Ativa um tenant (status -> 'active').
+   */
+  async activate(tenantId: string): Promise<TenantOutput> {
+    const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId } });
+    if (!tenant) throw new NotFoundError("Tenant not found");
+
+    const updated = await this.prisma.tenant.update({
+      where: { id: tenantId },
+      data: { status: "active" },
+    });
+
+    this.logger.info({ tenantId }, "Tenant activated");
+
+    return {
+      id: updated.id,
+      name: updated.name,
+      document: updated.document ?? undefined,
+      institutionType: updated.institutionType,
+      status: updated.status,
+      createdAt: updated.createdAt,
+    };
+  }
+
+  /**
+   * Desativa um tenant (status -> 'suspended').
+   */
+  async deactivate(tenantId: string): Promise<TenantOutput> {
+    const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId } });
+    if (!tenant) throw new NotFoundError("Tenant not found");
+
+    const updated = await this.prisma.tenant.update({
+      where: { id: tenantId },
+      data: { status: "suspended" },
+    });
+
+    this.logger.info({ tenantId }, "Tenant deactivated");
+
+    return {
+      id: updated.id,
+      name: updated.name,
+      document: updated.document ?? undefined,
+      institutionType: updated.institutionType,
+      status: updated.status,
+      createdAt: updated.createdAt,
+    };
+  }
+
+  /**
+   * Cancela um tenant (status -> 'cancelled').
+   */
+  async cancel(tenantId: string): Promise<TenantOutput> {
+    const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId } });
+    if (!tenant) throw new NotFoundError("Tenant not found");
+
+    const updated = await this.prisma.tenant.update({
+      where: { id: tenantId },
+      data: { status: "cancelled" },
+    });
+
+    this.logger.info({ tenantId }, "Tenant cancelled");
+
+    return {
+      id: updated.id,
+      name: updated.name,
+      document: updated.document ?? undefined,
+      institutionType: updated.institutionType,
+      status: updated.status,
+      createdAt: updated.createdAt,
+    };
+  }
 }
+
+export const tenantsService = new TenantsService();

@@ -54,15 +54,15 @@ export const DatabaseURISchema = z
 // ── Contexto de tenant extraído do JWT ────────────────────────────────────
 
 export interface TenantContext {
-  tenantId: number;
-  userId: number;
+  tenantId: string;
+  userId: string;
   role: "super_admin" | "admin" | "manager" | "teacher" | "student";
   email: string;
 }
 
 export interface JWTPayload {
-  sub: number; // user_id
-  tenantId: number;
+  sub: string; // user_id
+  tenantId: string;
   role: string;
   email: string;
   iat: number;

@@ -5,13 +5,7 @@
 
 import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
-import {
-  listPlans,
-  getPlanById,
-  createPlan,
-  updatePlan,
-  deactivatePlan,
-} from "../services/plans.service";
+import { plansService } from "../services/plans.service";
 import { authenticate, requireSuperAdmin } from "../middleware/authenticate";
 import { validate } from "../middleware/validate";
 
@@ -44,8 +38,15 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const showAll = req.tenant!.role === "super_admin" && req.query.all === "true";
-      const plans = await listPlans(!showAll);
-      res.json({ data: plans });
+      const result = await plansService.list({
+        onlyActive: !showAll,
+        page: req.query.page ? parseInt(req.query.page as string, 10) : undefined,
+        limit: req.query.limit ? parseInt(req.query.limit as string, 10) : undefined,
+        sortBy: req.query.sortBy as string | undefined,
+        sortOrder: req.query.sortOrder as "asc" | "desc" | undefined,
+        search: req.query.search as string | undefined,
+      });
+      res.json(result);
     } catch (error) {
       next(error);
     }
@@ -61,7 +62,7 @@ router.get(
   authenticate,
   async (req: Request<{ id: string }>, res: Response, next: NextFunction) => {
     try {
-      const plan = await getPlanById(parseInt(req.params.id, 10));
+      const plan = await plansService.findById(req.params.id);
       res.json({ data: plan });
     } catch (error) {
       next(error);
@@ -80,7 +81,7 @@ router.post(
   validate(CreatePlanSchema),
   async (req: Request<{}, {}, CreatePlanRequest>, res: Response, next: NextFunction) => {
     try {
-      const plan = await createPlan(req.body);
+      const plan = await plansService.create(req.body);
       res.status(201).json({ data: plan });
     } catch (error) {
       next(error);
@@ -103,7 +104,7 @@ router.patch(
     next: NextFunction
   ) => {
     try {
-      const plan = await updatePlan(parseInt(req.params.id, 10), req.body);
+      const plan = await plansService.update(req.params.id, req.body);
       res.json({ data: plan });
     } catch (error) {
       next(error);
@@ -121,7 +122,7 @@ router.delete(
   requireSuperAdmin,
   async (req: Request<{ id: string }>, res: Response, next: NextFunction) => {
     try {
-      await deactivatePlan(parseInt(req.params.id, 10));
+      await plansService.deactivate(req.params.id);
       res.status(204).send();
     } catch (error) {
       next(error);

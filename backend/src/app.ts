@@ -8,15 +8,30 @@ import helmet from "helmet";
 import { config } from "./lib/config";
 import { logger } from "./lib/logger";
 import { errorHandler } from "./middleware/errorHandler";
+import { createGlobalLimiter, createLoginLimiter, createAuthLimiter } from "./middleware/rateLimit";
 
 // Routes
 import authRoutes from "./routes/auth";
 import tenantRoutes from "./routes/tenants";
 import healthRoutes from "./routes/health";
 import planRoutes from "./routes/plans";
+import tenantSettingsRoutes from "./routes/tenant-settings";
+import devicesRoutes from "./routes/devices";
+import locationsRoutes from "./routes/locations";
+import academicPeriodsRoutes from "./routes/academic-periods";
+import coursesRoutes from "./routes/courses";
+import classesRoutes from "./routes/classes";
+import classEnrollmentsRoutes from "./routes/class-enrollments";
+import classSessionsRoutes from "./routes/class-sessions";
+import usersRoutes from "./routes/users";
 
 export function createApp(): Express {
   const app = express();
+
+  // Criar limiters após o Redis já estar conectado
+  const globalLimiter = createGlobalLimiter();
+  const loginLimiter = createLoginLimiter();
+  const authLimiter = createAuthLimiter();
 
   // Security
   app.use(helmet());
@@ -29,9 +44,17 @@ export function createApp(): Express {
     })
   );
 
-  // Body parsing
-  app.use(express.json({ limit: "10mb" }));
-  app.use(express.urlencoded({ limit: "10mb", extended: true }));
+  // Rate limiting global
+  app.use(globalLimiter);
+
+  // Body parsing — limites pequenos por rota (segurança contra payload bombing)
+  // Rotas de auth e admin só precisam de JSON mínimo
+  app.use("/auth",    express.json({ limit: "16kb" }), express.urlencoded({ limit: "16kb", extended: false }));
+  app.use("/plans",   express.json({ limit: "16kb" }), express.urlencoded({ limit: "16kb", extended: false }));
+  app.use("/tenants", express.json({ limit: "64kb" }), express.urlencoded({ limit: "64kb", extended: false }));
+  // Fallback para rotas futuras (ex: upload de frames via face engine)
+  app.use(express.json({ limit: "1mb" }));
+  app.use(express.urlencoded({ limit: "1mb", extended: true }));
 
   // Request logging
   app.use((_req: Request, res: Response, next: NextFunction) => {
@@ -55,9 +78,20 @@ export function createApp(): Express {
 
   // Routes
   app.use("/health", healthRoutes);
+  app.use("/auth/login", loginLimiter);
+  app.use("/auth", authLimiter);
   app.use("/auth", authRoutes);
   app.use("/tenants", tenantRoutes);
   app.use("/plans", planRoutes);
+  app.use("/tenant-settings", tenantSettingsRoutes);
+  app.use("/devices", devicesRoutes);
+  app.use("/locations", locationsRoutes);
+  app.use("/academic-periods", academicPeriodsRoutes);
+  app.use("/courses", coursesRoutes);
+  app.use("/classes", classesRoutes);
+  app.use("/class-enrollments", classEnrollmentsRoutes);
+  app.use("/class-sessions", classSessionsRoutes);
+  app.use("/users", usersRoutes);
 
   // 404 handler
   app.use((_req: Request, res: Response) => {

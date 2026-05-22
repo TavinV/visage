@@ -3,12 +3,16 @@
  */
 
 import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
+
+const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL as string });
 
 const globalForPrisma = global as unknown as { prisma: PrismaClient };
 
 export const prisma =
   globalForPrisma.prisma ||
   new PrismaClient({
+    adapter,
     log: [
       {
         emit: "event",
@@ -24,10 +28,6 @@ export const prisma =
       },
     ],
   });
-
-// Log queries em desenvolvimento (desabilitado por padrão)
-// Prisma $on events têm typing complexo em versions recentes
-// Se precisar de logs de query, configure via DATABASE_URL ou use Prisma Studio
 if (false) {
   // prisma.$on events aqui
 }

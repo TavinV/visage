@@ -12,6 +12,15 @@ export function errorHandler(
   res: Response,
   _next: NextFunction
 ): void {
+  // Tratar SyntaxError do body-parser (JSON parsing)
+  if (error instanceof SyntaxError && "body" in error) {
+    res.status(400).json({
+      error: "Invalid JSON in request body",
+      code: "invalid_json",
+    });
+    return;
+  }
+
   if (isHttpError(error)) {
     res.status(error.status).json({
       error: error.message,
@@ -31,3 +40,4 @@ export function errorHandler(
     code: "internal_error",
   });
 }
+

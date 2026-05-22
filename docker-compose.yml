@@ -80,8 +80,6 @@ volumes:
     driver: local
   fraud_frames:
     driver: local
-  fraud_frames:
-    driver: local
 
 networks:
   default:
