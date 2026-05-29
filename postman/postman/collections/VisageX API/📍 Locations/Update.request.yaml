@@ -1,0 +1,12 @@
+$kind: http-request
+url: "{{baseUrl}}/locations/{{createdLocationId}}"
+method: PATCH
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "name": "Campus Centro — Bloco A (renomeado)"
+    }
+order: 4000

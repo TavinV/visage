@@ -1,0 +1,18 @@
+$kind: http-request
+url: "{{baseUrl}}/tenants?page=1&limit=20"
+method: GET
+queryParams:
+  - key: page
+    value: "1"
+  - key: limit
+    value: "20"
+  - key: status
+    value: active
+    disabled: true
+  - key: institutionType
+    value: school
+    disabled: true
+  - key: search
+    value: UMC
+    disabled: true
+order: 1000

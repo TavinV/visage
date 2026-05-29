@@ -1,0 +1,4 @@
+$kind: http-request
+url: "{{baseUrl}}/tenants/{{createdTenantId}}/activate"
+method: POST
+order: 6000

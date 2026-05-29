@@ -5,7 +5,7 @@ agent: agent
 tools: [read, edit, search]
 ---
 
-Crie uma rota Express para o backend VisageX seguindo as instruções em [backend.instructions.md](../instructions/backend.instructions.md).
+Crie uma rota Express para o backend VisageX seguindo as instruções em [backend.instructions.md](../instructions/backend.instructions.md) e [postman.instructions.md](../instructions/postman.instructions.md).
 
 ## Requisitos
 
@@ -18,6 +18,7 @@ A rota deve incluir:
 5. Todas as queries Prisma com `where: { tenantId }` obrigatório
 6. Tratamento de erro com `{ error: string, code: string }`
 7. Tipos TypeScript explícitos — sem `any`
+8. **Arquivo(s) `.request.yaml`** na pasta correta de `postman/postman/collections/VisageX API/` para cada endpoint criado, seguindo as regras de `postman.instructions.md` (auth herdado, `pm.collectionVariables` exclusivo, `created<Domínio>Id` para POSTs)
 
 ## Rota solicitada
 

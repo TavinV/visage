@@ -9,6 +9,7 @@
 
 import { BaseService, ListParams, PaginatedResult } from "./base.service";
 import { NotFoundError, ConflictError, ValidationError } from "../utils/errors";
+import { normalizeDocument, isValidCpf } from "../utils/cpfQr";
 import bcryptjs from "bcryptjs";
 
 // ── DTOs ──────────────────────────────────────────────────────────────────────
@@ -155,6 +156,21 @@ class UsersService extends BaseService {
       passwordHash = await bcryptjs.hash(input.password, 12);
     }
 
+    const normalizedDoc = input.document ? normalizeDocument(input.document) : null;
+
+    // Validar CPF matematicamente (dígitos verificadores)
+    if (normalizedDoc && !isValidCpf(normalizedDoc)) {
+      throw new ValidationError("invalid_cpf");
+    }
+
+    // Validar CPF único no tenant quando fornecido
+    if (normalizedDoc) {
+      const docExists = await this.prisma.user.findFirst({
+        where: { tenantId: input.tenantId, document: normalizedDoc },
+      });
+      if (docExists) throw new ConflictError("document_already_exists");
+    }
+
     const user = await this.prisma.user.create({
       data: {
         tenantId: input.tenantId,
@@ -162,7 +178,7 @@ class UsersService extends BaseService {
         email: input.email || null,
         role: input.role,
         passwordHash,
-        document: input.document || null,
+        document: normalizedDoc,
         enrollmentCode: input.enrollmentCode || null,
         status: "active",
       },
@@ -214,7 +230,11 @@ class UsersService extends BaseService {
         ...(input.name && { name: input.name }),
         ...(input.email && { email: input.email }),
         ...(input.role && { role: input.role }),
-        ...(input.document !== undefined && { document: input.document || null }),
+        ...(input.document !== undefined && (() => {
+          const doc = input.document ? normalizeDocument(input.document) : null;
+          if (doc && !isValidCpf(doc)) throw new ValidationError("invalid_cpf");
+          return { document: doc };
+        })()),
         ...(input.enrollmentCode !== undefined && {
           enrollmentCode: input.enrollmentCode || null,
         }),

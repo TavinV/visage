@@ -1,0 +1,12 @@
+$kind: http-request
+url: "{{baseUrl}}/locations?page=1&limit=20"
+method: GET
+queryParams:
+  - key: page
+    value: "1"
+  - key: limit
+    value: "20"
+  - key: isActive
+    value: "true"
+    disabled: true
+order: 1000

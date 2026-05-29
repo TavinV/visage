@@ -1,0 +1,13 @@
+$kind: http-request
+url: "{{baseUrl}}/plans/{{createdPlanId}}"
+method: PATCH
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "priceMonthly": 249.90,
+      "maxClasses": 50
+    }
+order: 4000

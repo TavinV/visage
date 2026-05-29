@@ -1,0 +1,4 @@
+$kind: http-request
+url: "{{baseUrl}}/tenants/{{createdTenantId}}/deactivate"
+method: POST
+order: 7000

@@ -1,0 +1,1086 @@
+{
+  "info": {
+    "_postman_id": "visagex-api-collection-2026",
+    "name": "VisageX API",
+    "description": "## VisageX — API Collection\n\nColeção oficial da API REST do **VisageX** (sistema SaaS de chamada escolar com reconhecimento facial).\n\n### Convenções\n\n- **Base URL** configurada na variável `baseUrl` (default: `http://localhost:3000`).\n- **Autenticação** via `Authorization: Bearer {{accessToken}}` — herdada por todos os requests da coleção.\n- Após **Login**, o `accessToken`, `refreshToken`, `tenantId`, `userId` e `currentRole` são salvos automaticamente nas **variáveis da coleção** (não globais).\n- Cada login também salva tokens separados por contexto: `superAdminAccessToken`, `umcAccessToken`, `senaiAccessToken` — para troca rápida sem refazer login.\n- Após **POSTs de criação**, o ID do recurso é salvo automaticamente (ex.: `createdPlanId`, `createdUserId`, `createdLocationId`).\n- Todo endpoint retorna envelope `{ data: ... }` ou `{ data: [...], pagination: {...} }`.\n- Erros sempre no formato `{ error: string, code: string }` com status HTTP apropriado.\n\n### Multi-tenant\n\n- **super_admin**: gerencia planos e tenants. Login com `SUPER_ADMIN_EMAIL`/`SUPER_ADMIN_PASSWORD` do `.env`.\n- **admin de tenant**: gerencia tudo dentro do seu próprio tenant. Logins de exemplo:\n  - UMC: `otavioviniciusads@gmail.com`\n  - SENAI: `otavioviniciusflauzino@gmail.com`\n\n### Fluxo recomendado para começar\n\n1. Rode `Health → Check`.\n2. `Auth → Login — Super Admin` (cria as variáveis de sessão).\n3. `Plans → List` para verificar planos seedados.\n4. `Tenants → Create` para criar UMC e SENAI (se ainda não existem).\n5. `Auth → Login — UMC Admin` ou `Auth → Login — SENAI Admin` para operar como admin de tenant.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      { "key": "token", "value": "{{accessToken}}", "type": "string" }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Pre-request global — não faz nada por padrão.",
+          "// Cada request pode ter o seu próprio script."
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Test global — verifica formato de erro padrão em respostas 4xx/5xx.",
+          "if (pm.response.code >= 400) {",
+          "  pm.test('Erro segue contrato { error, code }', function () {",
+          "    const json = pm.response.json();",
+          "    pm.expect(json).to.have.property('error');",
+          "    pm.expect(json).to.have.property('code');",
+          "  });",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000", "type": "string", "description": "URL base do backend Express." },
+
+    { "key": "accessToken", "value": "", "type": "string", "description": "JWT de acesso ativo (preenchido automaticamente após login)." },
+    { "key": "refreshToken", "value": "", "type": "string", "description": "Refresh token opaco ativo." },
+    { "key": "tenantId", "value": "", "type": "string", "description": "tenantId do usuário ativo." },
+    { "key": "userId", "value": "", "type": "string", "description": "userId do usuário ativo." },
+    { "key": "currentRole", "value": "", "type": "string", "description": "Role do usuário ativo (super_admin | admin | manager | teacher | student)." },
+
+    { "key": "superAdminEmail", "value": "admin@visagex.local", "type": "string" },
+    { "key": "superAdminPassword", "value": "Ota@47802341825", "type": "string" },
+    { "key": "superAdminAccessToken", "value": "", "type": "string" },
+    { "key": "superAdminRefreshToken", "value": "", "type": "string" },
+
+    { "key": "umcEmail", "value": "otavioviniciusads@gmail.com", "type": "string" },
+    { "key": "umcPassword", "value": "Ota@181207", "type": "string" },
+    { "key": "umcAccessToken", "value": "", "type": "string" },
+    { "key": "umcRefreshToken", "value": "", "type": "string" },
+    { "key": "umcTenantId", "value": "", "type": "string" },
+
+    { "key": "senaiEmail", "value": "otavioviniciusflauzino@gmail.com", "type": "string" },
+    { "key": "senaiPassword", "value": "Ota@181207", "type": "string" },
+    { "key": "senaiAccessToken", "value": "", "type": "string" },
+    { "key": "senaiRefreshToken", "value": "", "type": "string" },
+    { "key": "senaiTenantId", "value": "", "type": "string" },
+
+    { "key": "createdPlanId", "value": "", "type": "string" },
+    { "key": "createdTenantId", "value": "", "type": "string" },
+    { "key": "createdUserId", "value": "", "type": "string" },
+    { "key": "createdLocationId", "value": "", "type": "string" },
+    { "key": "createdDeviceId", "value": "", "type": "string" },
+    { "key": "createdAcademicPeriodId", "value": "", "type": "string" },
+    { "key": "createdCourseId", "value": "", "type": "string" },
+    { "key": "createdClassId", "value": "", "type": "string" },
+    { "key": "createdClassSessionId", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "🏥 Health",
+      "description": "Endpoint público de status.",
+      "item": [
+        {
+          "name": "Check",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/health", "host": ["{{baseUrl}}"], "path": ["health"] },
+            "description": "Retorna `{ status: 'ok', timestamp }` se o backend estiver no ar."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "🔐 Auth",
+      "description": "Login (Access + Refresh Token), refresh com rotação e logout. Cada login salva os tokens **a nível da coleção** e também numa variável específica do contexto (super admin / UMC / SENAI) para troca rápida.",
+      "item": [
+        {
+          "name": "Login — Super Admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const { data } = pm.response.json();",
+                  "pm.collectionVariables.set('accessToken', data.accessToken);",
+                  "pm.collectionVariables.set('refreshToken', data.refreshToken);",
+                  "pm.collectionVariables.set('tenantId', data.user.tenantId);",
+                  "pm.collectionVariables.set('userId', data.user.id);",
+                  "pm.collectionVariables.set('currentRole', data.user.role);",
+                  "pm.collectionVariables.set('superAdminAccessToken', data.accessToken);",
+                  "pm.collectionVariables.set('superAdminRefreshToken', data.refreshToken);",
+                  "console.log('[Auth] Logado como super_admin:', data.user.email);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{superAdminEmail}}\",\n  \"password\": \"{{superAdminPassword}}\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/auth/login", "host": ["{{baseUrl}}"], "path": ["auth", "login"] },
+            "description": "Faz login com o Super Admin do bootstrap (env `SUPER_ADMIN_EMAIL`/`SUPER_ADMIN_PASSWORD`).\n\nSalva nas variáveis: `accessToken`, `refreshToken`, `tenantId`, `userId`, `currentRole`, `superAdminAccessToken`, `superAdminRefreshToken`."
+          }
+        },
+        {
+          "name": "Login — UMC Admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const { data } = pm.response.json();",
+                  "pm.collectionVariables.set('accessToken', data.accessToken);",
+                  "pm.collectionVariables.set('refreshToken', data.refreshToken);",
+                  "pm.collectionVariables.set('tenantId', data.user.tenantId);",
+                  "pm.collectionVariables.set('userId', data.user.id);",
+                  "pm.collectionVariables.set('currentRole', data.user.role);",
+                  "pm.collectionVariables.set('umcAccessToken', data.accessToken);",
+                  "pm.collectionVariables.set('umcRefreshToken', data.refreshToken);",
+                  "pm.collectionVariables.set('umcTenantId', data.user.tenantId);",
+                  "console.log('[Auth] Logado como UMC admin:', data.user.email);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{umcEmail}}\",\n  \"password\": \"{{umcPassword}}\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/auth/login", "host": ["{{baseUrl}}"], "path": ["auth", "login"] },
+            "description": "Login do admin do tenant UMC. Salva também em `umcAccessToken` e `umcTenantId`."
+          }
+        },
+        {
+          "name": "Login — SENAI Admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const { data } = pm.response.json();",
+                  "pm.collectionVariables.set('accessToken', data.accessToken);",
+                  "pm.collectionVariables.set('refreshToken', data.refreshToken);",
+                  "pm.collectionVariables.set('tenantId', data.user.tenantId);",
+                  "pm.collectionVariables.set('userId', data.user.id);",
+                  "pm.collectionVariables.set('currentRole', data.user.role);",
+                  "pm.collectionVariables.set('senaiAccessToken', data.accessToken);",
+                  "pm.collectionVariables.set('senaiRefreshToken', data.refreshToken);",
+                  "pm.collectionVariables.set('senaiTenantId', data.user.tenantId);",
+                  "console.log('[Auth] Logado como SENAI admin:', data.user.email);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{senaiEmail}}\",\n  \"password\": \"{{senaiPassword}}\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/auth/login", "host": ["{{baseUrl}}"], "path": ["auth", "login"] },
+            "description": "Login do admin do tenant SENAI. Salva também em `senaiAccessToken` e `senaiTenantId`."
+          }
+        },
+        {
+          "name": "Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const { data } = pm.response.json();",
+                  "pm.collectionVariables.set('accessToken', data.accessToken);",
+                  "pm.collectionVariables.set('refreshToken', data.refreshToken);",
+                  "console.log('[Auth] Tokens rotacionados');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/auth/refresh", "host": ["{{baseUrl}}"], "path": ["auth", "refresh"] },
+            "description": "Troca o refresh token ativo por um novo par (access + refresh). O refresh antigo é invalidado (rotação)."
+          }
+        },
+        {
+          "name": "Logout",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('204 No Content', () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set('accessToken', '');",
+                  "pm.collectionVariables.set('refreshToken', '');",
+                  "pm.collectionVariables.set('tenantId', '');",
+                  "pm.collectionVariables.set('userId', '');",
+                  "pm.collectionVariables.set('currentRole', '');",
+                  "console.log('[Auth] Sessão encerrada');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/auth/logout", "host": ["{{baseUrl}}"], "path": ["auth", "logout"] },
+            "description": "Revoga o refresh token e limpa as variáveis de sessão da coleção."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "📋 Plans (super_admin)",
+      "item": [
+        {
+          "name": "List",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/plans?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["plans"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "all", "value": "true", "description": "Inclui inativos (super_admin)", "disabled": true },
+                { "key": "search", "value": "", "disabled": true },
+                { "key": "sortBy", "value": "createdAt", "disabled": true },
+                { "key": "sortOrder", "value": "desc", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get by ID",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/plans/{{createdPlanId}}", "host": ["{{baseUrl}}"], "path": ["plans", "{{createdPlanId}}"] }
+          }
+        },
+        {
+          "name": "Create",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const { data } = pm.response.json();",
+                  "pm.collectionVariables.set('createdPlanId', data.id);",
+                  "console.log('[Plans] createdPlanId =', data.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Plano Demo\",\n  \"maxClasses\": 30,\n  \"priceMonthly\": 199.90\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/plans", "host": ["{{baseUrl}}"], "path": ["plans"] }
+          }
+        },
+        {
+          "name": "Update",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"priceMonthly\": 249.90,\n  \"maxClasses\": 50\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/plans/{{createdPlanId}}", "host": ["{{baseUrl}}"], "path": ["plans", "{{createdPlanId}}"] }
+          }
+        },
+        {
+          "name": "Deactivate (soft delete)",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{baseUrl}}/plans/{{createdPlanId}}", "host": ["{{baseUrl}}"], "path": ["plans", "{{createdPlanId}}"] }
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "🏢 Tenants (super_admin)",
+      "item": [
+        {
+          "name": "List",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/tenants?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["tenants"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "status", "value": "active", "disabled": true },
+                { "key": "institutionType", "value": "school", "disabled": true },
+                { "key": "search", "value": "UMC", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get by ID",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/tenants/{{createdTenantId}}", "host": ["{{baseUrl}}"], "path": ["tenants", "{{createdTenantId}}"] }
+          }
+        },
+        {
+          "name": "Create — UMC",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const { data } = pm.response.json();",
+                  "pm.collectionVariables.set('createdTenantId', data.id || data.tenant?.id);",
+                  "if (data.tenant?.id) pm.collectionVariables.set('umcTenantId', data.tenant.id);",
+                  "else if (data.id) pm.collectionVariables.set('umcTenantId', data.id);",
+                  "console.log('[Tenants] umcTenantId =', pm.collectionVariables.get('umcTenantId'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Universidade de Mogi das Cruzes\",\n  \"document\": \"43.069.421/0001-04\",\n  \"institutionType\": \"university\",\n  \"planId\": \"{{createdPlanId}}\",\n  \"adminUser\": {\n    \"name\": \"Otávio Vinícius (UMC)\",\n    \"email\": \"{{umcEmail}}\"\n  }\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/tenants", "host": ["{{baseUrl}}"], "path": ["tenants"] },
+            "description": "Cria o tenant UMC. O backend envia a senha temporária do admin por e-mail."
+          }
+        },
+        {
+          "name": "Create — SENAI",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const { data } = pm.response.json();",
+                  "pm.collectionVariables.set('createdTenantId', data.id || data.tenant?.id);",
+                  "if (data.tenant?.id) pm.collectionVariables.set('senaiTenantId', data.tenant.id);",
+                  "else if (data.id) pm.collectionVariables.set('senaiTenantId', data.id);",
+                  "console.log('[Tenants] senaiTenantId =', pm.collectionVariables.get('senaiTenantId'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"SENAI Mogi das Cruzes\",\n  \"document\": \"33.564.749/0001-09\",\n  \"institutionType\": \"school\",\n  \"planId\": \"{{createdPlanId}}\",\n  \"adminUser\": {\n    \"name\": \"Otávio Vinícius (SENAI)\",\n    \"email\": \"{{senaiEmail}}\"\n  }\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/tenants", "host": ["{{baseUrl}}"], "path": ["tenants"] }
+          }
+        },
+        {
+          "name": "Update",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"timezone\": \"America/Sao_Paulo\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/tenants/{{createdTenantId}}", "host": ["{{baseUrl}}"], "path": ["tenants", "{{createdTenantId}}"] }
+          }
+        },
+        {
+          "name": "Activate",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{baseUrl}}/tenants/{{createdTenantId}}/activate", "host": ["{{baseUrl}}"], "path": ["tenants", "{{createdTenantId}}", "activate"] }
+          }
+        },
+        {
+          "name": "Deactivate (suspend)",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{baseUrl}}/tenants/{{createdTenantId}}/deactivate", "host": ["{{baseUrl}}"], "path": ["tenants", "{{createdTenantId}}", "deactivate"] }
+          }
+        },
+        {
+          "name": "Cancel",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{baseUrl}}/tenants/{{createdTenantId}}/cancel", "host": ["{{baseUrl}}"], "path": ["tenants", "{{createdTenantId}}", "cancel"] }
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "⚙️ Tenant Settings",
+      "description": "Configurações de threshold, modos (pré-presença, checkout), enrollment e fraud frames. Admin do tenant.",
+      "item": [
+        {
+          "name": "Get",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/tenant-settings", "host": ["{{baseUrl}}"], "path": ["tenant-settings"] }
+          }
+        },
+        {
+          "name": "Update",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"recognitionThreshold\": 1.10,\n  \"livenessThreshold\": 0.85,\n  \"livenessEnabled\": true,\n  \"preAttendanceEnabled\": true,\n  \"preAttendanceWindowMin\": 30,\n  \"individualCheckoutEnabled\": false,\n  \"enrollmentTokenExpiryHours\": 72,\n  \"requireConsentBeforeFacial\": true,\n  \"enrollmentMultiFrameCount\": 3,\n  \"livenessThresholdEnrollment\": 0.90\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/tenant-settings", "host": ["{{baseUrl}}"], "path": ["tenant-settings"] }
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "👥 Users",
+      "description": "CRUD de usuários do tenant (admin only) + perfil e troca de senha do próprio usuário.\n\nCPF é normalizado automaticamente (pontos/hífens removidos) e validado matematicamente (dígitos verificadores).",
+      "item": [
+        {
+          "name": "List",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/users?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["users"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "role", "value": "student", "disabled": true },
+                { "key": "status", "value": "active", "disabled": true },
+                { "key": "search", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create — Student",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const { data } = pm.response.json();",
+                  "pm.collectionVariables.set('createdUserId', data.id);",
+                  "console.log('[Users] createdUserId =', data.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Aluno Teste\",\n  \"role\": \"student\",\n  \"document\": \"529.982.247-25\",\n  \"enrollmentCode\": \"2026001\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/users", "host": ["{{baseUrl}}"], "path": ["users"] },
+            "description": "Cria um aluno (sem e-mail, sem senha). CPF pode vir com ou sem formatação — é normalizado para dígitos puros antes de salvar."
+          }
+        },
+        {
+          "name": "Create — Teacher",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Professor Teste\",\n  \"email\": \"prof.teste@example.com\",\n  \"password\": \"Senha@12345\",\n  \"role\": \"teacher\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/users", "host": ["{{baseUrl}}"], "path": ["users"] }
+          }
+        },
+        {
+          "name": "My Profile",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/users/me/profile", "host": ["{{baseUrl}}"], "path": ["users", "me", "profile"] },
+            "description": "Retorna o perfil do usuário autenticado (qualquer role)."
+          }
+        },
+        {
+          "name": "Get by ID",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/users/{{createdUserId}}", "host": ["{{baseUrl}}"], "path": ["users", "{{createdUserId}}"] }
+          }
+        },
+        {
+          "name": "Update",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Aluno Teste (atualizado)\",\n  \"status\": \"active\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/users/{{createdUserId}}", "host": ["{{baseUrl}}"], "path": ["users", "{{createdUserId}}"] }
+          }
+        },
+        {
+          "name": "Change Password (self)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"Senha@12345\",\n  \"newPassword\": \"NovaSenha@123\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/users/change-password", "host": ["{{baseUrl}}"], "path": ["users", "change-password"] },
+            "description": "Altera a senha do usuário autenticado."
+          }
+        },
+        {
+          "name": "Reset Password (admin)",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{baseUrl}}/users/{{createdUserId}}/reset-password", "host": ["{{baseUrl}}"], "path": ["users", "{{createdUserId}}", "reset-password"] },
+            "description": "Admin gera uma senha temporária para o usuário. Retorna `{ temporaryPassword }`."
+          }
+        },
+        {
+          "name": "Delete",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{baseUrl}}/users/{{createdUserId}}", "host": ["{{baseUrl}}"], "path": ["users", "{{createdUserId}}"] }
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "📍 Locations",
+      "item": [
+        {
+          "name": "List",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/locations?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["locations"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "isActive", "value": "true", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const { data } = pm.response.json();",
+                  "pm.collectionVariables.set('createdLocationId', data.id);",
+                  "console.log('[Locations] createdLocationId =', data.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Campus Centro — Bloco A\",\n  \"address\": \"Av. Cândido Xavier de Almeida e Souza, 200\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/locations", "host": ["{{baseUrl}}"], "path": ["locations"] }
+          }
+        },
+        {
+          "name": "Get by ID",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/locations/{{createdLocationId}}", "host": ["{{baseUrl}}"], "path": ["locations", "{{createdLocationId}}"] }
+          }
+        },
+        {
+          "name": "Update",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Campus Centro — Bloco A (renomeado)\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/locations/{{createdLocationId}}", "host": ["{{baseUrl}}"], "path": ["locations", "{{createdLocationId}}"] }
+          }
+        },
+        {
+          "name": "Delete",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{baseUrl}}/locations/{{createdLocationId}}", "host": ["{{baseUrl}}"], "path": ["locations", "{{createdLocationId}}"] }
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "📱 Devices",
+      "item": [
+        {
+          "name": "List",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/devices?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["devices"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "isActive", "value": "true", "disabled": true },
+                { "key": "locationId", "value": "{{createdLocationId}}", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const { data } = pm.response.json();",
+                  "pm.collectionVariables.set('createdDeviceId', data.id);",
+                  "console.log('[Devices] createdDeviceId =', data.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceFingerprint\": \"totem-bloco-a-01\",\n  \"label\": \"Totem entrada Bloco A\",\n  \"locationId\": \"{{createdLocationId}}\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/devices", "host": ["{{baseUrl}}"], "path": ["devices"] }
+          }
+        },
+        {
+          "name": "Get by ID",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/devices/{{createdDeviceId}}", "host": ["{{baseUrl}}"], "path": ["devices", "{{createdDeviceId}}"] }
+          }
+        },
+        {
+          "name": "Update",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"Totem entrada principal\",\n  \"isActive\": true\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/devices/{{createdDeviceId}}", "host": ["{{baseUrl}}"], "path": ["devices", "{{createdDeviceId}}"] }
+          }
+        },
+        {
+          "name": "Delete",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{baseUrl}}/devices/{{createdDeviceId}}", "host": ["{{baseUrl}}"], "path": ["devices", "{{createdDeviceId}}"] }
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "📅 Academic Periods",
+      "item": [
+        {
+          "name": "List",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/academic-periods?page=1&limit=20", "host": ["{{baseUrl}}"], "path": ["academic-periods"], "query": [{ "key": "page", "value": "1" }, { "key": "limit", "value": "20" }] }
+          }
+        },
+        {
+          "name": "Create",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const { data } = pm.response.json();",
+                  "pm.collectionVariables.set('createdAcademicPeriodId', data.id);",
+                  "console.log('[AcademicPeriods] createdAcademicPeriodId =', data.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"2026/1\",\n  \"startsAt\": \"2026-02-01\",\n  \"endsAt\": \"2026-07-15\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/academic-periods", "host": ["{{baseUrl}}"], "path": ["academic-periods"] }
+          }
+        },
+        {
+          "name": "Get by ID",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/academic-periods/{{createdAcademicPeriodId}}", "host": ["{{baseUrl}}"], "path": ["academic-periods", "{{createdAcademicPeriodId}}"] }
+          }
+        },
+        {
+          "name": "Update",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"endsAt\": \"2026-07-20\"\n}" },
+            "url": { "raw": "{{baseUrl}}/academic-periods/{{createdAcademicPeriodId}}", "host": ["{{baseUrl}}"], "path": ["academic-periods", "{{createdAcademicPeriodId}}"] }
+          }
+        },
+        {
+          "name": "Delete",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{baseUrl}}/academic-periods/{{createdAcademicPeriodId}}", "host": ["{{baseUrl}}"], "path": ["academic-periods", "{{createdAcademicPeriodId}}"] }
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "📚 Courses",
+      "item": [
+        {
+          "name": "List",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/courses?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["courses"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "academicPeriodId", "value": "{{createdAcademicPeriodId}}", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const { data } = pm.response.json();",
+                  "pm.collectionVariables.set('createdCourseId', data.id);",
+                  "console.log('[Courses] createdCourseId =', data.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"academicPeriodId\": \"{{createdAcademicPeriodId}}\",\n  \"name\": \"Engenharia de Software\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/courses", "host": ["{{baseUrl}}"], "path": ["courses"] }
+          }
+        },
+        {
+          "name": "Get by ID",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/courses/{{createdCourseId}}", "host": ["{{baseUrl}}"], "path": ["courses", "{{createdCourseId}}"] }
+          }
+        },
+        {
+          "name": "Update",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Engenharia de Software — Bacharelado\"\n}" },
+            "url": { "raw": "{{baseUrl}}/courses/{{createdCourseId}}", "host": ["{{baseUrl}}"], "path": ["courses", "{{createdCourseId}}"] }
+          }
+        },
+        {
+          "name": "Delete",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{baseUrl}}/courses/{{createdCourseId}}", "host": ["{{baseUrl}}"], "path": ["courses", "{{createdCourseId}}"] }
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "🎓 Classes",
+      "item": [
+        {
+          "name": "List",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/classes?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["classes"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "courseId", "value": "{{createdCourseId}}", "disabled": true },
+                { "key": "teacherId", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const { data } = pm.response.json();",
+                  "pm.collectionVariables.set('createdClassId', data.id);",
+                  "console.log('[Classes] createdClassId =', data.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"courseId\": \"{{createdCourseId}}\",\n  \"name\": \"ES — Turma A (Noite)\",\n  \"teacherId\": \"{{createdUserId}}\",\n  \"room\": \"A-102\",\n  \"locationId\": \"{{createdLocationId}}\",\n  \"totalClassesPlanned\": 60\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/classes", "host": ["{{baseUrl}}"], "path": ["classes"] }
+          }
+        },
+        {
+          "name": "Get by ID",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/classes/{{createdClassId}}", "host": ["{{baseUrl}}"], "path": ["classes", "{{createdClassId}}"] }
+          }
+        },
+        {
+          "name": "Update",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"room\": \"A-205\"\n}" },
+            "url": { "raw": "{{baseUrl}}/classes/{{createdClassId}}", "host": ["{{baseUrl}}"], "path": ["classes", "{{createdClassId}}"] }
+          }
+        },
+        {
+          "name": "Delete",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{baseUrl}}/classes/{{createdClassId}}", "host": ["{{baseUrl}}"], "path": ["classes", "{{createdClassId}}"] }
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "📝 Class Enrollments",
+      "item": [
+        {
+          "name": "List",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/class-enrollments?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["class-enrollments"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "classId", "value": "{{createdClassId}}", "disabled": true },
+                { "key": "userId", "value": "{{createdUserId}}", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"classId\": \"{{createdClassId}}\",\n  \"userId\": \"{{createdUserId}}\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/class-enrollments", "host": ["{{baseUrl}}"], "path": ["class-enrollments"] }
+          }
+        },
+        {
+          "name": "Get by classId/userId",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/class-enrollments/{{createdClassId}}/{{createdUserId}}", "host": ["{{baseUrl}}"], "path": ["class-enrollments", "{{createdClassId}}", "{{createdUserId}}"] }
+          }
+        },
+        {
+          "name": "Delete",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{baseUrl}}/class-enrollments/{{createdClassId}}/{{createdUserId}}", "host": ["{{baseUrl}}"], "path": ["class-enrollments", "{{createdClassId}}", "{{createdUserId}}"] }
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "🗓️ Class Sessions",
+      "item": [
+        {
+          "name": "List",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/class-sessions?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["class-sessions"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "classId", "value": "{{createdClassId}}", "disabled": true },
+                { "key": "status", "value": "open", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const { data } = pm.response.json();",
+                  "pm.collectionVariables.set('createdClassSessionId', data.id);",
+                  "console.log('[ClassSessions] createdClassSessionId =', data.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"classId\": \"{{createdClassId}}\",\n  \"teacherId\": \"{{createdUserId}}\",\n  \"classesWorth\": 1\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/class-sessions", "host": ["{{baseUrl}}"], "path": ["class-sessions"] }
+          }
+        },
+        {
+          "name": "Get by ID",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/class-sessions/{{createdClassSessionId}}", "host": ["{{baseUrl}}"], "path": ["class-sessions", "{{createdClassSessionId}}"] }
+          }
+        },
+        {
+          "name": "Update",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"classesWorth\": 2\n}" },
+            "url": { "raw": "{{baseUrl}}/class-sessions/{{createdClassSessionId}}", "host": ["{{baseUrl}}"], "path": ["class-sessions", "{{createdClassSessionId}}"] }
+          }
+        },
+        {
+          "name": "Close",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{baseUrl}}/class-sessions/{{createdClassSessionId}}/close", "host": ["{{baseUrl}}"], "path": ["class-sessions", "{{createdClassSessionId}}", "close"] },
+            "description": "Encerra a sessão. Após `close`, alunos sem presença registrada são marcados como `absent`."
+          }
+        }
+      ]
+    }
+  ]
+}

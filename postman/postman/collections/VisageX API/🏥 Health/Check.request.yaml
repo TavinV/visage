@@ -1,0 +1,7 @@
+$kind: http-request
+description: "Retorna `{ status: 'ok', timestamp }` se o backend estiver no ar."
+url: "{{baseUrl}}/health"
+method: GET
+auth:
+  type: noauth
+order: 1000

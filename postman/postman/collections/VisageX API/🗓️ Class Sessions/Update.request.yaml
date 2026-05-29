@@ -1,0 +1,12 @@
+$kind: http-request
+url: "{{baseUrl}}/class-sessions/{{createdClassSessionId}}"
+method: PATCH
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "classesWorth": 2
+    }
+order: 4000

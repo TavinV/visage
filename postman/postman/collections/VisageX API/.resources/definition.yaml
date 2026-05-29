@@ -1,0 +1,83 @@
+$kind: collection
+description: |-
+  ## VisageX — API Collection
+
+  Coleção oficial da API REST do **VisageX** (sistema SaaS de chamada escolar com reconhecimento facial).
+
+  ### Convenções
+
+  - **Base URL** configurada na variável `baseUrl` (default: `http://localhost:3000`).
+  - **Autenticação** via `Authorization: Bearer {{accessToken}}` — herdada por todos os requests da coleção.
+  - Após **Login**, o `accessToken`, `refreshToken`, `tenantId`, `userId` e `currentRole` são salvos automaticamente nas **variáveis da coleção** (não globais).
+  - Cada login também salva tokens separados por contexto: `superAdminAccessToken`, `umcAccessToken`, `senaiAccessToken` — para troca rápida sem refazer login.
+  - Após **POSTs de criação**, o ID do recurso é salvo automaticamente (ex.: `createdPlanId`, `createdUserId`, `createdLocationId`).
+  - Todo endpoint retorna envelope `{ data: ... }` ou `{ data: [...], pagination: {...} }`.
+  - Erros sempre no formato `{ error: string, code: string }` com status HTTP apropriado.
+
+  ### Multi-tenant
+
+  - **super_admin**: gerencia planos e tenants. Login com `SUPER_ADMIN_EMAIL`/`SUPER_ADMIN_PASSWORD` do `.env`.
+  - **admin de tenant**: gerencia tudo dentro do seu próprio tenant. Logins de exemplo:
+    - UMC: `otavioviniciusads@gmail.com`
+    - SENAI: `otavioviniciusflauzino@gmail.com`
+
+  ### Fluxo recomendado para começar
+
+  1. Rode `Health → Check`.
+  2. `Auth → Login — Super Admin` (cria as variáveis de sessão).
+  3. `Plans → List` para verificar planos seedados.
+  4. `Tenants → Create` para criar UMC e SENAI (se ainda não existem).
+  5. `Auth → Login — UMC Admin` ou `Auth → Login — SENAI Admin` para operar como admin de tenant.
+variables:
+  baseUrl: http://localhost:3000
+  accessToken: ""
+  refreshToken: ""
+  tenantId: ""
+  userId: ""
+  currentRole: ""
+  superAdminEmail: admin@visagex.local
+  superAdminPassword: Ota@47802341825
+  superAdminAccessToken: ""
+  superAdminRefreshToken: ""
+  umcEmail: otavioviniciusads@gmail.com
+  umcPassword: Ota@181207
+  umcAccessToken: ""
+  umcRefreshToken: ""
+  umcTenantId: ""
+  senaiEmail: otavioviniciusflauzino@gmail.com
+  senaiPassword: Ota@181207
+  senaiAccessToken: ""
+  senaiRefreshToken: ""
+  senaiTenantId: ""
+  createdPlanId: ""
+  createdTenantId: ""
+  createdUserId: ""
+  createdLocationId: ""
+  createdDeviceId: ""
+  createdAcademicPeriodId: ""
+  createdCourseId: ""
+  createdClassId: ""
+  createdClassSessionId: ""
+scripts:
+  - type: http:beforeRequest
+    code: |-
+      // Pre-request global — não faz nada por padrão.
+      // Cada request pode ter o seu próprio script.
+    language: text/javascript
+  - type: http:afterResponse
+    code: |-
+      // Test global — verifica formato de erro padrão em respostas 4xx/5xx.
+      if (pm.response.code >= 400) {
+        pm.test('Erro segue contrato { error, code }', function () {
+          const json = pm.response.json();
+          pm.expect(json).to.have.property('error');
+          pm.expect(json).to.have.property('code');
+        });
+      }
+    language: text/javascript
+auth:
+  - id: 71bbea33-f08c-4293-bcbb-7d96eb2a1f7c
+    type: bearer
+    name: bearer auth
+    credentials:
+      token: "{{accessToken}}"

@@ -1,0 +1,22 @@
+$kind: http-request
+url: "{{baseUrl}}/class-sessions"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "classId": "{{createdClassId}}",
+      "teacherId": "{{createdUserId}}",
+      "classesWorth": 1
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('201 Created', () => pm.response.to.have.status(201));
+      const { data } = pm.response.json();
+      pm.collectionVariables.set('createdClassSessionId', data.id);
+      console.log('[ClassSessions] createdClassSessionId =', data.id);
+    language: text/javascript
+order: 2000

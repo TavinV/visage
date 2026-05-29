@@ -1,0 +1,15 @@
+$kind: http-request
+url: "{{baseUrl}}/devices?page=1&limit=20"
+method: GET
+queryParams:
+  - key: page
+    value: "1"
+  - key: limit
+    value: "20"
+  - key: isActive
+    value: "true"
+    disabled: true
+  - key: locationId
+    value: "{{createdLocationId}}"
+    disabled: true
+order: 1000

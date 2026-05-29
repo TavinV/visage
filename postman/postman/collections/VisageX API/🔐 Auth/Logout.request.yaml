@@ -1,0 +1,26 @@
+$kind: http-request
+description: Revoga o refresh token e limpa as variáveis de sessão da coleção.
+url: "{{baseUrl}}/auth/logout"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "refreshToken": "{{refreshToken}}"
+    }
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('204 No Content', () => pm.response.to.have.status(204));
+      pm.collectionVariables.set('accessToken', '');
+      pm.collectionVariables.set('refreshToken', '');
+      pm.collectionVariables.set('tenantId', '');
+      pm.collectionVariables.set('userId', '');
+      pm.collectionVariables.set('currentRole', '');
+      console.log('[Auth] Sessão encerrada');
+    language: text/javascript
+order: 5000

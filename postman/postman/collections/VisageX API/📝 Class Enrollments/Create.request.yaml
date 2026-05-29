@@ -1,0 +1,13 @@
+$kind: http-request
+url: "{{baseUrl}}/class-enrollments"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "classId": "{{createdClassId}}",
+      "userId": "{{createdUserId}}"
+    }
+order: 2000

@@ -1,0 +1,30 @@
+$kind: http-request
+description: Cria o tenant UMC. O backend envia a senha temporária do admin por e-mail.
+url: "{{baseUrl}}/tenants"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "name": "Universidade de Mogi das Cruzes",
+      "document": "43.069.421/0001-04",
+      "institutionType": "university",
+      "planId": "{{createdPlanId}}",
+      "adminUser": {
+        "name": "Otávio Vinícius (UMC)",
+        "email": "{{umcEmail}}"
+      }
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('201 Created', () => pm.response.to.have.status(201));
+      const { data } = pm.response.json();
+      pm.collectionVariables.set('createdTenantId', data.id || data.tenant?.id);
+      if (data.tenant?.id) pm.collectionVariables.set('umcTenantId', data.tenant.id);
+      else if (data.id) pm.collectionVariables.set('umcTenantId', data.id);
+      console.log('[Tenants] umcTenantId =', pm.collectionVariables.get('umcTenantId'));
+    language: text/javascript
+order: 3000

@@ -1,0 +1,4 @@
+$kind: http-request
+url: "{{baseUrl}}/academic-periods/{{createdAcademicPeriodId}}"
+method: GET
+order: 3000

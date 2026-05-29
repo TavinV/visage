@@ -1,0 +1,21 @@
+$kind: http-request
+url: "{{baseUrl}}/tenant-settings"
+method: PATCH
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "recognitionThreshold": 1.10,
+      "livenessThreshold": 0.85,
+      "livenessEnabled": true,
+      "preAttendanceEnabled": true,
+      "preAttendanceWindowMin": 30,
+      "individualCheckoutEnabled": false,
+      "enrollmentTokenExpiryHours": 72,
+      "requireConsentBeforeFacial": true,
+      "enrollmentMultiFrameCount": 3,
+      "livenessThresholdEnrollment": 0.90
+    }
+order: 2000

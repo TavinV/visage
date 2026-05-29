@@ -1,0 +1,22 @@
+$kind: http-request
+url: "{{baseUrl}}/academic-periods"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "name": "2026/1",
+      "startsAt": "2026-02-01",
+      "endsAt": "2026-07-15"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('201 Created', () => pm.response.to.have.status(201));
+      const { data } = pm.response.json();
+      pm.collectionVariables.set('createdAcademicPeriodId', data.id);
+      console.log('[AcademicPeriods] createdAcademicPeriodId =', data.id);
+    language: text/javascript
+order: 2000

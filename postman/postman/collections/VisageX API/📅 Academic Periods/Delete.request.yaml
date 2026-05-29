@@ -1,0 +1,4 @@
+$kind: http-request
+url: "{{baseUrl}}/academic-periods/{{createdAcademicPeriodId}}"
+method: DELETE
+order: 5000

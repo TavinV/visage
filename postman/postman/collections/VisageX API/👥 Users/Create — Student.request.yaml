@@ -1,0 +1,24 @@
+$kind: http-request
+description: Cria um aluno (sem e-mail, sem senha). CPF pode vir com ou sem formatação — é normalizado para dígitos puros antes de salvar.
+url: "{{baseUrl}}/users"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "name": "Aluno Teste",
+      "role": "student",
+      "document": "529.982.247-25",
+      "enrollmentCode": "2026001"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('201 Created', () => pm.response.to.have.status(201));
+      const { data } = pm.response.json();
+      pm.collectionVariables.set('createdUserId', data.id);
+      console.log('[Users] createdUserId =', data.id);
+    language: text/javascript
+order: 2000

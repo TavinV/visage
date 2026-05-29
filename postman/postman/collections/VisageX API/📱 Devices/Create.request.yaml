@@ -1,0 +1,22 @@
+$kind: http-request
+url: "{{baseUrl}}/devices"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "deviceFingerprint": "totem-bloco-a-01",
+      "label": "Totem entrada Bloco A",
+      "locationId": "{{createdLocationId}}"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('201 Created', () => pm.response.to.have.status(201));
+      const { data } = pm.response.json();
+      pm.collectionVariables.set('createdDeviceId', data.id);
+      console.log('[Devices] createdDeviceId =', data.id);
+    language: text/javascript
+order: 2000

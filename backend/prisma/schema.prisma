@@ -30,7 +30,7 @@ model Tenant {
   planId          String
   plan            Plan      @relation(fields: [planId], references: [id])
   name            String    @db.VarChar(200)
-  document        String?   @db.VarChar(20) // CNPJ ou CPF
+  document        String?   @db.VarChar(14) // CNPJ — apenas dígitos, sem pontuação
   institutionType String    @db.VarChar(20) // 'school' | 'university'
   status          String    @default("trial") @db.VarChar(20) // 'active' | 'suspended' | 'trial' | 'cancelled'
   trialEndsAt     DateTime? @db.Timestamptz()
@@ -121,7 +121,7 @@ model User {
   passwordHash   String? @db.VarChar(255) // NULL para alunos sem acesso ao painel
   role           String  @db.VarChar(20) // 'super_admin' | 'admin' | 'manager' | 'teacher' | 'student'
   status         String  @default("active") @db.VarChar(20) // 'active' | 'inactive' | 'pending'
-  document       String? @db.VarChar(20) // CPF
+  document       String? @db.VarChar(11) // CPF — apenas dígitos, sem pontuação
   enrollmentCode String? @db.VarChar(50) // matrícula institucional (opcional)
 
   // Estado do cadastro biométrico (desnormalizado para queries rápidas)
@@ -149,6 +149,7 @@ model User {
   auditLogs AuditLog[]
 
   @@unique([tenantId, email])
+  @@unique([tenantId, document])
   @@map("users")
 }
 

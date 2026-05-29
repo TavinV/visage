@@ -1,0 +1,15 @@
+$kind: http-request
+url: "{{baseUrl}}/class-sessions?page=1&limit=20"
+method: GET
+queryParams:
+  - key: page
+    value: "1"
+  - key: limit
+    value: "20"
+  - key: classId
+    value: "{{createdClassId}}"
+    disabled: true
+  - key: status
+    value: open
+    disabled: true
+order: 1000

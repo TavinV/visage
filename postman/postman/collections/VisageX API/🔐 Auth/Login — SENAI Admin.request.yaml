@@ -1,0 +1,31 @@
+$kind: http-request
+description: Login do admin do tenant SENAI. Salva também em `senaiAccessToken` e `senaiTenantId`.
+url: "{{baseUrl}}/auth/login"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "email": "{{senaiEmail}}",
+      "password": "{{senaiPassword}}"
+    }
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('200 OK', () => pm.response.to.have.status(200));
+      const { data } = pm.response.json();
+      pm.collectionVariables.set('accessToken', data.accessToken);
+      pm.collectionVariables.set('refreshToken', data.refreshToken);
+      pm.collectionVariables.set('tenantId', data.user.tenantId);
+      pm.collectionVariables.set('userId', data.user.id);
+      pm.collectionVariables.set('currentRole', data.user.role);
+      pm.collectionVariables.set('senaiAccessToken', data.accessToken);
+      pm.collectionVariables.set('senaiRefreshToken', data.refreshToken);
+      pm.collectionVariables.set('senaiTenantId', data.user.tenantId);
+      console.log('[Auth] Logado como SENAI admin:', data.user.email);
+    language: text/javascript
+order: 3000

@@ -1,0 +1,6 @@
+$kind: collection
+description: |-
+  CRUD de usuários do tenant (admin only) + perfil e troca de senha do próprio usuário.
+
+  CPF é normalizado automaticamente (pontos/hífens removidos) e validado matematicamente (dígitos verificadores).
+order: 6000

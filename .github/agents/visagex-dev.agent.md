@@ -28,7 +28,11 @@ Você é o agente de desenvolvimento do **VisageX** — sistema SaaS de chamada 
 3. Verifique arquivos existentes no serviço relevante antes de criar novos
 4. Implemente seguindo as instruções de arquivo do serviço (`.github/instructions/`)
 5. Para o banco: nunca altere schema diretamente — crie migration incremental
-6. **Ao concluir qualquer implementação**, atualize `ROADMAP.md` na raiz do projeto:
+6. **Ao criar ou modificar rotas Express** (`backend/src/routes/*.ts`), siga `.github/instructions/postman.instructions.md` e mantenha os arquivos YAML em `postman/postman/collections/VisageX API/` sincronizados:
+   - Rota nova → crie o `.request.yaml` correspondente na pasta do domínio
+   - Domínio novo → crie a pasta, o `.resources/definition.yaml` e todos os requests
+   - Rota removida → remova o `.request.yaml` correspondente
+7. **Ao concluir qualquer implementação**, atualize `ROADMAP.md` na raiz do projeto:
    - Marque como ✅ cada item que foi implementado nesta sessão
    - Se o item não existia no ROADMAP, adicione-o na seção correta com ✅
    - Não altere itens que não foram tocados nesta sessão

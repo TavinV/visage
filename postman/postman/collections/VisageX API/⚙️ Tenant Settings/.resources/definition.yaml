@@ -1,0 +1,3 @@
+$kind: collection
+description: Configurações de threshold, modos (pré-presença, checkout), enrollment e fraud frames. Admin do tenant.
+order: 5000

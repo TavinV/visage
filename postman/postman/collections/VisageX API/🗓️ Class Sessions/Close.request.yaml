@@ -1,0 +1,5 @@
+$kind: http-request
+description: Encerra a sessão. Após `close`, alunos sem presença registrada são marcados como `absent`.
+url: "{{baseUrl}}/class-sessions/{{createdClassSessionId}}/close"
+method: POST
+order: 5000

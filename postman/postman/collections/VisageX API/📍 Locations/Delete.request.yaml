@@ -1,0 +1,4 @@
+$kind: http-request
+url: "{{baseUrl}}/locations/{{createdLocationId}}"
+method: DELETE
+order: 5000

@@ -1,0 +1,12 @@
+$kind: http-request
+url: "{{baseUrl}}/academic-periods/{{createdAcademicPeriodId}}"
+method: PATCH
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "endsAt": "2026-07-20"
+    }
+order: 4000

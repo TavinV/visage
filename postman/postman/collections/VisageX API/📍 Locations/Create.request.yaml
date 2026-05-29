@@ -1,0 +1,21 @@
+$kind: http-request
+url: "{{baseUrl}}/locations"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "name": "Campus Centro — Bloco A",
+      "address": "Av. Cândido Xavier de Almeida e Souza, 200"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('201 Created', () => pm.response.to.have.status(201));
+      const { data } = pm.response.json();
+      pm.collectionVariables.set('createdLocationId', data.id);
+      console.log('[Locations] createdLocationId =', data.id);
+    language: text/javascript
+order: 2000

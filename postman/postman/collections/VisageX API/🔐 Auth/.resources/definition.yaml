@@ -1,0 +1,3 @@
+$kind: collection
+description: Login (Access + Refresh Token), refresh com rotação e logout. Cada login salva os tokens **a nível da coleção** e também numa variável específica do contexto (super admin / UMC / SENAI) para troca rápida.
+order: 2000

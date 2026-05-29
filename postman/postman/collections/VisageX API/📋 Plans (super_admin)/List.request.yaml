@@ -1,0 +1,22 @@
+$kind: http-request
+url: "{{baseUrl}}/plans?page=1&limit=20"
+method: GET
+queryParams:
+  - key: page
+    value: "1"
+  - key: limit
+    value: "20"
+  - key: all
+    value: "true"
+    disabled: true
+    description: Inclui inativos (super_admin)
+  - key: search
+    value: ""
+    disabled: true
+  - key: sortBy
+    value: createdAt
+    disabled: true
+  - key: sortOrder
+    value: desc
+    disabled: true
+order: 1000

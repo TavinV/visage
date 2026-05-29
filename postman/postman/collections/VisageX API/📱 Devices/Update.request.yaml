@@ -1,0 +1,13 @@
+$kind: http-request
+url: "{{baseUrl}}/devices/{{createdDeviceId}}"
+method: PATCH
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "label": "Totem entrada principal",
+      "isActive": true
+    }
+order: 4000

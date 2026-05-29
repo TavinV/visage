@@ -1,0 +1,4 @@
+$kind: http-request
+url: "{{baseUrl}}/plans/{{createdPlanId}}"
+method: DELETE
+order: 5000

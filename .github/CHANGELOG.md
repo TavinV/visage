@@ -2,11 +2,35 @@
 
 Este arquivo registra todas as mudanças **estruturais** do projeto que afetam arquitetura, fluxos, modelos de dados ou comportamento. Consulte antes de qualquer implementação.
 
-**Última atualização:** 9 de maio de 2026
+**Última atualização:** 28 de maio de 2026
 
 ---
 
 ## Mudanças em andamento
+
+### CPF como Identificador de Consentimento + Normalização de Documentos
+
+- **Data:** 28 de maio de 2026
+- **Status:** Em progresso
+- **Migration:** `20260528120000_add_cpf_uniqueness_and_normalize_documents`
+- **Descrição:** O CPF do aluno passa a ser o identificador primário no fluxo de consentimento. O QR code apresentado no totem é um payload AES-256-GCM do CPF cifrado com `QR_SECRET_KEY` (separada da `MASTER_KEY`). Todos os documentos (CPF em `users` e CNPJ em `tenants`) são normalizados no banco — armazenados **apenas como dígitos**, sem pontos, hífens ou barras.
+- **Impactos:**
+  - **Banco de dados:**
+    - `users.document`: normalizado para 11 dígitos (CPF); novo índice único em `(tenantId, document)` — NULLs não conflitam (comportamento nativo PostgreSQL)
+    - `tenants.document`: normalizado para até 14 dígitos (CNPJ); VarChar reduzido de 20 para 14
+    - Migration aplica `TRANSLATE(document, '.-', '')` em `users` e `TRANSLATE(document, '.-/', '')` em `tenants` para dados existentes
+  - **Backend:**
+    - Nova var de ambiente obrigatória: `QR_SECRET_KEY` (64 hex chars = 32 bytes)
+    - `validateConfig()` valida o comprimento de `QR_SECRET_KEY` no startup
+    - Novo utilitário `src/utils/cpfQr.ts`:
+      - `normalizeDocument(doc)` — remove pontuação de CPF/CNPJ antes de persistir
+      - `isValidCpf(cpf)` / `isValidCnpj(cnpj)` — validação de formato normalizado
+      - `generateCpfQrPayload(tenantId, cpf)` → base64url (IV 12b + tag 16b + ciphertext)
+      - `decodeCpfQrPayload(encoded)` → `{ tenantId, cpf }` — InvalidTag re-lançado como `ValidationError`, nunca silenciado
+    - Fluxo de consentimento no totem: scan QR → backend decifra payload → encontra usuário por `(tenantId, cpf)` → exibe nome → consent → captura facial
+  - **Frontend:** Totem deve gerar/exibir QR code a partir do payload retornado pelo backend; campo CPF no formulário de cadastro deve ser mascarado mas salvo sem formatação
+  - **Engine Python:** Sem impacto
+- **Motivo:** CPF é o documento de identidade nacional — elimina necessidade de entregar tokens físicos individualmente; o QR é auto-contido, regenerável e revogável (basta invalidar o registro do aluno); normalização evita duplicatas por diferença de formatação
 
 ### Otimização de Performance — Crop de Face no Browser
 

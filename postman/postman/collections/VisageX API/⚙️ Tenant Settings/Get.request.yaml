@@ -1,0 +1,4 @@
+$kind: http-request
+url: "{{baseUrl}}/tenant-settings"
+method: GET
+order: 1000

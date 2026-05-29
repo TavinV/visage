@@ -1,0 +1,29 @@
+$kind: http-request
+url: "{{baseUrl}}/tenants"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "name": "SENAI Mogi das Cruzes",
+      "document": "33.564.749/0001-09",
+      "institutionType": "school",
+      "planId": "{{createdPlanId}}",
+      "adminUser": {
+        "name": "Otávio Vinícius (SENAI)",
+        "email": "{{senaiEmail}}"
+      }
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('201 Created', () => pm.response.to.have.status(201));
+      const { data } = pm.response.json();
+      pm.collectionVariables.set('createdTenantId', data.id || data.tenant?.id);
+      if (data.tenant?.id) pm.collectionVariables.set('senaiTenantId', data.tenant.id);
+      else if (data.id) pm.collectionVariables.set('senaiTenantId', data.id);
+      console.log('[Tenants] senaiTenantId =', pm.collectionVariables.get('senaiTenantId'));
+    language: text/javascript
+order: 4000

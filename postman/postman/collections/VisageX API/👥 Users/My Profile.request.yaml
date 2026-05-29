@@ -1,0 +1,5 @@
+$kind: http-request
+description: Retorna o perfil do usuário autenticado (qualquer role).
+url: "{{baseUrl}}/users/me/profile"
+method: GET
+order: 4000

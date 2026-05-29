@@ -1,0 +1,12 @@
+$kind: http-request
+url: "{{baseUrl}}/courses/{{createdCourseId}}"
+method: PATCH
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "name": "Engenharia de Software — Bacharelado"
+    }
+order: 4000

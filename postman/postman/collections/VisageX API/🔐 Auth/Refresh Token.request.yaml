@@ -1,0 +1,24 @@
+$kind: http-request
+description: Troca o refresh token ativo por um novo par (access + refresh). O refresh antigo é invalidado (rotação).
+url: "{{baseUrl}}/auth/refresh"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "refreshToken": "{{refreshToken}}"
+    }
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('200 OK', () => pm.response.to.have.status(200));
+      const { data } = pm.response.json();
+      pm.collectionVariables.set('accessToken', data.accessToken);
+      pm.collectionVariables.set('refreshToken', data.refreshToken);
+      console.log('[Auth] Tokens rotacionados');
+    language: text/javascript
+order: 4000

@@ -7,6 +7,7 @@
 import { BaseService, ListParams, PaginatedResult } from "./base.service";
 import { generateKey, generateIV } from "../utils/crypto";
 import { NotFoundError, ValidationError } from "../utils/errors";
+import { normalizeDocument } from "../utils/cpfQr";
 import { config } from "../lib/config";
 import { emailService } from "./email.service";
 import crypto from "crypto";
@@ -125,7 +126,7 @@ class TenantsService extends BaseService {
       const newTenant = await tx.tenant.create({
         data: {
           name: input.name,
-          document: input.document,
+          document: input.document ? normalizeDocument(input.document) : undefined,
           institutionType: input.institutionType,
           planId: input.planId,
           status: "trial",
@@ -231,7 +232,9 @@ class TenantsService extends BaseService {
       data: {
         ...(input.status && { status: input.status }),
         ...(input.name && { name: input.name }),
-        ...(input.document !== undefined && { document: input.document }),
+        ...(input.document !== undefined && {
+          document: input.document ? normalizeDocument(input.document) : null,
+        }),
         ...(input.institutionType && { institutionType: input.institutionType }),
         ...(input.planId && { planId: input.planId }),
         ...(input.timezone && { timezone: input.timezone }),

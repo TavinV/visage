@@ -1,0 +1,12 @@
+$kind: http-request
+url: "{{baseUrl}}/tenants/{{createdTenantId}}"
+method: PATCH
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "timezone": "America/Sao_Paulo"
+    }
+order: 5000
