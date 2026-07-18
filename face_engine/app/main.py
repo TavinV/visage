@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from insightface.app import FaceAnalysis
 
 from app.core.config import settings
+from app.core.logging import setup_logging
 from app.infra.cache_memory import MemoryEmbeddingCache
 from app.utils.crypto import EmbeddingCrypto
 from app.services.dek_manager import DEKManager
@@ -29,7 +30,7 @@ from app.engine.embedder import FaceEmbedder
 from app.engine.liveness import LivenessDetector
 from app.engine.comparator import FaceComparator
 from app.core.security import validate_api_key_middleware
-from app.api.routes import recognize, embeddings, calibrate
+from app.api.routes import recognize, embeddings, calibrate, enroll, cache, detect
 
 
 # Instâncias globais de modelos (singleton por worker)
@@ -52,6 +53,9 @@ async def lifespan(app: FastAPI):
     global face_comparator, embedding_cache, dek_manager
 
     # ========== STARTUP ==========
+    # Logger "face_engine" com handler próprio — os logs por camada do
+    # pipeline (detecção, liveness, HSV, comparação) dependem disto
+    setup_logging()
     print("[STARTUP] Carregando Face Recognition Engine...")
 
     try:
@@ -138,6 +142,9 @@ app.middleware("http")(validate_api_key_middleware)
 app.include_router(recognize.router)
 app.include_router(embeddings.router)
 app.include_router(calibrate.router)
+app.include_router(enroll.router)
+app.include_router(cache.router)
+app.include_router(detect.router)
 
 
 # Schema de resposta de health

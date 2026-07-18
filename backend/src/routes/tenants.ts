@@ -5,6 +5,7 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { tenantsService } from "../services/tenants.service";
+import { keyRotationService } from "../services/key-rotation.service";
 import { authenticate, requireSuperAdmin } from "../middleware/authenticate";
 import { validate } from "../middleware/validate";
 import { EmailSchema } from "../types";
@@ -185,6 +186,25 @@ router.post(
     try {
       const tenantId = req.params.id;
       const result = await tenantsService.cancel(tenantId);
+      res.json({ data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * POST /tenants/:id/rotate-key
+ * Rotaciona a DEK do tenant: re-cifra todos os embeddings, incrementa
+ * key_version e invalida o cache de DEK na engine (super admin only)
+ */
+router.post(
+  "/:id/rotate-key",
+  authenticate,
+  requireSuperAdmin,
+  async (req: Request<{ id: string }>, res: Response, next: NextFunction) => {
+    try {
+      const result = await keyRotationService.rotateTenantDek(req.params.id);
       res.json({ data: result });
     } catch (error) {
       next(error);

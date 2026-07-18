@@ -23,6 +23,15 @@ const LogoutSchema = z.object({
   refreshToken: z.string().min(1, "refreshToken é obrigatório"),
 });
 
+const ForgotPasswordSchema = z.object({
+  email: EmailSchema,
+});
+
+const ResetPasswordSchema = z.object({
+  token: z.string().min(16).max(128),
+  newPassword: z.string().min(8).max(100),
+});
+
 type LoginRequest = z.infer<typeof LoginSchema>;
 type RefreshRequest = z.infer<typeof RefreshSchema>;
 type LogoutRequest = z.infer<typeof LogoutSchema>;
@@ -72,6 +81,42 @@ router.post(
     try {
       await authService.logout(req.body.refreshToken);
       res.status(204).send();
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * POST /auth/forgot-password
+ * Envia link de redefinição por email. Resposta constante — não vaza contas.
+ */
+router.post(
+  "/forgot-password",
+  validate(ForgotPasswordSchema),
+  async (req: Request<{}, {}, z.infer<typeof ForgotPasswordSchema>>, res: Response, next: NextFunction) => {
+    try {
+      await authService.requestPasswordReset(req.body.email);
+      res.json({
+        data: { sent: true },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * POST /auth/reset-password
+ * Consome o token de uso único (15min) e define a nova senha.
+ */
+router.post(
+  "/reset-password",
+  validate(ResetPasswordSchema),
+  async (req: Request<{}, {}, z.infer<typeof ResetPasswordSchema>>, res: Response, next: NextFunction) => {
+    try {
+      await authService.resetPassword(req.body.token, req.body.newPassword);
+      res.json({ data: { reset: true } });
     } catch (error) {
       next(error);
     }

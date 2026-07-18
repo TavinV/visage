@@ -7,9 +7,11 @@
  * Admin pode gerenciar usuários do seu próprio tenant.
  */
 
+import { Prisma } from "@prisma/client";
 import { BaseService, ListParams, PaginatedResult } from "./base.service";
 import { NotFoundError, ConflictError, ValidationError } from "../utils/errors";
 import { normalizeDocument, isValidCpf } from "../utils/cpfQr";
+import { engineInvalidateEmbedding } from "../lib/faceEngine";
 import bcryptjs from "bcryptjs";
 
 // ── DTOs ──────────────────────────────────────────────────────────────────────
@@ -48,6 +50,7 @@ export interface UserOutput {
   document?: string;
   enrollmentCode?: string;
   facialStatus: string;
+  mustChangePassword: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -132,7 +135,7 @@ class UsersService extends BaseService {
   /**
    * Criar novo usuário
    */
-  async create(input: CreateUserInput): Promise<UserOutput> {
+  async create(input: CreateUserInput): Promise<UserOutput & { temporaryPassword?: string }> {
     // Validar email único por tenant
     if (input.email) {
       const existing = await this.prisma.user.findFirst({
@@ -147,13 +150,16 @@ class UsersService extends BaseService {
       }
     }
 
-    // Hash de senha se fornecida
+    // Quem acessa o painel recebe senha temporária gerada aqui e é obrigado
+    // a trocá-la no primeiro acesso. Alunos não têm senha (acesso via totem).
     let passwordHash: string | null = null;
-    if (input.password) {
-      if (input.password.length < 8) {
-        throw new ValidationError("password_too_short");
+    let temporaryPassword: string | undefined;
+    if (input.role !== "student") {
+      if (!input.email) {
+        throw new ValidationError("email_required_for_panel_roles");
       }
-      passwordHash = await bcryptjs.hash(input.password, 12);
+      temporaryPassword = this.generateTemporaryPassword();
+      passwordHash = await bcryptjs.hash(temporaryPassword, 12);
     }
 
     const normalizedDoc = input.document ? normalizeDocument(input.document) : null;
@@ -178,8 +184,10 @@ class UsersService extends BaseService {
         email: input.email || null,
         role: input.role,
         passwordHash,
+        mustChangePassword: temporaryPassword !== undefined,
         document: normalizedDoc,
-        enrollmentCode: input.enrollmentCode || null,
+        // Código interno só faz sentido para alunos
+        enrollmentCode: input.role === "student" ? input.enrollmentCode || null : null,
         status: "active",
       },
       select: this.getUserSelect(),
@@ -190,7 +198,7 @@ class UsersService extends BaseService {
       "User created",
     );
 
-    return this.toOutput(user);
+    return { ...this.toOutput(user), temporaryPassword };
   }
 
   /**
@@ -295,7 +303,8 @@ class UsersService extends BaseService {
 
     await this.prisma.user.update({
       where: { id: userId },
-      data: { passwordHash: newPasswordHash },
+      // Troca voluntária ou de primeiro acesso — o flag é sempre liberado
+      data: { passwordHash: newPasswordHash, mustChangePassword: false },
     });
 
     this.logger.info(
@@ -321,9 +330,19 @@ class UsersService extends BaseService {
       throw new ValidationError("cannot_delete_super_admin");
     }
 
-    await this.prisma.user.delete({
-      where: { id },
-    });
+    try {
+      await this.prisma.user.delete({
+        where: { id },
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2003"
+      ) {
+        throw new ConflictError("user_has_related_records");
+      }
+      throw error;
+    }
 
     this.logger.info(
       { userId: id, tenantId },
@@ -350,7 +369,7 @@ class UsersService extends BaseService {
 
     await this.prisma.user.update({
       where: { id },
-      data: { passwordHash },
+      data: { passwordHash, mustChangePassword: true },
     });
 
     this.logger.info(
@@ -359,6 +378,109 @@ class UsersService extends BaseService {
     );
 
     return tempPassword;
+  }
+
+  /**
+   * LGPD — Revogação de consentimento biométrico.
+   *
+   * Obrigatório (ver .claude/security.md):
+   *   1. biometric_consents.is_active = false + revoked_at + revoked_by_id
+   *   2. facial_embeddings do usuário deletados IMEDIATAMENTE
+   *   3. users.facial_status = 'revoked' — warm cache e recognize filtram
+   *      por facial_status='registered', então o usuário sai do reconhecimento
+   */
+  async revokeConsent(
+    userId: string,
+    tenantId: string,
+    revokedById: string
+  ): Promise<void> {
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, tenantId },
+      select: { id: true },
+    });
+    if (!user) throw new NotFoundError("user_not_found");
+
+    await this.prisma.$transaction([
+      this.prisma.biometricConsent.updateMany({
+        where: { tenantId, userId, isActive: true },
+        data: { isActive: false, revokedAt: new Date(), revokedById },
+      }),
+      this.prisma.facialEmbedding.deleteMany({
+        where: { tenantId, userId },
+      }),
+      this.prisma.user.updateMany({
+        where: { id: userId, tenantId },
+        data: { facialStatus: "revoked" },
+      }),
+      this.prisma.auditLog.create({
+        data: {
+          tenantId,
+          userId: revokedById,
+          action: "biometric_consent_revoked",
+          details: `Consentimento biométrico revogado para o usuário ${userId}; embeddings deletados`,
+        },
+      }),
+    ]);
+
+    // Invalida o embedding em cache na engine (não-fatal)
+    engineInvalidateEmbedding(tenantId, userId).catch((error) => {
+      this.logger.warn({ tenantId, userId, error }, "Failed to invalidate engine cache");
+    });
+
+    this.logger.info({ tenantId, userId, revokedById }, "Biometric consent revoked — embeddings deleted");
+  }
+
+  /**
+   * LGPD — Exclusão definitiva dos dados biométricos do aluno.
+   *
+   * Decisão conservadora (MVP):
+   *   - HARD DELETE: dados biométricos (facial_embeddings) e tokens de cadastro.
+   *   - O cadastro do usuário (nome, e-mail, documento, etc.) NÃO é alterado —
+   *     apenas a biometria é removida. Anonimizar/excluir o cadastro é uma
+   *     ação separada (ver delete()).
+   *   - biometric_consents são revogados mas MANTIDOS como evidência legal
+   *     de que houve consentimento e de quando foi revogado.
+   */
+  async eraseUserData(
+    userId: string,
+    tenantId: string,
+    requestedById: string
+  ): Promise<void> {
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, tenantId },
+      select: { id: true, role: true },
+    });
+    if (!user) throw new NotFoundError("user_not_found");
+    if (user.role === "super_admin") {
+      throw new ValidationError("cannot_erase_super_admin");
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.facialEmbedding.deleteMany({ where: { tenantId, userId } }),
+      this.prisma.enrollmentToken.deleteMany({ where: { tenantId, userId } }),
+      this.prisma.biometricConsent.updateMany({
+        where: { tenantId, userId, isActive: true },
+        data: { isActive: false, revokedAt: new Date(), revokedById: requestedById },
+      }),
+      this.prisma.user.updateMany({
+        where: { id: userId, tenantId },
+        data: { facialStatus: "revoked" },
+      }),
+      this.prisma.auditLog.create({
+        data: {
+          tenantId,
+          userId: requestedById,
+          action: "user_data_erased",
+          details: `Dados biométricos excluídos definitivamente para o usuário ${userId}`,
+        },
+      }),
+    ]);
+
+    engineInvalidateEmbedding(tenantId, userId).catch((error) => {
+      this.logger.warn({ tenantId, userId, error }, "Failed to invalidate engine cache");
+    });
+
+    this.logger.info({ tenantId, userId, requestedById }, "User data erased (LGPD)");
   }
 
   // ── Helpers privados ──────────────────────────────────────────────────────
@@ -377,6 +499,7 @@ class UsersService extends BaseService {
       document: true,
       enrollmentCode: true,
       facialStatus: true,
+      mustChangePassword: true,
       createdAt: true,
       updatedAt: true,
     };
@@ -396,6 +519,7 @@ class UsersService extends BaseService {
       document: user.document ?? undefined,
       enrollmentCode: user.enrollmentCode ?? undefined,
       facialStatus: user.facialStatus,
+      mustChangePassword: user.mustChangePassword ?? false,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };

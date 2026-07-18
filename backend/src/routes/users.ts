@@ -256,4 +256,48 @@ router.delete(
   },
 );
 
+/**
+ * POST /users/:id/revoke-consent
+ * LGPD — revoga consentimento biométrico: deleta embeddings imediatamente
+ * e marca facial_status='revoked' (admin/manager)
+ */
+router.post(
+  "/:id/revoke-consent",
+  authenticate,
+  requireRole("admin", "manager", "super_admin"),
+  async (req: Request<{ id: string }>, res: Response, next: NextFunction) => {
+    try {
+      const { tenantId, userId } = req.tenant!;
+
+      await usersService.revokeConsent(req.params.id, tenantId, userId);
+
+      res.json({ data: { revoked: true } });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+/**
+ * DELETE /users/:id/data
+ * LGPD — exclusão definitiva dos dados biométricos (embeddings + tokens de
+ * cadastro). O cadastro do usuário não é alterado (admin only)
+ */
+router.delete(
+  "/:id/data",
+  authenticate,
+  requireRole("admin", "super_admin"),
+  async (req: Request<{ id: string }>, res: Response, next: NextFunction) => {
+    try {
+      const { tenantId, userId } = req.tenant!;
+
+      await usersService.eraseUserData(req.params.id, tenantId, userId);
+
+      res.json({ data: { erased: true } });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
 export default router;

@@ -1,8 +1,8 @@
 $kind: collection
 description: |-
-  ## VisageX — API Collection
+  ## Visage — API Collection
 
-  Coleção oficial da API REST do **VisageX** (sistema SaaS de chamada escolar com reconhecimento facial).
+  Coleção oficial da API REST do **Visage** (sistema SaaS de chamada escolar com reconhecimento facial).
 
   ### Convenções
 
@@ -35,7 +35,7 @@ variables:
   tenantId: ""
   userId: ""
   currentRole: ""
-  superAdminEmail: admin@visagex.local
+  superAdminEmail: admin@Visage.local
   superAdminPassword: Ota@47802341825
   superAdminAccessToken: ""
   superAdminRefreshToken: ""

@@ -1,0 +1,333 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ScanFace, Timer } from "lucide-react";
+import { formatPercent } from "@/lib/format";
+import type { CurrentSession } from "@/lib/deviceApi";
+import { useTotemCamera, meanAbsDiff } from "./useTotemCamera";
+import { useFaceDetection } from "./useFaceDetection";
+import {
+  StageShell,
+  StageHeader,
+  StageBottom,
+  StageError,
+  StageResultOverlay,
+  FaceGuide,
+  type GuideState,
+  type TotemResult,
+} from "./TotemStage";
+
+const IDLE_TIMEOUT_S = 60;
+
+/** Diferença média mínima entre frames (escala 0–255) para aceitar como cena viva. */
+const STATIC_PIXEL_THRESHOLD = 3.0;
+const BURST_FRAMES = 3;
+const BURST_INTERVAL_MS = 140;
+
+const DETECT_INTERVAL_MS = 550;
+/** Movimento mínimo entre ticks para considerar alguém presente (fallback sem FaceDetector). */
+const MOTION_PRESENCE_THRESHOLD = 2.0;
+/** A oval pisca na cor do desfecho por este tempo antes do overlay entrar. */
+const GUIDE_BLINK_BEFORE_OVERLAY_MS = 550;
+
+const loadingPhrases = [
+  "Analisando a imagem capturada",
+  "Verificando vivacidade",
+  "Comparando com os alunos da chamada",
+  "Confirmando identidade",
+  "Registrando presença",
+];
+
+type FaceState = "none" | "far" | "close" | "good" | "multiple";
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+interface TotemCameraProps {
+  session: CurrentSession | null;
+  processing: boolean;
+  result: TotemResult | null;
+  onCapture: (imageB64: string) => void;
+  onStaticDetected: () => void;
+  onClose: () => void;
+}
+
+/**
+ * Palco de presença em tela cheia: a detecção facial dispara a captura
+ * automaticamente — sem botão. A guia oval sinaliza o estado (branca →
+ * azul pulsante → verde/vermelha) e o texto de status vive na base.
+ */
+export function TotemCamera({
+  session,
+  processing,
+  result,
+  onCapture,
+  onStaticDetected,
+  onClose,
+}: TotemCameraProps) {
+  const camera = useTotemCamera();
+  const faceDetection = useFaceDetection();
+
+  const [countdown, setCountdown] = useState(IDLE_TIMEOUT_S);
+  const [phraseIndex, setPhraseIndex] = useState(0);
+  const [faceState, setFaceState] = useState<FaceState>("none");
+  const [showOverlay, setShowOverlay] = useState(false);
+  const busyRef = useRef(false);
+  const stableTicks = useRef(0);
+  const lastLuminance = useRef<Uint8ClampedArray | null>(null);
+
+  const busy = processing || result !== null;
+  const cameraError = camera.status === "error";
+
+  // Coreografia do desfecho: a oval pisca na cor do resultado e só então o
+  // overlay verde/vermelho toma a tela. Avisos ficam apenas no texto da base.
+  useEffect(() => {
+    if (!result || result.kind === "warning") {
+      setShowOverlay(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setShowOverlay(true), GUIDE_BLINK_BEFORE_OVERLAY_MS);
+    return () => {
+      window.clearTimeout(timer);
+      setShowOverlay(false);
+    };
+  }, [result]);
+
+  useEffect(() => {
+    void camera.start();
+    return camera.stop;
+  }, [camera.start, camera.stop]);
+
+  // Contagem de inatividade — pausa durante processamento/resultado
+  useEffect(() => {
+    if (busy || cameraError) return;
+    const interval = window.setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          window.clearInterval(interval);
+          onClose();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => window.clearInterval(interval);
+  }, [busy, cameraError, onClose]);
+
+  // Resultado exibido renova o tempo do totem e zera a estabilidade
+  useEffect(() => {
+    if (result) {
+      setCountdown(IDLE_TIMEOUT_S);
+      stableTicks.current = 0;
+    }
+  }, [result]);
+
+  // Frases rotativas durante o processamento
+  useEffect(() => {
+    if (!processing) {
+      setPhraseIndex(0);
+      return;
+    }
+    const interval = window.setInterval(
+      () => setPhraseIndex((p) => (p + 1) % loadingPhrases.length),
+      2200
+    );
+    return () => window.clearInterval(interval);
+  }, [processing]);
+
+  /**
+   * Um tick do laço de reconhecimento: detecta rosto (nativo ou por
+   * movimento), exige 2 ticks estáveis, roda a camada 1 anti-spoofing
+   * e envia o frame — tudo sem interação do aluno.
+   */
+  const runDetectionTick = useCallback(async () => {
+    const video = camera.videoRef.current;
+    if (busyRef.current || !video || !video.videoWidth) return;
+    busyRef.current = true;
+    try {
+      const faces = await faceDetection.detect(video);
+      if (faces !== null) {
+        if (faces.length === 0) {
+          stableTicks.current = 0;
+          setFaceState("none");
+          return;
+        }
+        if (faces.length > 1) {
+          stableTicks.current = 0;
+          setFaceState("multiple");
+          return;
+        }
+        setCountdown(IDLE_TIMEOUT_S);
+        const ratio = faces[0].width / video.videoWidth;
+        if (ratio < 0.16) {
+          stableTicks.current = 0;
+          setFaceState("far");
+          return;
+        }
+        if (ratio > 0.52) {
+          stableTicks.current = 0;
+          setFaceState("close");
+          return;
+        }
+        setFaceState("good");
+      } else {
+        // Sem FaceDetector nativo: movimento entre ticks indica presença
+        const lum = camera.grabLuminance();
+        const prev = lastLuminance.current;
+        lastLuminance.current = lum;
+        if (!lum || !prev) return;
+        if (meanAbsDiff(lum, prev) < MOTION_PRESENCE_THRESHOLD) {
+          stableTicks.current = 0;
+          setFaceState("none");
+          return;
+        }
+        setCountdown(IDLE_TIMEOUT_S);
+        setFaceState("good");
+      }
+
+      // Dois ticks estáveis (~1,1s) antes de capturar — evita frames borrados
+      stableTicks.current += 1;
+      if (stableTicks.current < 2) return;
+      stableTicks.current = 0;
+
+      // Camada 1 anti-spoofing: 3 amostras — cena parada indica foto/impresso
+      const samples: Uint8ClampedArray[] = [];
+      for (let i = 0; i < BURST_FRAMES; i++) {
+        const lum = camera.grabLuminance();
+        if (lum) samples.push(lum);
+        if (i < BURST_FRAMES - 1) await sleep(BURST_INTERVAL_MS);
+      }
+      if (samples.length >= 2) {
+        let maxDiff = 0;
+        for (let i = 1; i < samples.length; i++) {
+          maxDiff = Math.max(maxDiff, meanAbsDiff(samples[i - 1], samples[i]));
+        }
+        if (maxDiff < STATIC_PIXEL_THRESHOLD) {
+          onStaticDetected();
+          return;
+        }
+      }
+
+      const imageB64 = camera.captureJpegB64();
+      if (imageB64) onCapture(imageB64);
+    } finally {
+      busyRef.current = false;
+    }
+  }, [camera, faceDetection, onCapture, onStaticDetected]);
+
+  useEffect(() => {
+    if (camera.status !== "ready" || busy) return;
+    const interval = window.setInterval(() => void runDetectionTick(), DETECT_INTERVAL_MS);
+    return () => window.clearInterval(interval);
+  }, [camera.status, busy, runDetectionTick]);
+
+  const guide: GuideState = result
+    ? result.kind
+    : processing
+      ? "processing"
+      : faceState === "multiple"
+        ? "warning"
+        : faceState === "none"
+          ? "neutral"
+          : "detecting";
+
+  const guideScale = faceState === "far" ? 0.88 : faceState === "close" ? 1.12 : 1;
+
+  const status = result
+    ? {
+        key: `result-${result.kind}-${result.title}`,
+        title: result.title,
+        subtitle: result.message,
+        chip:
+          result.confidence !== undefined ? (
+            <span className="rounded-full bg-white/15 px-3 py-1 font-mono-ds text-[11px] text-white/85 backdrop-blur-md">
+              Confiança {formatPercent(result.confidence * 100)}
+            </span>
+          ) : undefined,
+      }
+    : processing
+      ? {
+          key: `loading-${phraseIndex}`,
+          title: "Reconhecendo…",
+          subtitle: `${loadingPhrases[phraseIndex]}.`,
+        }
+      : faceState === "multiple"
+        ? {
+            key: "multiple",
+            title: "Uma pessoa por vez",
+            subtitle: "Afaste os demais rostos para continuar.",
+          }
+        : faceState === "far"
+          ? {
+              key: "far",
+              title: "Aproxime-se da câmera",
+              subtitle: "Chegue mais perto até o rosto preencher a guia.",
+            }
+          : faceState === "close"
+            ? {
+                key: "close",
+                title: "Afaste-se um pouco",
+                subtitle: "Seu rosto está muito próximo da câmera.",
+              }
+            : faceState === "good"
+              ? {
+                  key: "good",
+                  title: "Fique parado um instante",
+                  subtitle: "O reconhecimento acontece automaticamente.",
+                }
+              : {
+                  key: "idle",
+                  title: "Posicione o rosto dentro da guia",
+                  subtitle: "Mantenha o rosto centralizado e bem iluminado.",
+                };
+
+  return (
+    <StageShell>
+      {cameraError ? (
+        <StageError
+          message="Não foi possível acessar a câmera. Verifique a permissão do navegador."
+          onRetry={() => void camera.start()}
+        />
+      ) : (
+        <>
+          {/* Espelhado como um espelho de verdade; a captura usa o frame bruto */}
+          <video
+            ref={camera.bindVideo}
+            autoPlay
+            playsInline
+            muted
+            className="absolute inset-0 h-full w-full -scale-x-100 object-cover"
+          />
+          <FaceGuide
+            state={guide}
+            scale={guideScale}
+            blink={!!result && result.kind !== "warning" && !showOverlay}
+          />
+          <StageBottom
+            contentKey={status.key}
+            title={status.title}
+            subtitle={status.subtitle}
+            chip={status.chip}
+          />
+          <StageResultOverlay result={showOverlay ? result : null} />
+        </>
+      )}
+
+      <StageHeader
+        icon={<ScanFace size={20} strokeWidth={1.75} />}
+        title={session ? session.className : "Nenhuma chamada aberta"}
+        subtitle={session ? "Chamada aberta" : "Pré-presença — confirmada quando a chamada abrir"}
+        live={!!session}
+        chip={
+          !cameraError ? (
+            <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 font-mono-ds text-xs text-white/85">
+              <Timer size={13} />
+              {countdown}s
+            </span>
+          ) : undefined
+        }
+        onClose={onClose}
+        fraction={cameraError ? undefined : countdown / IDLE_TIMEOUT_S}
+      />
+    </StageShell>
+  );
+}

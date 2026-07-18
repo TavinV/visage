@@ -87,6 +87,14 @@ model TenantSettings {
   enrollmentMultiFrameCount   Int     @default(3) // frames capturados no cadastro
   livenessThresholdEnrollment Float   @default(0.90) // threshold mais rigoroso no cadastro
 
+  // Totem
+  // Template da senha do painel oculto do totem. Aceita {{data}} (DDMM) e
+  // {{hora}} (HHMM), ex.: "adminumc{{data}}@{{hora}}". Null = painel sem senha.
+  totemPanelPassword String?
+  // Fuso do relógio exibido no totem: "local" (dispositivo) ou IANA tz
+  // (ex.: "America/Sao_Paulo" para horário de Brasília)
+  totemClockTimezone String  @default("local")
+
   updatedAt DateTime @updatedAt @db.Timestamptz()
 
   @@map("tenant_settings")
@@ -127,6 +135,9 @@ model User {
   // Estado do cadastro biométrico (desnormalizado para queries rápidas)
   // 'none' | 'consent_given' | 'registered' | 'consent_refused' | 'revoked'
   facialStatus String @default("none") @db.VarChar(20)
+
+  // Senha temporária (gerada na criação/reset) exige troca no primeiro acesso
+  mustChangePassword Boolean @default(false)
 
   // Relations
   facialEmbeddings        FacialEmbedding[]
@@ -189,6 +200,8 @@ model Device {
   location          Location? @relation(fields: [locationId], references: [id])
 
   isActive   Boolean   @default(true)
+  // Libera o fluxo de cadastro biométrico por CPF na tela deste totem
+  allowEnrollment Boolean @default(false)
   lastSeenAt DateTime? @db.Timestamptz()
 
   recognitionLogs RecognitionLog[]
@@ -217,6 +230,7 @@ model Location {
   classes        Class[]
   devices        Device[]
   preAttendances PreAttendance[]
+  classSessions  ClassSession[]
 
   createdAt DateTime @default(now()) @db.Timestamptz()
 
@@ -334,9 +348,14 @@ model ClassSession {
   createdById String
   createdBy   User   @relation("CreatedBy", fields: [createdById], references: [id])
 
+  // Sala escolhida pelo professor ao abrir a chamada — sobrepõe a sala
+  // padrão da turma no matching do totem. Null = usa class.locationId.
+  locationId String?
+  location   Location? @relation(fields: [locationId], references: [id])
+
   startedAt    DateTime  @default(now()) @db.Timestamptz()
   endedAt      DateTime? @db.Timestamptz()
-  status       String    @default("open") @db.VarChar(20) // 'open' | 'closed'
+  status       String    @default("open") @db.VarChar(20) // 'open' | 'closed' | 'cancelled'
   classesWorth Int       @default(1)
 
   attendanceRecords AttendanceRecord[]
@@ -367,6 +386,10 @@ model AttendanceRecord {
   confidence       Float?
   livenessScore    Float?
   wasPreAttendance Boolean @default(false)
+
+  // Override do professor: quantas aulas esta presença vale nesta sessão
+  // (0 = ausente). Null = vale o classesWorth integral da sessão.
+  classesCounted Int?
 
   adjustedById String?
   adjustedBy   User?     @relation("AdjustedBy", fields: [adjustedById], references: [id])

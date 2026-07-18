@@ -5,6 +5,7 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { devicesService } from "../services/devices.service";
+import { calibrationService } from "../services/calibration.service";
 import { authenticate } from "../middleware/authenticate";
 import { validate } from "../middleware/validate";
 
@@ -16,12 +17,14 @@ const CreateDeviceSchema = z.object({
   deviceFingerprint: z.string().min(1).max(255),
   label: z.string().max(100).optional(),
   locationId: z.string().uuid().optional(),
+  allowEnrollment: z.boolean().optional(),
 });
 
 const UpdateDeviceSchema = z.object({
   label: z.string().max(100).optional(),
   locationId: z.string().uuid().optional(),
   isActive: z.boolean().optional(),
+  allowEnrollment: z.boolean().optional(),
 });
 
 type CreateDeviceRequest = z.infer<typeof CreateDeviceSchema>;
@@ -132,6 +135,118 @@ router.patch(
       }
 
       const result = await devicesService.update(req.params.id, tenantId, req.body);
+      res.json({ data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * POST /devices/:id/calibration/start
+ * Coloca o totem em modo calibração de vivacidade (admin only)
+ */
+router.post(
+  "/:id/calibration/start",
+  authenticate,
+  async (req: Request<{ id: string }>, res: Response, next: NextFunction) => {
+    try {
+      const { tenantId, role } = req.tenant!;
+      if (role !== "admin" && role !== "super_admin") {
+        res.status(403).json({ error: "Forbidden", code: "forbidden" });
+        return;
+      }
+      const result = await calibrationService.start(tenantId, req.params.id);
+      res.json({ data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * DELETE /devices/:id/calibration
+ * Encerra o modo calibração (admin only)
+ */
+router.delete(
+  "/:id/calibration",
+  authenticate,
+  async (req: Request<{ id: string }>, res: Response, next: NextFunction) => {
+    try {
+      const { tenantId, role } = req.tenant!;
+      if (role !== "admin" && role !== "super_admin") {
+        res.status(403).json({ error: "Forbidden", code: "forbidden" });
+        return;
+      }
+      await calibrationService.stop(tenantId, req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * GET /devices/:id/calibration
+ * Progresso da coleta + resultados calculados, para o modal do painel (admin only)
+ */
+router.get(
+  "/:id/calibration",
+  authenticate,
+  async (req: Request<{ id: string }>, res: Response, next: NextFunction) => {
+    try {
+      const { tenantId, role } = req.tenant!;
+      if (role !== "admin" && role !== "super_admin") {
+        res.status(403).json({ error: "Forbidden", code: "forbidden" });
+        return;
+      }
+      const result = await calibrationService.report(tenantId, req.params.id);
+      res.json({ data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * POST /devices/:id/calibration/compute
+ * Envia as imagens coletadas para as rotas de Youden da engine (admin only)
+ */
+router.post(
+  "/:id/calibration/compute",
+  authenticate,
+  async (req: Request<{ id: string }>, res: Response, next: NextFunction) => {
+    try {
+      const { tenantId, role } = req.tenant!;
+      if (role !== "admin" && role !== "super_admin") {
+        res.status(403).json({ error: "Forbidden", code: "forbidden" });
+        return;
+      }
+      const result = await calibrationService.compute(tenantId, req.params.id);
+      res.json({ data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * POST /devices/:id/regenerate-key
+ * Regenera a chave de API do dispositivo, invalidando a anterior (admin only)
+ */
+router.post(
+  "/:id/regenerate-key",
+  authenticate,
+  async (req: Request<{ id: string }>, res: Response, next: NextFunction) => {
+    try {
+      const { tenantId, role } = req.tenant!;
+
+      if (role !== "admin" && role !== "super_admin") {
+        res.status(403).json({ error: "Forbidden", code: "forbidden" });
+        return;
+      }
+
+      const result = await devicesService.regenerateApiKey(req.params.id, tenantId);
       res.json({ data: result });
     } catch (error) {
       next(error);

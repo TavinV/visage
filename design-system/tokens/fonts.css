@@ -1,0 +1,8 @@
+/* ==========================================================================
+   Flauzino — Web fonts
+   Poppins (brand) + IBM Plex Mono (technical / data).
+   NOTE: currently served from Google Fonts CDN. For production, self-host
+   the .woff2 binaries and replace these @import lines with @font-face rules.
+   ========================================================================== */
+
+@import url("https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap");

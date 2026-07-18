@@ -11,6 +11,8 @@ build/
 # ── Variáveis de ambiente ────────────────────────────────────────────────────
 .env
 *.env
+.env.local
+.env.*.local
 !*.env.example
 !db/.gitkeep
 
@@ -39,3 +41,6 @@ Thumbs.db
 
 .idea/
 *~
+.claude/
+.next
+.claude

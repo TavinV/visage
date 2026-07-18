@@ -7,6 +7,7 @@ import { z } from "zod";
 import { classEnrollmentsService } from "../services/class-enrollments.service";
 import { authenticate } from "../middleware/authenticate";
 import { validate } from "../middleware/validate";
+import { prisma } from "../lib/prisma";
 
 const router = Router();
 
@@ -21,18 +22,33 @@ type CreateEnrollmentRequest = z.infer<typeof CreateEnrollmentSchema>;
 
 /**
  * GET /class-enrollments
- * Lista matrículas do tenant (admin only)
+ * Lista matrículas do tenant. Professor: apenas das próprias turmas
+ * (exige classId de uma turma da qual seja responsável).
  */
 router.get(
   "/",
   authenticate,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { tenantId, role } = req.tenant!;
+      const { tenantId, userId, role } = req.tenant!;
 
-      if (role !== "admin" && role !== "super_admin") {
+      if (!["admin", "manager", "teacher", "super_admin"].includes(role)) {
         res.status(403).json({ error: "Forbidden", code: "forbidden" });
         return;
+      }
+
+      if (role === "teacher") {
+        const classId = req.query.classId as string | undefined;
+        const ownClass = classId
+          ? await prisma.class.findFirst({
+              where: { id: classId, tenantId, teacherId: userId },
+              select: { id: true },
+            })
+          : null;
+        if (!ownClass) {
+          res.status(403).json({ error: "Forbidden", code: "forbidden" });
+          return;
+        }
       }
 
       const result = await classEnrollmentsService.list({

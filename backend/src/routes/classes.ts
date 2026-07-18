@@ -34,16 +34,16 @@ type UpdateClassRequest = z.infer<typeof UpdateClassSchema>;
 
 /**
  * GET /classes
- * Lista turmas do tenant (admin only)
+ * Lista turmas do tenant. Professor recebe apenas as próprias turmas.
  */
 router.get(
   "/",
   authenticate,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { tenantId, role } = req.tenant!;
+      const { tenantId, userId, role } = req.tenant!;
 
-      if (role !== "admin" && role !== "super_admin") {
+      if (!["admin", "manager", "teacher", "super_admin"].includes(role)) {
         res.status(403).json({ error: "Forbidden", code: "forbidden" });
         return;
       }
@@ -56,7 +56,8 @@ router.get(
         sortOrder: req.query.sortOrder as "asc" | "desc" | undefined,
         search: req.query.search as string | undefined,
         courseId: req.query.courseId as string | undefined,
-        teacherId: req.query.teacherId as string | undefined,
+        // Professor: escopo travado nas próprias turmas
+        teacherId: role === "teacher" ? userId : (req.query.teacherId as string | undefined),
       });
 
       res.json(result);
@@ -97,21 +98,25 @@ router.post(
 
 /**
  * GET /classes/:id
- * Obtém uma turma (admin only)
+ * Obtém uma turma. Professor só enxerga turmas das quais é responsável.
  */
 router.get(
   "/:id",
   authenticate,
   async (req: Request<{ id: string }>, res: Response, next: NextFunction) => {
     try {
-      const { tenantId, role } = req.tenant!;
+      const { tenantId, userId, role } = req.tenant!;
 
-      if (role !== "admin" && role !== "super_admin") {
+      if (!["admin", "manager", "teacher", "super_admin"].includes(role)) {
         res.status(403).json({ error: "Forbidden", code: "forbidden" });
         return;
       }
 
       const result = await classesService.findById(req.params.id, tenantId);
+      if (role === "teacher" && result.teacherId !== userId) {
+        res.status(403).json({ error: "Forbidden", code: "forbidden" });
+        return;
+      }
       res.json({ data: result });
     } catch (error) {
       next(error);

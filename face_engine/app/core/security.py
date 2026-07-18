@@ -37,9 +37,11 @@ async def validate_api_key_middleware(request: Request, call_next: Callable) -> 
         response = await call_next(request)
         return response
 
-    # Rotas que não requerem autenticação (verificar com startswith para evitar problemas com normalization)
-    public_prefixes = ["/health", "/docs", "/redoc", "/openapi.json", "/"]
-    is_public = any(path.startswith(prefix) for prefix in public_prefixes)
+    # Rotas que não requerem autenticação.
+    # ⚠️ A raiz "/" é comparada por IGUALDADE — usar startswith("/") tornaria
+    # TODAS as rotas públicas e desabilitaria a autenticação da engine.
+    public_prefixes = ["/health", "/docs", "/redoc", "/openapi.json"]
+    is_public = path == "/" or any(path.startswith(prefix) for prefix in public_prefixes)
 
     # Se rota é pública, passe direto
     if is_public:

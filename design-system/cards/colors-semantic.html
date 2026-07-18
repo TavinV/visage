@@ -1,0 +1,26 @@
+<!-- @dsCard group="Colors" viewport="700x160" name="Semantic Status" subtitle="Muted, institutional — never candy-bright" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; padding: 20px; background: var(--surface-card); font-family: var(--font-sans); }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  .item { border: 1px solid var(--border-subtle); border-radius: var(--radius-md); overflow: hidden; }
+  .bar { height: 56px; }
+  .meta { padding: 8px 10px; }
+  .name { font-size: 12px; font-weight: 600; color: var(--text-strong); }
+  .hex { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+  .tint { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: -2px; margin-right: 6px; }
+</style>
+</head>
+<body>
+  <div class="grid">
+    <div class="item"><div class="bar" style="background:var(--success-600)"></div><div class="meta"><div class="name"><span class="tint" style="background:var(--success-100)"></span>Success</div><div class="hex">#1F7A4D</div></div></div>
+    <div class="item"><div class="bar" style="background:var(--warning-600)"></div><div class="meta"><div class="name"><span class="tint" style="background:var(--warning-100)"></span>Warning</div><div class="hex">#B07410</div></div></div>
+    <div class="item"><div class="bar" style="background:var(--danger-600)"></div><div class="meta"><div class="name"><span class="tint" style="background:var(--danger-100)"></span>Danger</div><div class="hex">#B3261E</div></div></div>
+    <div class="item"><div class="bar" style="background:var(--info-600)"></div><div class="meta"><div class="name"><span class="tint" style="background:var(--info-100)"></span>Info</div><div class="hex">#2563EB</div></div></div>
+  </div>
+</body>
+</html>

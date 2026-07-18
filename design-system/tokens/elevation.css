@@ -1,0 +1,28 @@
+/* ==========================================================================
+   Flauzino — Elevation & motion tokens
+   Shadows are soft, cool and restrained — structure over drama.
+   Tinted with navy rather than pure black for an institutional feel.
+   ========================================================================== */
+
+:root {
+  /* Shadows (cool navy-tinted) */
+  --shadow-xs: 0 1px 2px rgba(11, 18, 32, 0.06);
+  --shadow-sm: 0 1px 3px rgba(11, 18, 32, 0.08), 0 1px 2px rgba(11, 18, 32, 0.04);
+  --shadow-md: 0 4px 12px rgba(11, 18, 32, 0.08), 0 2px 4px rgba(11, 18, 32, 0.04);
+  --shadow-lg: 0 12px 28px rgba(11, 18, 32, 0.12), 0 4px 8px rgba(11, 18, 32, 0.05);
+  --shadow-xl: 0 24px 56px rgba(11, 18, 32, 0.16);
+
+  /* Inner / inset (for inputs, wells) */
+  --shadow-inset: inset 0 1px 2px rgba(11, 18, 32, 0.06);
+
+  /* Focus ring */
+  --ring-focus: 0 0 0 3px var(--focus-ring-alpha);
+
+  /* Motion — measured, no bounce. Confidence, not playfulness. */
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1); /* @kind other */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1); /* @kind other */
+  --ease-in: cubic-bezier(0.4, 0, 1, 1); /* @kind other */
+  --duration-fast: 120ms; /* @kind other */
+  --duration-base: 200ms; /* @kind other */
+  --duration-slow: 320ms; /* @kind other */
+}

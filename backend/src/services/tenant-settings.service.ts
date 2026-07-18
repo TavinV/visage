@@ -23,6 +23,8 @@ export interface UpdateTenantSettingsInput {
   requireConsentBeforeFacial?: boolean;
   enrollmentMultiFrameCount?: number;
   livenessThresholdEnrollment?: number;
+  totemPanelPassword?: string | null;
+  totemClockTimezone?: string;
 }
 
 export interface TenantSettingsOutput {
@@ -41,6 +43,8 @@ export interface TenantSettingsOutput {
   requireConsentBeforeFacial: boolean;
   enrollmentMultiFrameCount: number;
   livenessThresholdEnrollment: number;
+  totemPanelPassword: string | null;
+  totemClockTimezone: string;
   updatedAt: Date;
 }
 
@@ -86,6 +90,8 @@ class TenantSettingsService extends BaseService {
         ...(input.requireConsentBeforeFacial !== undefined && { requireConsentBeforeFacial: input.requireConsentBeforeFacial }),
         ...(input.enrollmentMultiFrameCount !== undefined && { enrollmentMultiFrameCount: input.enrollmentMultiFrameCount }),
         ...(input.livenessThresholdEnrollment !== undefined && { livenessThresholdEnrollment: input.livenessThresholdEnrollment }),
+        ...(input.totemPanelPassword !== undefined && { totemPanelPassword: input.totemPanelPassword }),
+        ...(input.totemClockTimezone !== undefined && { totemClockTimezone: input.totemClockTimezone }),
       },
     });
 
@@ -110,6 +116,8 @@ class TenantSettingsService extends BaseService {
       requireConsentBeforeFacial: settings.requireConsentBeforeFacial,
       enrollmentMultiFrameCount: settings.enrollmentMultiFrameCount,
       livenessThresholdEnrollment: settings.livenessThresholdEnrollment,
+      totemPanelPassword: settings.totemPanelPassword ?? null,
+      totemClockTimezone: settings.totemClockTimezone ?? "local",
       updatedAt: settings.updatedAt,
     };
   }

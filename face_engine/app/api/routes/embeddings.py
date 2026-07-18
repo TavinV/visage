@@ -3,6 +3,8 @@ Rotas POST /embeddings/register e DELETE /embeddings/{tenant_id}/{person_id}.
 Registro de novos embeddings (múltiplas imagens com média) e invalidação de cache.
 """
 
+from typing import Optional
+
 import cv2
 import numpy as np
 from fastapi import APIRouter, UploadFile, Form, HTTPException, status, File
@@ -65,16 +67,17 @@ async def register_embedding(
         HTTPException 400: Imagem inválida, nenhuma face detectada ou < 1 imagem
         HTTPException 422: Erro ao processar embedding
     """
-    from app.core.config import settings
     from app.utils.crypto import EmbeddingCrypto
     from app.main import dek_manager
-    
+
     # ------------------------------------------------------------------
-    # Descriptografar DEK se fornecida
+    # Resolver DEK do tenant: descriptografa se fornecida na request,
+    # senão tenta reaproveitar do cache do DEKManager.
     # ------------------------------------------------------------------
+    tenant_dek: Optional[bytes] = None
     if dek_ct and dek_iv and dek_tag:
         try:
-            dek_manager.decrypt_dek(
+            tenant_dek = dek_manager.decrypt_dek(
                 tenant_id=tenant_id,
                 dek_ct_hex=dek_ct,
                 dek_iv_hex=dek_iv,
@@ -82,11 +85,18 @@ async def register_embedding(
                 key_version=dek_key_version,
             )
         except Exception as exc:
-            from fastapi import HTTPException, status
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Erro ao descriptografar DEK: {str(exc)}",
             )
+    else:
+        tenant_dek = dek_manager.get_cached_dek(tenant_id)
+
+    if tenant_dek is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="DEK do tenant não fornecida e nenhuma DEK em cache para este tenant",
+        )
     from app.engine.detector import FaceDetector
     from app.engine.embedder import FaceEmbedder
     from app.main import face_detector, face_embedder
@@ -156,7 +166,7 @@ async def register_embedding(
         mean_embedding = mean_embedding / norm
 
     # Criptografar
-    crypto = EmbeddingCrypto(settings.aes_key)
+    crypto = EmbeddingCrypto(tenant_dek.hex())
     iv, tag, ciphertext = crypto.encrypt_embedding(mean_embedding)
 
     return RegisterEmbeddingResponse(
@@ -172,7 +182,7 @@ async def register_embedding(
 @router.delete("/{tenant_id}/{person_id}", response_model=InvalidateResponse)
 async def invalidate_embedding(
     tenant_id: str,
-    person_id: int,
+    person_id: str,
 ) -> InvalidateResponse:
     """
     Invalida embedding em cache quando usuário é removido ou atualizado.
@@ -181,7 +191,7 @@ async def invalidate_embedding(
 
     Args:
         tenant_id: ID do tenant
-        person_id: ID da pessoa
+        person_id: ID da pessoa (UUID do backend ou inteiro legado)
 
     Returns:
         InvalidateResponse com invalidated=true
@@ -189,5 +199,8 @@ async def invalidate_embedding(
     from app.main import embedding_cache
 
     embedding_cache.invalidate(tenant_id, person_id)
+    # Entradas legadas podem ter sido cacheadas com chave inteira
+    if person_id.isdigit():
+        embedding_cache.invalidate(tenant_id, int(person_id))
 
     return InvalidateResponse(invalidated=True)

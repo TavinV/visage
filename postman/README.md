@@ -1,6 +1,6 @@
-# Postman — VisageX API
+# Postman — Visage API
 
-Coleção oficial do backend Express. Importe `VisageX API.postman_collection.json` no Postman (File → Import).
+Coleção oficial do backend Express. Importe `Visage API.postman_collection.json` no Postman (File → Import).
 
 ## Convenções (importantes para evolução)
 
@@ -37,7 +37,7 @@ Configuradas como variáveis da coleção — alteráveis em **Edit Collection �
 
 | Variável             | Default                            |
 | -------------------- | ---------------------------------- |
-| `superAdminEmail`    | `admin@visagex.local`              |
+| `superAdminEmail`    | `admin@Visage.local`               |
 | `superAdminPassword` | `Ota@47802341825`                  |
 | `umcEmail`           | `otavioviniciusads@gmail.com`      |
 | `umcPassword`        | `Ota@181207`                       |

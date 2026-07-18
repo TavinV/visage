@@ -5,7 +5,7 @@ e calibração automática de thresholds.
 """
 
 from pydantic import BaseModel, Field, model_validator
-from typing import Optional, Literal
+from typing import Optional, Literal, Union
 
 
 # ============================================================================
@@ -21,8 +21,11 @@ class EncryptedDEK(BaseModel):
 
 
 class EncryptedEmbedding(BaseModel):
-    """Embedding criptografado armazenado no Node.js"""
-    person_id: int
+    """Embedding criptografado armazenado no Node.js.
+
+    person_id aceita int (legado/testes) ou str (UUIDs do backend).
+    """
+    person_id: Union[int, str]
     embedding_iv: str = Field(..., description="IV em hexadecimal (12 bytes)")
     embedding_tag: str = Field(..., description="Tag GCM em hexadecimal (16 bytes)")
     embedding_ct: str = Field(..., description="Ciphertext em hexadecimal (2048 bytes)")
@@ -70,7 +73,7 @@ class RecognizeRequest(BaseModel):
 class RecognizeResponse(BaseModel):
     """Response completo de /recognize com todos os scores brutos."""
     status: str = Field(..., description="Status: identified, not_identified, liveness_failed, no_face_detected, multiple_faces_detected")
-    person_id: Optional[int] = None
+    person_id: Optional[Union[int, str]] = None
     confidence: Optional[float] = None
     liveness_score: Optional[float] = None
     liveness_v1_raw: Optional[float] = None
@@ -81,6 +84,77 @@ class RecognizeResponse(BaseModel):
     detection_score_raw: Optional[float] = None
     best_distance_raw: Optional[float] = None
     processing_ms: int
+
+
+# ============================================================================
+# SCHEMAS DE ENROLLMENT (cadastro via QR Code)
+# ============================================================================
+
+class EnrollFrameResponse(BaseModel):
+    """Response de POST /enroll/frame.
+
+    status = 'frame_accepted' → embedding do frame cifrado individualmente
+    com a DEK do tenant (mesmo formato de /embeddings/register).
+    Qualquer outro status → frame rejeitado, frontend re-tenta.
+    """
+    status: str = Field(
+        ...,
+        description=(
+            "frame_accepted | no_face_detected | multiple_faces_detected | "
+            "low_detection_score | liveness_failed"
+        ),
+    )
+    embedding_iv: Optional[str] = None
+    embedding_tag: Optional[str] = None
+    embedding_ct: Optional[str] = None
+    liveness_score: Optional[float] = None
+    detection_score: Optional[float] = None
+    processing_ms: int
+
+
+class EnrollFrameEmbedding(BaseModel):
+    """Embedding cifrado de um frame individual do fluxo de cadastro."""
+    embedding_iv: str
+    embedding_tag: str
+    embedding_ct: str
+
+
+class EnrollFinalizeRequest(BaseModel):
+    """Request de POST /enroll/finalize — consolida N frames em um embedding."""
+    tenant_id: str
+    tenant_dek: EncryptedDEK
+    frames: list[EnrollFrameEmbedding] = Field(..., min_length=1)
+
+
+class EnrollFinalizeResponse(BaseModel):
+    """Embedding consolidado (média vetorial + L2), cifrado com a DEK."""
+    embedding_iv: str
+    embedding_tag: str
+    embedding_ct: str
+    key_version: int
+    model_version: str = "arcface_r50_v1"
+    frames_used: int
+
+
+# ============================================================================
+# SCHEMAS DE CACHE
+# ============================================================================
+
+class WarmCacheRequest(BaseModel):
+    """Request de POST /cache/warm — popula cache antes da chamada abrir."""
+    tenant_id: str
+    tenant_dek: EncryptedDEK
+    candidates: list[EncryptedEmbedding]
+
+
+class WarmCacheResponse(BaseModel):
+    """Quantidade de embeddings descriptografados e cacheados."""
+    warmed: int
+
+
+class InvalidateDekResponse(BaseModel):
+    """Response de DELETE /cache/dek/{tenant_id}."""
+    invalidated: bool
 
 
 # ============================================================================

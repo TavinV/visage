@@ -20,10 +20,10 @@ class MemoryEmbeddingCache:
 
     def __init__(self):
         """Inicializa cache vazio com lock para thread-safety."""
-        self._cache: dict[str, dict[int, np.ndarray]] = {}
+        self._cache: dict[str, dict[int | str, np.ndarray]] = {}
         self._lock = threading.RLock()
 
-    def get(self, tenant_id: str, person_id: int) -> Optional[np.ndarray]:
+    def get(self, tenant_id: str, person_id: int | str) -> Optional[np.ndarray]:
         """
         Recupera embedding do cache para um person_id em um tenant.
 
@@ -40,7 +40,7 @@ class MemoryEmbeddingCache:
                 return None
             return tenant_cache.get(person_id)
 
-    def set(self, tenant_id: str, person_id: int, embedding: np.ndarray) -> None:
+    def set(self, tenant_id: str, person_id: int | str, embedding: np.ndarray) -> None:
         """
         Armazena embedding no cache.
 
@@ -54,7 +54,7 @@ class MemoryEmbeddingCache:
                 self._cache[tenant_id] = {}
             self._cache[tenant_id][person_id] = embedding.copy()
 
-    def invalidate(self, tenant_id: str, person_id: int) -> None:
+    def invalidate(self, tenant_id: str, person_id: int | str) -> None:
         """
         Remove um embedding específico do cache.
 
@@ -78,7 +78,7 @@ class MemoryEmbeddingCache:
             if tenant_id in self._cache:
                 del self._cache[tenant_id]
 
-    def get_many(self, tenant_id: str, person_ids: list[int]) -> dict[int, np.ndarray]:
+    def get_many(self, tenant_id: str, person_ids: list[int | str]) -> dict[int | str, np.ndarray]:
         """
         Recupera múltiplos embeddings do cache de uma vez.
 

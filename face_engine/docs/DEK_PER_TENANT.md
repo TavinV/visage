@@ -164,8 +164,8 @@ embedding_crypto = EmbeddingCrypto(dek_bytes.hex())
 - [x] `app/core/config.py` — Atualizado com MASTER_KEY
 - [x] `app/api/schemas.py` — Novos schemas (EncryptedDEK, EncryptedEmbedding)
 - [x] `app/main.py` — Inicializa DEKManager no startup
-- [ ] `app/api/routes/recognize.py` — Usar tenant_dek do request
-- [ ] `app/api/routes/embeddings.py` — Usar tenant_dek do request
+- [x] `app/api/routes/recognize.py` — Usar tenant_dek do request
+- [x] `app/api/routes/embeddings.py` — Usar tenant_dek do request
 - [ ] `app/api/routes/calibrate.py` — Usar tenant_dek do request
 - [ ] Testes de invalidação de DEK (malformed hex, invalid tag, etc)
 - [ ] Documentação de rotação de chave (key_version)

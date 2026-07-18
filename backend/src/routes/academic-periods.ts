@@ -39,7 +39,7 @@ router.get(
     try {
       const { tenantId, role } = req.tenant!;
 
-      if (role !== "admin" && role !== "super_admin") {
+      if (!["admin", "manager", "teacher", "super_admin"].includes(role)) {
         res.status(403).json({ error: "Forbidden", code: "forbidden" });
         return;
       }
@@ -101,7 +101,7 @@ router.get(
     try {
       const { tenantId, role } = req.tenant!;
 
-      if (role !== "admin" && role !== "super_admin") {
+      if (!["admin", "manager", "teacher", "super_admin"].includes(role)) {
         res.status(403).json({ error: "Forbidden", code: "forbidden" });
         return;
       }

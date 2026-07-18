@@ -56,8 +56,17 @@ export const DatabaseURISchema = z
 export interface TenantContext {
   tenantId: string;
   userId: string;
-  role: "super_admin" | "admin" | "manager" | "teacher" | "student";
+  role: "super_admin" | "admin" | "manager" | "teacher" | "student" | "device";
   email: string;
+}
+
+// ── Contexto de dispositivo (totem) autenticado via X-Device-Key ───────────
+
+export interface DeviceContext {
+  deviceId: string;
+  tenantId: string;
+  locationId?: string;
+  deviceFingerprint: string;
 }
 
 export interface JWTPayload {

@@ -22,6 +22,7 @@ import numpy as np
 from fastapi import APIRouter, HTTPException, UploadFile, Form, status
 
 from app.api.schemas import RecognizeResponse, ThresholdConfig
+from app.core.logging import logger
 
 router = APIRouter(tags=["recognition"])
 
@@ -67,7 +68,7 @@ async def recognize(
     tenant_id: str = Form(...),
     image: UploadFile = Form(...),
     candidates: str = Form(...),
-    dek_ct: str = Form(None),  # DEK criptografada (hex) — opcional para backwards compat
+    dek_ct: str = Form(None),  # DEK criptografada (hex) — opcional se já houver DEK em cache para o tenant
     dek_iv: str = Form(None),  # IV da DEK (hex)
     dek_tag: str = Form(None),  # Tag GCM da DEK (hex)
     dek_key_version: str = Form(default="1"),  # Versão da chave
@@ -107,7 +108,6 @@ async def recognize(
         RecognizeResponse com status, confidence e scores brutos.
     """
     import json
-    from app.core.config import settings
     from app.utils.crypto import EmbeddingCrypto
     from app.engine.hsv_analysis import analyze_screen_saturation
     from app.main import (
@@ -122,24 +122,33 @@ async def recognize(
     start_time = time.time()
 
     # ------------------------------------------------------------------
-    # Descriptografar DEK se fornecida (novo fluxo multi-tenant)
+    # Resolver DEK do tenant (novo fluxo multi-tenant): descriptografa se
+    # fornecida na request, senão tenta reaproveitar do cache do DEKManager.
     # ------------------------------------------------------------------
+    tenant_dek: Optional[bytes] = None
     if dek_ct and dek_iv and dek_tag:
         try:
             # DEKManager descifra e cacheia a DEK
-            dek_manager.decrypt_dek(
+            tenant_dek = dek_manager.decrypt_dek(
                 tenant_id=tenant_id,
                 dek_ct_hex=dek_ct,
                 dek_iv_hex=dek_iv,
                 dek_tag_hex=dek_tag,
                 key_version=dek_key_version,
             )
-            # DEK agora está cacheada e será usada para descriptografar embeddings
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Erro ao descriptografar DEK: {str(exc)}",
             )
+    else:
+        tenant_dek = dek_manager.get_cached_dek(tenant_id)
+
+    if tenant_dek is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="DEK do tenant não fornecida e nenhuma DEK em cache para este tenant",
+        )
 
     # ------------------------------------------------------------------
     # Montar ThresholdConfig com valores fornecidos ou defaults
@@ -196,6 +205,10 @@ async def recognize(
     all_faces = face_detector.detect_all_faces(image_array, min_det_score=thresholds.detection_score_min)
 
     if len(all_faces) == 0:
+        logger.info(
+            "recognize[%s]: NO_FACE — nenhuma face com det_score >= %.2f",
+            tenant_id, thresholds.detection_score_min,
+        )
         asyncio.create_task(
             _save_audit_frame(image_array, tenant_id, "no_face_detected", None)
         )
@@ -205,6 +218,11 @@ async def recognize(
         )
 
     if len(all_faces) > 1:
+        logger.info(
+            "recognize[%s]: MULTIPLE_FACES — %d faces (scores: %s)",
+            tenant_id, len(all_faces),
+            ", ".join(f"{f.get('det_score', 0.0):.2f}" for f in all_faces),
+        )
         asyncio.create_task(
             _save_audit_frame(image_array, tenant_id, "multiple_faces", None)
         )
@@ -233,6 +251,19 @@ async def recognize(
             v2_weight=thresholds.liveness_v2_weight,
         )
 
+        # Sempre logar os scores do MiniFASNet — é o dado necessário para
+        # debugar falsos positivos de spoofing em câmeras ruins
+        logger.info(
+            "recognize[%s]: liveness v1=%.3f v2=%.3f combinado=%.3f "
+            "(threshold=%.2f, pesos=%.2f/%.2f, det=%.3f) -> %s",
+            tenant_id,
+            liveness_v1_raw, liveness_v2_raw, liveness_combined_raw,
+            thresholds.liveness,
+            thresholds.liveness_v1_weight, thresholds.liveness_v2_weight,
+            detection_score_raw,
+            "APROVADO" if is_live else "REPROVADO (MiniFASNet)",
+        )
+
         if not is_live:
             asyncio.create_task(
                 _save_audit_frame(image_array, tenant_id, "liveness_failed", None)
@@ -258,8 +289,22 @@ async def recognize(
         saturation_std_min=thresholds.hsv_saturation_std_min,
     )
 
+    if is_screen_suspicious:
+        logger.info(
+            "recognize[%s]: HSV suspeito de tela — saturação média=%.1f (máx=%.1f) "
+            "desvio=%.1f (mín=%.1f); liveness=%.3f vs corte combinado=%.3f",
+            tenant_id,
+            saturation_mean, thresholds.hsv_saturation_max,
+            saturation_std, thresholds.hsv_saturation_std_min,
+            liveness_combined_raw, thresholds.liveness * 1.2,
+        )
+
     # Bloqueia se HSV suspeito E score MiniFASNet abaixo de threshold * 1.2
     if is_screen_suspicious and liveness_combined_raw < (thresholds.liveness * 1.2):
+        logger.info(
+            "recognize[%s]: REPROVADO (HSV+MiniFASNet) — tela suspeita com liveness %.3f < %.3f",
+            tenant_id, liveness_combined_raw, thresholds.liveness * 1.2,
+        )
         asyncio.create_task(
             _save_audit_frame(image_array, tenant_id, "liveness_failed_screen", None)
         )
@@ -294,7 +339,7 @@ async def recognize(
             processing_ms=int((time.time() - start_time) * 1000),
         )
 
-    crypto = EmbeddingCrypto(settings.aes_key)
+    crypto = EmbeddingCrypto(tenant_dek.hex())
     candidate_ids = [c["person_id"] for c in candidates_list]
     cached_embeddings = embedding_cache.get_many(tenant_id, candidate_ids)
 
@@ -343,6 +388,12 @@ async def recognize(
         idx, best_distance_raw, confidence = result
         person_id_found = candidates_list[idx]["person_id"]
 
+        logger.info(
+            "recognize[%s]: IDENTIFICADO person=%s distância=%.3f (threshold=%.2f) "
+            "confiança=%.2f, %d candidatos",
+            tenant_id, person_id_found, best_distance_raw,
+            thresholds.recognition, confidence, len(candidates_list),
+        )
         asyncio.create_task(
             _save_audit_frame(image_array, tenant_id, "identified", person_id_found)
         )
@@ -361,6 +412,21 @@ async def recognize(
             processing_ms=processing_ms,
         )
 
+    # Menor distância mesmo sem match — mostra o quão perto o melhor
+    # candidato ficou do threshold (essencial para debugar quase-matches)
+    all_distances = face_comparator.compute_distances(
+        query_embedding, embeddings_for_comparison
+    )
+    if all_distances:
+        best_distance_raw = float(min(all_distances.values()))
+
+    logger.info(
+        "recognize[%s]: NAO_IDENTIFICADO — melhor distância %s vs threshold %.2f "
+        "(%d candidatos)",
+        tenant_id,
+        f"{best_distance_raw:.3f}" if best_distance_raw is not None else "n/a",
+        thresholds.recognition, len(candidates_list),
+    )
     asyncio.create_task(
         _save_audit_frame(image_array, tenant_id, "not_identified", None)
     )

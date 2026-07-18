@@ -29,6 +29,8 @@ export interface AuthTokens {
     email: string;
     name: string;
     role: string;
+    /** Senha temporária em uso — o frontend força a troca antes do console */
+    mustChangePassword: boolean;
   };
 }
 
@@ -42,7 +44,9 @@ interface RefreshPayload {
 // ── Constantes ───────────────────────────────────────────────────────────────
 
 const REFRESH_PREFIX = "rtoken:";
+const RESET_PREFIX = "pwdreset:";
 const ACCESS_TOKEN_TTL_SECONDS = 900; // 15 minutos
+const RESET_TTL_SECONDS = 900; // link de redefinição vive só 15 minutos
 
 // ── Serviço ───────────────────────────────────────────────────────────────────
 
@@ -124,6 +128,7 @@ class AuthService extends BaseService {
         email: user.email ?? "",
         name: user.name,
         role: user.role,
+        mustChangePassword: user.mustChangePassword ?? false,
       },
     };
   }
@@ -160,6 +165,63 @@ class AuthService extends BaseService {
    */
   async logout(refreshToken: string): Promise<void> {
     await redis.del(`${REFRESH_PREFIX}${refreshToken}`);
+  }
+
+  // ── Redefinição de senha ─────────────────────────────────────────────────────
+
+  /**
+   * Gera token de redefinição (uso único, TTL curtíssimo) e envia por email.
+   * Resposta idêntica exista ou não a conta — não vaza cadastros.
+   */
+  async requestPasswordReset(email: string): Promise<void> {
+    const user = await this.prisma.user.findFirst({
+      where: { email },
+      select: { id: true, name: true, email: true, passwordHash: true },
+    });
+    // Só contas com senha (alunos não têm acesso ao painel)
+    if (!user || !user.passwordHash || !user.email) return;
+
+    const token = crypto.randomBytes(32).toString("base64url");
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    await redis.set(
+      `${RESET_PREFIX}${tokenHash}`,
+      user.id,
+      { EX: RESET_TTL_SECONDS }
+    );
+
+    const { emailService } = await import("./email.service");
+    try {
+      await emailService.send({
+        to: user.email,
+        templateId: "password-reset",
+        context: {
+          name: user.name,
+          resetUrl: `${config.frontendUrl}/reset-password?token=${token}`,
+          expiresIn: "15 minutos",
+        },
+      });
+    } catch (error) {
+      this.logger.warn({ userId: user.id, error }, "Failed to send password reset email");
+    }
+  }
+
+  /**
+   * Consome o token (GETDEL — uso único mesmo sob concorrência) e troca a senha.
+   */
+  async resetPassword(token: string, newPassword: string): Promise<void> {
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    const userId = await redis.getDel(`${RESET_PREFIX}${tokenHash}`);
+    if (!userId) {
+      throw new UnauthorizedError("Link de redefinição inválido ou expirado");
+    }
+
+    const passwordHash = await bcryptjs.hash(newPassword, 10);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash },
+    });
+
+    this.logger.info({ userId }, "Password reset via email token");
   }
 }
 

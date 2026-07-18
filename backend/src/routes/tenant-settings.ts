@@ -27,6 +27,9 @@ const UpdateSettingsSchema = z.object({
   requireConsentBeforeFacial: z.boolean().optional(),
   enrollmentMultiFrameCount: z.number().int().optional(),
   livenessThresholdEnrollment: z.number().optional(),
+  // Senha do painel do totem — template com {{data}}/{{hora}}; null desativa
+  totemPanelPassword: z.string().max(200).nullable().optional(),
+  totemClockTimezone: z.string().max(50).optional(),
 });
 
 type UpdateSettingsRequest = z.infer<typeof UpdateSettingsSchema>;

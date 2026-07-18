@@ -114,8 +114,8 @@ interface TemplateManifest {
 }
 
 const TEMPLATE_REGISTRY = {
-  "welcome": {
-    subject: "Bem-vindo ao VisageX, {{name}}!",
+  welcome: {
+    subject: "Bem-vindo ao Visage, {{name}}!",
     file: "welcome.hbs",
   },
   "enrollment-invite": {
@@ -123,7 +123,7 @@ const TEMPLATE_REGISTRY = {
     file: "enrollment-invite.hbs",
   },
   "password-reset": {
-    subject: "Redefinição de senha — VisageX",
+    subject: "Redefinição de senha — Visage",
     file: "password-reset.hbs",
   },
   "attendance-report": {
@@ -140,7 +140,7 @@ export type EmailTemplateId = keyof typeof TEMPLATE_REGISTRY;
 
 /** Mapeia cada template ID ao tipo de contexto exigido. */
 export type TemplateContextMap = {
-  "welcome": WelcomeEmailContext;
+  welcome: WelcomeEmailContext;
   "enrollment-invite": EnrollmentInviteEmailContext;
   "password-reset": PasswordResetEmailContext;
   "attendance-report": AttendanceReportEmailContext;
@@ -215,7 +215,11 @@ class EmailService {
 
     // Injeta conteúdo renderizado no layout base
     // `year` é adicionado automaticamente para uso no footer do layout
-    const html = layout({ ...context, body: bodyHtml, year: new Date().getFullYear() });
+    const html = layout({
+      ...context,
+      body: bodyHtml,
+      year: new Date().getFullYear(),
+    });
 
     const info = await mailer.sendMail({
       from: `"${config.smtpFromName}" <${config.smtpFromEmail}>`,

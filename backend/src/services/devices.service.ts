@@ -14,12 +14,14 @@ export interface CreateDeviceInput {
   deviceFingerprint: string;
   label?: string;
   locationId?: string;
+  allowEnrollment?: boolean;
 }
 
 export interface UpdateDeviceInput {
   label?: string;
   locationId?: string;
   isActive?: boolean;
+  allowEnrollment?: boolean;
 }
 
 export interface DeviceOutput {
@@ -29,6 +31,7 @@ export interface DeviceOutput {
   label?: string;
   locationId?: string;
   isActive: boolean;
+  allowEnrollment: boolean;
   lastSeenAt?: Date;
   createdAt: Date;
 }
@@ -92,8 +95,9 @@ class DevicesService extends BaseService {
 
   /**
    * Cria um novo dispositivo.
+   * A apiKey bruta só existe nesta resposta — apenas o SHA-256 é persistido.
    */
-  async create(input: CreateDeviceInput): Promise<DeviceOutput> {
+  async create(input: CreateDeviceInput): Promise<DeviceOutput & { apiKey: string }> {
     // Validar que o tenant existe
     const tenant = await this.prisma.tenant.findUnique({ where: { id: input.tenantId } });
     if (!tenant) throw new NotFoundError("Tenant not found");
@@ -118,11 +122,12 @@ class DevicesService extends BaseService {
         locationId: input.locationId,
         apiKeyHash,
         isActive: true,
+        allowEnrollment: input.allowEnrollment ?? false,
       },
     });
 
     this.logger.info({ deviceId: device.id, tenantId: input.tenantId }, "Device created");
-    return this.toOutput(device);
+    return { ...this.toOutput(device), apiKey };
   }
 
   /**
@@ -152,11 +157,34 @@ class DevicesService extends BaseService {
         ...(input.label !== undefined && { label: input.label }),
         ...(input.locationId !== undefined && { locationId: input.locationId }),
         ...(input.isActive !== undefined && { isActive: input.isActive }),
+        ...(input.allowEnrollment !== undefined && { allowEnrollment: input.allowEnrollment }),
       },
     });
 
     this.logger.info({ deviceId: id, tenantId }, "Device updated");
     return this.toOutput(updated);
+  }
+
+  /**
+   * Regenera a chave de API do dispositivo, invalidando a anterior imediatamente.
+   * A apiKey bruta só existe nesta resposta — apenas o SHA-256 é persistido.
+   */
+  async regenerateApiKey(id: string, tenantId: string): Promise<DeviceOutput & { apiKey: string }> {
+    const device = await this.prisma.device.findFirst({
+      where: { id, tenantId },
+    });
+    if (!device) throw new NotFoundError("Device not found");
+
+    const apiKey = crypto.randomBytes(32).toString("hex");
+    const apiKeyHash = crypto.createHash("sha256").update(apiKey).digest("hex");
+
+    const updated = await this.prisma.device.update({
+      where: { id },
+      data: { apiKeyHash },
+    });
+
+    this.logger.info({ deviceId: id, tenantId }, "Device API key regenerated");
+    return { ...this.toOutput(updated), apiKey };
   }
 
   /**
@@ -180,6 +208,7 @@ class DevicesService extends BaseService {
       label: device.label ?? undefined,
       locationId: device.locationId ?? undefined,
       isActive: device.isActive,
+      allowEnrollment: device.allowEnrollment ?? false,
       lastSeenAt: device.lastSeenAt ?? undefined,
       createdAt: device.createdAt,
     };

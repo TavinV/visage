@@ -24,6 +24,12 @@ import classesRoutes from "./routes/classes";
 import classEnrollmentsRoutes from "./routes/class-enrollments";
 import classSessionsRoutes from "./routes/class-sessions";
 import usersRoutes from "./routes/users";
+import studentsRoutes from "./routes/students";
+import enrollmentRoutes from "./routes/enrollment";
+import createDeviceRouter from "./routes/device";
+import reportsRoutes from "./routes/reports";
+import auditRoutes from "./routes/audit";
+import adminRoutes from "./routes/admin";
 
 export function createApp(): Express {
   const app = express();
@@ -52,6 +58,9 @@ export function createApp(): Express {
   app.use("/auth",    express.json({ limit: "16kb" }), express.urlencoded({ limit: "16kb", extended: false }));
   app.use("/plans",   express.json({ limit: "16kb" }), express.urlencoded({ limit: "16kb", extended: false }));
   app.use("/tenants", express.json({ limit: "64kb" }), express.urlencoded({ limit: "64kb", extended: false }));
+  // Frames JPEG em base64 (totem): até ~1MB de imagem → ~1.4MB em base64
+  app.use("/device",     express.json({ limit: "2mb" }));
+  app.use("/enrollment", express.json({ limit: "2mb" }));
   // Fallback para rotas futuras (ex: upload de frames via face engine)
   app.use(express.json({ limit: "1mb" }));
   app.use(express.urlencoded({ limit: "1mb", extended: true }));
@@ -92,6 +101,12 @@ export function createApp(): Express {
   app.use("/class-enrollments", classEnrollmentsRoutes);
   app.use("/class-sessions", classSessionsRoutes);
   app.use("/users", usersRoutes);
+  app.use("/students", studentsRoutes);
+  app.use("/enrollment", enrollmentRoutes);
+  app.use("/device", createDeviceRouter());
+  app.use("/attendance/reports", reportsRoutes);
+  app.use("/audit", auditRoutes);
+  app.use("/admin", adminRoutes);
 
   // 404 handler
   app.use((_req: Request, res: Response) => {

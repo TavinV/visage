@@ -18,6 +18,12 @@ export interface ClassEnrollmentOutput {
   classId: string;
   userId: string;
   enrolledAt: Date;
+  /** Dados do aluno embutidos — evita um fetch de /users por linha no painel. */
+  student?: {
+    name: string;
+    enrollmentCode?: string;
+    facialStatus: string;
+  };
 }
 
 export interface ListClassEnrollmentsParams extends ListParams {
@@ -49,12 +55,20 @@ class ClassEnrollmentsService extends BaseService {
     };
 
     const [enrollments, total] = await this.prisma.$transaction([
-      this.prisma.classEnrollment.findMany({ where, take, skip, orderBy }),
+      this.prisma.classEnrollment.findMany({
+        where,
+        take,
+        skip,
+        orderBy,
+        include: {
+          user: { select: { name: true, enrollmentCode: true, facialStatus: true } },
+        },
+      }),
       this.prisma.classEnrollment.count({ where }),
     ]);
 
     return this.buildPaginatedResult(
-      enrollments.map(this.toOutput),
+      enrollments.map((e) => this.toOutput(e)),
       total,
       page,
       limit
@@ -148,6 +162,13 @@ class ClassEnrollmentsService extends BaseService {
       classId: enrollment.classId,
       userId: enrollment.userId,
       enrolledAt: enrollment.enrolledAt,
+      ...(enrollment.user && {
+        student: {
+          name: enrollment.user.name,
+          enrollmentCode: enrollment.user.enrollmentCode ?? undefined,
+          facialStatus: enrollment.user.facialStatus,
+        },
+      }),
     };
   }
 }
