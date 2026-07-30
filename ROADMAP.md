@@ -278,7 +278,6 @@
 | ❌     | → Ajuste manual de presença com rastreabilidade                                         |
 | ❌     | **Totem PWA** (`/totem/{device_token}`)                                                 |
 | ❌     | → Modo reconhecimento: loop automático de captura (sem interação)                       |
-| ❌     | → Camada 1 anti-spoofing: variação de pixels em JS (Canvas API, 3 frames × 250ms)       |
 | ❌     | → Exibição de nome + feedback por 3s após reconhecimento                                |
 | ❌     | → SSE: atualização em tempo real do status da chamada                                   |
 | ❌     | → Modo cadastro (`registration_mode`): QR Scan → regulamento LGPD → captura multi-frame |

@@ -71,6 +71,18 @@ export function createAuthLimiter(): RateLimitRequestHandler {
   });
 }
 
+/** Factory — limiter para POST /demo-requests (anti-spam do form público) */
+export function createDemoRequestLimiter(): RateLimitRequestHandler {
+  return rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hora
+    limit: 8,
+    standardHeaders: "draft-7",
+    legacyHeaders: false,
+    store: makeStore("demo-request"),
+    handler,
+  });
+}
+
 /**
  * Limiters de dispositivo — chaveados por deviceId (não por IP).
  * Devem ser aplicados APÓS deviceAuth, que popula req.device.

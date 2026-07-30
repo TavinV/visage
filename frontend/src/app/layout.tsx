@@ -27,7 +27,7 @@ const monoDs = IBM_Plex_Mono({
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://visage.app"),
-  title: "Visage — A chamada que se faz sozinha",
+  title: "Visage — A primeira chamada com reconhecimento facial do Brasil",
   description:
     "A Visage identifica automaticamente quem está presente em sala utilizando reconhecimento facial, registrando a frequência em segundos. Detecção de fraude, criptografia em nível militar e conformidade total com a LGPD.",
   keywords: [
@@ -39,7 +39,7 @@ export const metadata: Metadata = {
     "antifraude",
   ],
   openGraph: {
-    title: "Visage — A chamada que se faz sozinha",
+    title: "Visage — A primeira chamada com reconhecimento facial do Brasil",
     description:
       "Reconhecimento facial para chamada escolar automática. Presença registrada em segundos, com detecção de fraude e criptografia em nível militar.",
     type: "website",

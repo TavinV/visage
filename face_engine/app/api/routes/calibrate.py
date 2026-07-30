@@ -427,6 +427,13 @@ async def calibrate(
     liveness_threshold, liveness_real_pass, liveness_attack_block, liveness_youden = \
         _find_optimal_threshold(real_liveness_scores, attack_liveness_scores, 'higher_is_real')
 
+    # Threshold de cadastro (mais rigoroso): média dos scores reais + margem fixa.
+    # O cadastro exige qualidade melhor que o reconhecimento do dia a dia — em vez do
+    # EER, usa a média de quem realmente passou na captura como piso e soma 0.15.
+    liveness_enrollment_suggested = float(
+        min(1.0, np.mean(real_liveness_scores) + 0.15)
+    )
+
     hsv_threshold, hsv_real_pass, hsv_attack_block, hsv_youden = \
         _find_optimal_threshold(real_saturation_scores, attack_saturation_scores, 'lower_is_real')
 
@@ -462,6 +469,7 @@ async def calibrate(
         youden_score=liveness_youden,
         confidence=confidence_level,
         interpretation=liveness_interpretation,
+        suggested_enrollment_value=round(liveness_enrollment_suggested, 2),
     )
 
     hsv_analysis = ThresholdAnalysis(

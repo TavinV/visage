@@ -66,7 +66,6 @@ export interface TenantSettings {
   recognitionThreshold: number;
   livenessThreshold: number;
   livenessEnabled: boolean;
-  staticPixelThreshold: number;
   allowManualOverride: boolean;
   preAttendanceEnabled: boolean;
   preAttendanceWindowMin: number;

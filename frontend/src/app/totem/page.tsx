@@ -227,14 +227,6 @@ export default function TotemPage() {
     [presentResult]
   );
 
-  const handleStatic = useCallback(() => {
-    presentResult({
-      kind: "error",
-      title: "Imagem estática detectada",
-      message: "A captura parece uma foto. Posicione o próprio rosto e tente de novo.",
-    });
-  }, [presentResult]);
-
   // 5 toques na marca abrem o painel oculto (com senha, quando configurada)
   const handleSecretTap = () => {
     tapCount.current += 1;
@@ -356,7 +348,6 @@ export default function TotemPage() {
               processing={processing}
               result={result}
               onCapture={handleCapture}
-              onStaticDetected={handleStatic}
               onClose={closeCamera}
             />
           </motion.div>

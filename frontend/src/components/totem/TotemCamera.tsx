@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ScanFace, Timer } from "lucide-react";
+import { cn } from "@/lib/cn";
 import { formatPercent } from "@/lib/format";
 import type { CurrentSession } from "@/lib/deviceApi";
 import { useTotemCamera, meanAbsDiff } from "./useTotemCamera";
@@ -13,16 +14,13 @@ import {
   StageError,
   StageResultOverlay,
   FaceGuide,
+  FlashlightOverlay,
+  FlashlightButton,
   type GuideState,
   type TotemResult,
 } from "./TotemStage";
 
 const IDLE_TIMEOUT_S = 60;
-
-/** Diferença média mínima entre frames (escala 0–255) para aceitar como cena viva. */
-const STATIC_PIXEL_THRESHOLD = 3.0;
-const BURST_FRAMES = 3;
-const BURST_INTERVAL_MS = 140;
 
 const DETECT_INTERVAL_MS = 550;
 /** Movimento mínimo entre ticks para considerar alguém presente (fallback sem FaceDetector). */
@@ -40,14 +38,11 @@ const loadingPhrases = [
 
 type FaceState = "none" | "far" | "close" | "good" | "multiple";
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
 interface TotemCameraProps {
   session: CurrentSession | null;
   processing: boolean;
   result: TotemResult | null;
   onCapture: (imageB64: string) => void;
-  onStaticDetected: () => void;
   onClose: () => void;
 }
 
@@ -61,7 +56,6 @@ export function TotemCamera({
   processing,
   result,
   onCapture,
-  onStaticDetected,
   onClose,
 }: TotemCameraProps) {
   const camera = useTotemCamera();
@@ -71,6 +65,7 @@ export function TotemCamera({
   const [phraseIndex, setPhraseIndex] = useState(0);
   const [faceState, setFaceState] = useState<FaceState>("none");
   const [showOverlay, setShowOverlay] = useState(false);
+  const [flashlightOn, setFlashlightOn] = useState(false);
   const busyRef = useRef(false);
   const stableTicks = useRef(0);
   const lastLuminance = useRef<Uint8ClampedArray | null>(null);
@@ -136,8 +131,8 @@ export function TotemCamera({
 
   /**
    * Um tick do laço de reconhecimento: detecta rosto (nativo ou por
-   * movimento), exige 2 ticks estáveis, roda a camada 1 anti-spoofing
-   * e envia o frame — tudo sem interação do aluno.
+   * movimento), exige 2 ticks estáveis e envia o frame — tudo sem
+   * interação do aluno.
    */
   const runDetectionTick = useCallback(async () => {
     const video = camera.videoRef.current;
@@ -189,30 +184,12 @@ export function TotemCamera({
       if (stableTicks.current < 2) return;
       stableTicks.current = 0;
 
-      // Camada 1 anti-spoofing: 3 amostras — cena parada indica foto/impresso
-      const samples: Uint8ClampedArray[] = [];
-      for (let i = 0; i < BURST_FRAMES; i++) {
-        const lum = camera.grabLuminance();
-        if (lum) samples.push(lum);
-        if (i < BURST_FRAMES - 1) await sleep(BURST_INTERVAL_MS);
-      }
-      if (samples.length >= 2) {
-        let maxDiff = 0;
-        for (let i = 1; i < samples.length; i++) {
-          maxDiff = Math.max(maxDiff, meanAbsDiff(samples[i - 1], samples[i]));
-        }
-        if (maxDiff < STATIC_PIXEL_THRESHOLD) {
-          onStaticDetected();
-          return;
-        }
-      }
-
       const imageB64 = camera.captureJpegB64();
       if (imageB64) onCapture(imageB64);
     } finally {
       busyRef.current = false;
     }
-  }, [camera, faceDetection, onCapture, onStaticDetected]);
+  }, [camera, faceDetection, onCapture]);
 
   useEffect(() => {
     if (camera.status !== "ready" || busy) return;
@@ -281,7 +258,7 @@ export function TotemCamera({
                 };
 
   return (
-    <StageShell>
+    <StageShell flashlightOn={flashlightOn}>
       {cameraError ? (
         <StageError
           message="Não foi possível acessar a câmera. Verifique a permissão do navegador."
@@ -297,6 +274,7 @@ export function TotemCamera({
             muted
             className="absolute inset-0 h-full w-full -scale-x-100 object-cover"
           />
+          <FlashlightOverlay active={flashlightOn} scale={guideScale} />
           <FaceGuide
             state={guide}
             scale={guideScale}
@@ -319,14 +297,23 @@ export function TotemCamera({
         live={!!session}
         chip={
           !cameraError ? (
-            <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 font-mono-ds text-xs text-white/85">
-              <Timer size={13} />
-              {countdown}s
-            </span>
+            <div className="flex shrink-0 items-center gap-2">
+              <FlashlightButton active={flashlightOn} onClick={() => setFlashlightOn((v) => !v)} />
+              <span
+                className={cn(
+                  "flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 font-mono-ds text-xs transition-colors duration-300",
+                  flashlightOn ? "bg-flauzino-navy-900/10 text-flauzino-navy-900" : "bg-white/10 text-white/85"
+                )}
+              >
+                <Timer size={13} />
+                {countdown}s
+              </span>
+            </div>
           ) : undefined
         }
         onClose={onClose}
         fraction={cameraError ? undefined : countdown / IDLE_TIMEOUT_S}
+        flashlightOn={flashlightOn}
       />
     </StageShell>
   );

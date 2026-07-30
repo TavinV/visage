@@ -188,6 +188,11 @@ class ThresholdAnalysis(BaseModel):
     youden_score: float = Field(..., description="Índice de Youden (0.0-1.0)")
     confidence: Literal['low', 'medium', 'high'] = Field(..., description="Confiança da análise")
     interpretation: str = Field(..., description="Interpretação em português")
+    suggested_enrollment_value: Optional[float] = Field(
+        default=None,
+        description="Apenas para 'liveness': média dos scores reais + 0.15, usado no cadastro "
+                     "(mais rigoroso que o threshold de reconhecimento)",
+    )
 
 
 class CalibrateResponse(BaseModel):

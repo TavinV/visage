@@ -78,7 +78,7 @@ const actionCopy: Record<RowAction["kind"], { title: string; description: (name:
   "rotate-key": {
     title: "Rotacionar chave de criptografia",
     description: (n) =>
-      `Gera uma nova DEK para "${n}" e recifra todos os embeddings faciais. A operação pode levar alguns segundos.`,
+      `Gera uma nova chave de criptografia para "${n}" e recodifica todos os cadastros faciais com ela. A operação pode levar alguns segundos.`,
     confirm: "Rotacionar chave",
     danger: false,
   },
@@ -169,7 +169,7 @@ export default function TenantsPage() {
       if (a.kind === "rotate-key") {
         const data = (result as { data: RotateDekResult }).data;
         toast.success(
-          `Chave rotacionada (versão ${data.keyVersion}). ${data.embeddingsRotated} embeddings recifrados.`
+          `Chave rotacionada (versão ${data.keyVersion}). ${data.embeddingsRotated} cadastros faciais recodificados.`
         );
       } else {
         const done: Record<string, string> = {
@@ -325,7 +325,7 @@ export default function TenantsPage() {
                       variant="ghost"
                       size="sm"
                       onClick={() => setAction({ kind: "rotate-key", tenant })}
-                      title="Rotacionar chave (DEK)"
+                      title="Rotacionar chave de criptografia"
                       aria-label={`Rotacionar chave de ${tenant.name}`}
                     >
                       <KeyRound size={15} />

@@ -56,7 +56,6 @@ export function RecognitionStatusBadge({ status }: { status: string }) {
     below_threshold: { label: "Abaixo do limiar", variant: "warning" },
     liveness_failed: { label: "Falha de vivacidade", variant: "danger" },
     screen_detected: { label: "Tela detectada", variant: "danger" },
-    static_image: { label: "Imagem estática", variant: "danger" },
     no_face: { label: "Sem rosto", variant: "neutral" },
     error: { label: "Erro", variant: "danger" },
   };

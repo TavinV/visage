@@ -1,0 +1,49 @@
+/* ==========================================================================
+   Flauzino — Typography tokens
+   Poppins across the system. Authority through weight discipline:
+   medium (500) and semibold (600) carry the brand; 700 for display only.
+   ========================================================================== */
+
+:root {
+  /* Families */
+  --font-sans: "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Poppins", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", ui-monospace, "Cascadia Mono", Menlo, monospace;
+
+  /* Weights — priorise medium & semibold */
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* Type scale (1.250 major-third, 16px base) */
+  --text-xs: 0.75rem;   /* 12 */
+  --text-sm: 0.875rem;  /* 14 */
+  --text-base: 1rem;    /* 16 */
+  --text-md: 1.125rem;  /* 18 */
+  --text-lg: 1.375rem;  /* 22 */
+  --text-xl: 1.75rem;   /* 28 */
+  --text-2xl: 2.25rem;  /* 36 */
+  --text-3xl: 2.875rem; /* 46 */
+  --text-4xl: 3.75rem;  /* 60 */
+
+  /* Line heights */
+  --leading-tight: 1.1;
+  --leading-snug: 1.25;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.65;
+
+  /* Letter spacing — tight display, wide eyebrows */
+  --tracking-tighter: -0.03em;
+  --tracking-tight: -0.015em;
+  --tracking-normal: 0em;
+  --tracking-wide: 0.04em;
+  --tracking-eyebrow: 0.14em; /* uppercase labels / kickers */
+
+  /* Semantic roles */
+  --display-weight: var(--weight-semibold);
+  --display-tracking: var(--tracking-tight);
+  --heading-weight: var(--weight-semibold);
+  --body-weight: var(--weight-regular);
+  --label-weight: var(--weight-medium);
+}

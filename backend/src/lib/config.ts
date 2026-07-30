@@ -73,6 +73,8 @@ export const config = {
   smtpPassword: getEnvOptional("SMTP_PASSWORD"),
   smtpFromEmail: getEnv("SMTP_FROM_EMAIL", "no-reply@Visage.com"),
   smtpFromName: getEnv("SMTP_FROM_NAME", "Visage"),
+  // Destinatário das solicitações de demonstração da landing page
+  demoNotifyEmail: getEnv("DEMO_NOTIFY_EMAIL", "otavioviniciusads@gmail.com"),
 
   // Features
   debug: getEnvOptional("DEBUG", "false") === "true",

@@ -16,7 +16,6 @@ const UpdateSettingsSchema = z.object({
   recognitionThreshold: z.number().optional(),
   livenessThreshold: z.number().optional(),
   livenessEnabled: z.boolean().optional(),
-  staticPixelThreshold: z.number().optional(),
   allowManualOverride: z.boolean().optional(),
   preAttendanceEnabled: z.boolean().optional(),
   preAttendanceWindowMin: z.number().int().optional(),

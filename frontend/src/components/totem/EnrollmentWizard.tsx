@@ -37,8 +37,7 @@ const frameRejectionMessages: Record<string, string> = {
   no_face_detected: "Nenhum rosto encontrado. Centralize o rosto na guia.",
   multiple_faces_detected: "Mais de um rosto na imagem. Uma pessoa por vez.",
   low_detection_score: "Imagem pouco nítida. Ajuste a iluminação.",
-  liveness_failed: "A verificação de vivacidade reprovou o frame. Evite fotos ou telas.",
-  static_image: "A imagem parece estática. Mova-se naturalmente diante da câmera.",
+  liveness_failed: "A verificação de vivacidade reprovou a imagem. Evite fotos ou telas.",
 };
 
 const facialStatusLabel: Record<string, string> = {

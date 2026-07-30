@@ -17,7 +17,7 @@ Leia estes arquivos do repositório antes de começar, na ordem:
 3. `.claude/database.md` — schema completo, índices
 4. `.claude/security.md` — envelope encryption (DEK/KEK), LGPD
 5. `.claude/facial-recognition.md` — contratos da engine Python (`/recognize`, `/embeddings/register`, `/cache/warm`, etc.)
-6. `.claude/anti-spoofing.md` — 4 camadas anti-spoofing e thresholds
+6. `.claude/anti-spoofing.md` — 3 camadas anti-spoofing e thresholds
 7. `.claude/api.md` — endpoints REST completos por domínio
 8. `.claude/development.md` — padrões de código por serviço (estrutura de pastas, padrão de serviço OOP, isolamento multi-tenant)
 9. `ROADMAP.md` — checklist detalhado do que já está pronto (✅) e do que falta (❌) — **use isso como fonte de verdade sobre o que implementar**

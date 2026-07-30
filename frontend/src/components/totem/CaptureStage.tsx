@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { useTotemCamera } from "./useTotemCamera";
 import {
   StageShell,
@@ -8,6 +8,8 @@ import {
   StageBottom,
   StageError,
   FaceGuide,
+  FlashlightOverlay,
+  FlashlightButton,
   type GuideState,
 } from "./TotemStage";
 
@@ -39,6 +41,10 @@ interface CaptureStageProps {
 }
 
 const ACCEPTED_FLASH_MS = 900;
+/** Falhas seguidas de nitidez/luz até sugerir a lanterna de tela (piscando o botão). */
+const LOW_LIGHT_HINT_STREAK = 2;
+/** "Imagem pouco nítida. Ajuste a iluminação." e variantes equivalentes vindas do backend. */
+const LOW_LIGHT_FEEDBACK_RE = /nítid|ilumina/i;
 
 /**
  * Palco de captura compartilhado (cadastro e calibração): câmera em tela
@@ -62,6 +68,9 @@ export function CaptureStage({
   sideControls,
 }: CaptureStageProps) {
   const [flashAccepted, setFlashAccepted] = useState(false);
+  const [flashlightOn, setFlashlightOn] = useState(false);
+  const [suggestFlashlight, setSuggestFlashlight] = useState(false);
+  const lowLightStreak = useRef(0);
 
   // Flash verde curto quando um passo é aceito
   useEffect(() => {
@@ -70,6 +79,25 @@ export function CaptureStage({
     const timer = window.setTimeout(() => setFlashAccepted(false), ACCEPTED_FLASH_MS);
     return () => window.clearTimeout(timer);
   }, [acceptedTick]);
+
+  // Falhas repetidas de nitidez/luz sugerem a lanterna (botão piscando) — some
+  // assim que a lanterna liga ou a rejeição deixa de ser desse tipo.
+  useEffect(() => {
+    const isLowLightHint = !flashlightOn && !!feedback && LOW_LIGHT_FEEDBACK_RE.test(feedback);
+    if (!isLowLightHint) {
+      lowLightStreak.current = 0;
+      setSuggestFlashlight(false);
+      return;
+    }
+    lowLightStreak.current += 1;
+    if (lowLightStreak.current >= LOW_LIGHT_HINT_STREAK) setSuggestFlashlight(true);
+  }, [feedback, flashlightOn]);
+
+  const toggleFlashlight = () => {
+    setFlashlightOn((v) => !v);
+    setSuggestFlashlight(false);
+    lowLightStreak.current = 0;
+  };
 
   const guide: GuideState = flashAccepted
     ? "success"
@@ -102,7 +130,7 @@ export function CaptureStage({
                 };
 
   return (
-    <StageShell>
+    <StageShell flashlightOn={flashlightOn}>
       {camera.status === "error" ? (
         <StageError
           message="Não foi possível acessar a câmera. Verifique a permissão do navegador."
@@ -117,6 +145,7 @@ export function CaptureStage({
             muted
             className="absolute inset-0 h-full w-full -scale-x-100 object-cover"
           />
+          <FlashlightOverlay active={flashlightOn} scale={guideScale} />
           <FaceGuide state={guide} scale={guideScale} />
           <StageBottom contentKey={status.key} title={status.title} subtitle={status.subtitle} />
           {sideControls && (
@@ -133,6 +162,10 @@ export function CaptureStage({
         subtitle={subtitle}
         onClose={onClose}
         segments={{ total: totalSteps, completed: completedSteps }}
+        chip={
+          <FlashlightButton active={flashlightOn} onClick={toggleFlashlight} suggest={suggestFlashlight} />
+        }
+        flashlightOn={flashlightOn}
       />
     </StageShell>
   );

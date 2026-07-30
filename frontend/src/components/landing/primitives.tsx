@@ -8,7 +8,9 @@ import {
   useTransform,
   type Variants,
 } from "framer-motion";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import Link from "next/link";
+import { EagleMark } from "@/components/ui/Logo";
 
 /* Signature easing — long, confident decel curve used across the page. */
 export const EASE = [0.22, 1, 0.36, 1] as const;
@@ -154,14 +156,116 @@ export function VisageMark({ className = "h-9 w-9" }: { className?: string }) {
   );
 }
 
+/* Marca temporária: águia da Flauzino (white-label), como na aplicação
+   autenticada. O VisageMark original acima fica preservado para quando a
+   marca própria voltar. */
 export function Wordmark({ className = "" }: { className?: string }) {
   return (
-    <span className={`flex items-center gap-2.5 ${className}`}>
-      <VisageMark className="h-8 w-8" />
-      <span className="text-[17px] font-semibold tracking-tight text-brand-950">
-        Visage
-      </span>
+    <span className={`flex items-center gap-2.5 text-brand-950 ${className}`}>
+      <EagleMark size={36} />
+      <span className="text-[17px] font-semibold tracking-tight">Visage</span>
     </span>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  ShinyText — gradient sweep across text, like reactbits' shiny-text */
+/* ------------------------------------------------------------------ */
+
+export function ShinyText({
+  children,
+  className = "",
+  as: Tag = "span",
+  color = "#172554",
+  shine = "#8ba2f0",
+}: {
+  children: ReactNode;
+  className?: string;
+  as?: "span" | "h1" | "h2" | "h3";
+  /** base text color the shine sweeps over */
+  color?: string;
+  shine?: string;
+}) {
+  return (
+    <Tag
+      className={`inline-block animate-shimmer bg-[length:200%_100%] bg-clip-text text-transparent ${className}`}
+      style={{
+        backgroundImage: `linear-gradient(110deg, ${color} 40%, ${shine} 50%, ${color} 60%)`,
+      }}
+    >
+      {children}
+    </Tag>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  DecryptedText — scrambles into place on view, like reactbits'      */
+/*  decrypted-text. Cycles random glyphs before settling per-char.     */
+/* ------------------------------------------------------------------ */
+
+const DECRYPT_CHARS = "!<>-_\\/[]{}—=+*^?#________";
+
+export function DecryptedText({
+  text,
+  className = "",
+  as: Tag = "span",
+  speed = 32,
+  revealDelay = 45,
+}: {
+  text: string;
+  className?: string;
+  as?: "span" | "h1" | "h2" | "h3";
+  /** ms between scramble frames */
+  speed?: number;
+  /** ms between each character locking in */
+  revealDelay?: number;
+}) {
+  const ref = useRef<HTMLElement>(null);
+  const inView = useInView(ref, { once: true, margin: "-15% 0px" });
+  const [display, setDisplay] = useState(text);
+  const [started, setStarted] = useState(false);
+
+  useEffect(() => {
+    if (!inView || started) return;
+    setStarted(true);
+
+    let revealed = 0;
+    const scrambleFor = (index: number) =>
+      text
+        .split("")
+        .map((ch, i) => {
+          if (ch === " ") return " ";
+          if (i < index) return text[i];
+          return DECRYPT_CHARS[Math.floor(Math.random() * DECRYPT_CHARS.length)];
+        })
+        .join("");
+
+    const scrambleInterval = setInterval(() => {
+      setDisplay(scrambleFor(revealed));
+    }, speed);
+
+    const revealInterval = setInterval(() => {
+      revealed += 1;
+      if (revealed > text.length) {
+        clearInterval(revealInterval);
+        clearInterval(scrambleInterval);
+        setDisplay(text);
+        return;
+      }
+      setDisplay(scrambleFor(revealed));
+    }, revealDelay);
+
+    return () => {
+      clearInterval(scrambleInterval);
+      clearInterval(revealInterval);
+    };
+  }, [inView, started, text, speed, revealDelay]);
+
+  return (
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    <Tag ref={ref as any} className={`tabular-nums ${className}`} aria-label={text}>
+      {display}
+    </Tag>
   );
 }
 
@@ -192,7 +296,7 @@ export function Eyebrow({
 
 export function PrimaryButton({
   children,
-  href = "#demo",
+  href = "/demonstracao",
   className = "",
 }: {
   children: ReactNode;
@@ -200,12 +304,12 @@ export function PrimaryButton({
   className?: string;
 }) {
   return (
-    <a
+    <Link
       href={href}
       className={`group inline-flex cursor-pointer items-center gap-2 rounded-xl bg-brand-600 px-5 py-3 text-sm font-semibold text-white shadow-pop transition-all duration-200 hover:bg-brand-700 hover:shadow-lift focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-500/30 ${className}`}
     >
       {children}
-    </a>
+    </Link>
   );
 }
 

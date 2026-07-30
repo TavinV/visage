@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ScanFace, ClipboardCheck, ShieldAlert, QrCode, MonitorSmartphone, Activity } from "lucide-react";
+import { ScanFace, ClipboardCheck, ShieldAlert, IdCard, MonitorSmartphone, Activity } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -32,7 +32,6 @@ const SettingsSchema = z.object({
   recognitionThreshold: threshold("o limiar de reconhecimento"),
   livenessEnabled: z.boolean(),
   livenessThreshold: threshold("o limiar de vivacidade"),
-  staticPixelThreshold: z.number("Informe o limiar.").min(0, "Mínimo 0."),
   allowManualOverride: z.boolean(),
   preAttendanceEnabled: z.boolean(),
   preAttendanceWindowMin: z
@@ -46,10 +45,6 @@ const SettingsSchema = z.object({
     .int("Use um número inteiro.")
     .min(1, "Mínimo 1 hora."),
   requireConsentBeforeFacial: z.boolean(),
-  enrollmentTokenExpiryHours: z
-    .number("Informe as horas.")
-    .int("Use um número inteiro.")
-    .min(1, "Mínimo 1 hora."),
   enrollmentMultiFrameCount: z
     .number("Informe a quantidade.")
     .int("Use um número inteiro.")
@@ -89,7 +84,6 @@ export default function SettingsPage() {
       recognitionThreshold: s.recognitionThreshold,
       livenessEnabled: s.livenessEnabled,
       livenessThreshold: s.livenessThreshold,
-      staticPixelThreshold: s.staticPixelThreshold,
       allowManualOverride: s.allowManualOverride,
       preAttendanceEnabled: s.preAttendanceEnabled,
       preAttendanceWindowMin: s.preAttendanceWindowMin,
@@ -97,7 +91,6 @@ export default function SettingsPage() {
       saveFraudFrames: s.saveFraudFrames,
       fraudRetentionHours: s.fraudRetentionHours,
       requireConsentBeforeFacial: s.requireConsentBeforeFacial,
-      enrollmentTokenExpiryHours: s.enrollmentTokenExpiryHours,
       enrollmentMultiFrameCount: s.enrollmentMultiFrameCount,
       livenessThresholdEnrollment: s.livenessThresholdEnrollment,
       totemPanelPassword: s.totemPanelPassword ?? "",
@@ -155,7 +148,7 @@ export default function SettingsPage() {
         <Card>
           <CardHeader
             title="Reconhecimento"
-            description="Sensibilidade do matching facial e das defesas anti-spoofing."
+            description="Sensibilidade do reconhecimento facial e da proteção contra fraudes (fotos, vídeos e telas)."
             icon={<ScanFace size={18} strokeWidth={1.75} />}
             actions={
               <Button
@@ -174,7 +167,7 @@ export default function SettingsPage() {
               type="number"
               step="0.01"
               min={0}
-              hint="Limiar de similaridade do matching — valores maiores são mais rígidos."
+              hint="Nível de exigência da comparação facial — valores maiores tornam o reconhecimento mais rígido."
               error={errors.recognitionThreshold?.message}
               {...form.register("recognitionThreshold", asNumber)}
             />
@@ -190,15 +183,6 @@ export default function SettingsPage() {
               min={0}
               error={errors.livenessThreshold?.message}
               {...form.register("livenessThreshold", asNumber)}
-            />
-            <Input
-              label="Limiar de variação de pixels"
-              type="number"
-              step="0.1"
-              min={0}
-              hint="Diferença mínima entre frames para descartar imagens estáticas."
-              error={errors.staticPixelThreshold?.message}
-              {...form.register("staticPixelThreshold", asNumber)}
             />
           </CardBody>
         </Card>
@@ -266,22 +250,15 @@ export default function SettingsPage() {
         <Card>
           <CardHeader
             title="Cadastro biométrico"
-            description="Regras do fluxo de cadastro via QR Code no totem."
-            icon={<QrCode size={18} strokeWidth={1.75} />}
+            description="Regras do fluxo de cadastro por CPF no totem."
+            icon={<IdCard size={18} strokeWidth={1.75} />}
           />
           <CardBody className="flex flex-col gap-4">
-            <Input
-              label="Validade do token (horas)"
-              type="number"
-              min={1}
-              error={errors.enrollmentTokenExpiryHours?.message}
-              {...form.register("enrollmentTokenExpiryHours", asNumber)}
-            />
             <Input
               label="Frames por cadastro"
               type="number"
               min={1}
-              hint="Quantidade de capturas consolidadas no embedding final."
+              hint="Quantidade de capturas usadas para gerar o cadastro facial final."
               error={errors.enrollmentMultiFrameCount?.message}
               {...form.register("enrollmentMultiFrameCount", asNumber)}
             />

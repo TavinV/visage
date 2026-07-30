@@ -290,6 +290,8 @@ export interface EngineThresholdAnalysis {
   youden_score: number;
   confidence: "low" | "medium" | "high";
   interpretation: string;
+  /** Apenas em 'liveness': média dos scores reais + 0.15, sugerido para o cadastro. */
+  suggested_enrollment_value?: number | null;
 }
 
 export interface EngineLivenessCalibration {

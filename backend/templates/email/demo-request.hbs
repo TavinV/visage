@@ -1,0 +1,89 @@
+<!-- Template: demo-request.hbs -->
+<!-- Contexto: DemoRequestEmailContext { contactName, institutionName, studentCount, email, phone, plan, submittedAt } -->
+
+<h1
+  style="margin:0 0 8px 0;font-size:24px;font-weight:700;color:#0b1220;line-height:1.3;"
+>
+  Nova solicitação de demonstração
+</h1>
+<p style="margin:0 0 24px 0;font-size:15px;color:#69788f;line-height:1.6;">
+  <strong>{{contactName}}</strong>
+  pediu uma demonstração da Visage pelo site, em nome da instituição
+  <strong>{{institutionName}}</strong>.
+</p>
+
+<!-- Dados da solicitação -->
+<table
+  role="presentation"
+  cellspacing="0"
+  cellpadding="0"
+  border="0"
+  width="100%"
+  style="margin:8px 0 24px 0;background-color:#f6f8fb;border-radius:12px;border:1px solid #e1e7ef;"
+>
+  <tr>
+    <td style="padding:20px 24px 8px 24px;">
+      <p style="margin:0 0 2px 0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:#9aa7bd;">Responsável</p>
+      <p style="margin:0;font-size:16px;font-weight:600;color:#0b1220;">{{contactName}}</p>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:8px 24px;">
+      <p style="margin:0 0 2px 0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:#9aa7bd;">Instituição</p>
+      <p style="margin:0;font-size:15px;color:#364152;">{{institutionName}}</p>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:8px 24px;">
+      <p style="margin:0 0 2px 0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:#9aa7bd;">Plano de interesse</p>
+      <p style="margin:0;font-size:15px;color:#364152;">{{plan}}</p>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:8px 24px;">
+      <p style="margin:0 0 2px 0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:#9aa7bd;">Quantidade de alunos</p>
+      <p style="margin:0;font-size:15px;color:#364152;">{{studentCount}}</p>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:8px 24px;">
+      <p style="margin:0 0 2px 0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:#9aa7bd;">E-mail de contato</p>
+      <p style="margin:0;font-size:15px;color:#364152;">
+        <a href="mailto:{{email}}" style="color:#2563eb;text-decoration:none;">{{email}}</a>
+      </p>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:8px 24px 20px 24px;">
+      <p style="margin:0 0 2px 0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:#9aa7bd;">Telefone</p>
+      <p style="margin:0;font-size:15px;color:#364152;">
+        <a href="tel:{{phone}}" style="color:#2563eb;text-decoration:none;">{{phone}}</a>
+      </p>
+    </td>
+  </tr>
+</table>
+
+<!-- CTA -->
+<table
+  role="presentation"
+  cellspacing="0"
+  cellpadding="0"
+  border="0"
+  style="margin:0 0 24px 0;"
+>
+  <tr>
+    <td style="border-radius:10px;background-color:#2563eb;">
+      <a
+        href="mailto:{{email}}"
+        style="display:inline-block;padding:14px 28px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:10px;letter-spacing:0.2px;"
+      >
+        Responder {{contactName}}
+      </a>
+    </td>
+  </tr>
+</table>
+
+<p style="margin:0;font-size:13px;color:#69788f;line-height:1.6;">
+  Recebida em {{submittedAt}}. Responda diretamente a este e-mail para falar com
+  {{contactName}}.
+</p>

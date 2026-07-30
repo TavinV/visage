@@ -13,16 +13,10 @@ const STAGES = [
   { icon: CheckCircle2, title: "Presença", desc: "Frequência registrada", pos: 94, t: "2,4s" },
 ];
 
-function StageNode({
-  stage,
-  vertical = false,
-}: {
-  stage: (typeof STAGES)[number];
-  vertical?: boolean;
-}) {
+function StageNode({ stage }: { stage: (typeof STAGES)[number] }) {
   const delay = (stage.pos / 100) * SWEEP;
   return (
-    <div className={vertical ? "flex items-start gap-4" : "flex flex-col items-center text-center"}>
+    <div className="flex flex-col items-center text-center">
       <motion.div
         className="relative flex h-14 w-14 flex-none items-center justify-center rounded-2xl border border-slate-200 bg-white shadow-card"
         initial={{ scale: 0.85, opacity: 0.4 }}
@@ -40,13 +34,13 @@ function StageNode({
         />
       </motion.div>
       <motion.div
-        className={vertical ? "pt-1" : "mt-4"}
+        className="mt-4"
         initial={{ opacity: 0, y: 8 }}
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true }}
         transition={{ duration: 0.5, delay: delay + 0.1, ease: EASE }}
       >
-        <div className="flex items-center gap-2">
+        <div className="flex items-center justify-center gap-2">
           <span className="text-sm font-semibold text-slate-900">{stage.title}</span>
           <span className="font-mono text-[11px] text-brand-600">{stage.t}</span>
         </div>
@@ -64,9 +58,6 @@ export default function SpeedSection() {
     >
       <div className="mx-auto max-w-6xl px-5 lg:px-8">
         <div className="mx-auto max-w-2xl text-center">
-          <Reveal className="flex justify-center">
-            <Eyebrow>Seção 04 · Velocidade</Eyebrow>
-          </Reveal>
           <Reveal delay={0.06}>
             <h2 className="mt-5 text-balance text-[clamp(2.1rem,4.4vw,3.4rem)] font-semibold leading-[1.02] tracking-tightest text-brand-950">
               Velocidade extrema
@@ -131,21 +122,11 @@ export default function SpeedSection() {
           </div>
         </Reveal>
 
-        {/* mobile vertical timeline */}
-        <div className="relative mt-14 lg:hidden">
-          <div className="absolute left-[27px] top-4 bottom-4 w-px bg-slate-200" />
-          <motion.div
-            className="absolute left-[27px] top-4 bottom-4 w-px origin-top bg-gradient-to-b from-brand-600 to-brand-400"
-            initial={{ scaleY: 0 }}
-            whileInView={{ scaleY: 1 }}
-            viewport={{ once: true }}
-            transition={{ duration: SWEEP, ease: EASE }}
-          />
-          <div className="space-y-6">
-            {STAGES.map((s) => (
-              <StageNode key={s.title} stage={s} vertical />
-            ))}
-          </div>
+        {/* mobile: cartões centralizados, sem trilho lateral */}
+        <div className="mt-14 grid grid-cols-2 gap-x-4 gap-y-10 lg:hidden">
+          {STAGES.map((s) => (
+            <StageNode key={s.title} stage={s} />
+          ))}
         </div>
       </div>
     </section>

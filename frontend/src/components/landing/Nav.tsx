@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { ArrowRight } from "lucide-react";
+import Link from "next/link";
 import { Wordmark } from "./primitives";
 
 const LINKS = [
-  { id: "story", label: "Como funciona" },
-  { id: "presenca", label: "Presença" },
+  { id: "plataforma", label: "Como funciona" },
+  { id: "recursos", label: "Recursos" },
   { id: "seguranca", label: "Segurança" },
-  { id: "velocidade", label: "Velocidade" },
+  { id: "planos", label: "Planos" },
 ];
 
 export default function Nav() {
@@ -47,19 +48,19 @@ export default function Nav() {
         </nav>
 
         <div className="flex items-center gap-2">
-          <a
-            href="#demo"
+          <Link
+            href="/login"
             className="hidden text-sm font-medium text-slate-600 transition-colors hover:text-brand-700 sm:block"
           >
             Entrar
-          </a>
-          <a
-            href="#demo"
+          </Link>
+          <Link
+            href="/demonstracao"
             className="group inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-pop transition-all duration-200 hover:bg-brand-700 hover:shadow-lift"
           >
             Solicitar demo
             <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
-          </a>
+          </Link>
         </div>
       </div>
     </header>

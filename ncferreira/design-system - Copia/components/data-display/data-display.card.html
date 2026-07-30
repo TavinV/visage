@@ -1,0 +1,57 @@
+<!-- @dsCard group="Components" viewport="700x340" name="Data Display — Badge, Card, Avatar" subtitle="Status badges, surfaces, identity" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../../styles.css">
+<style>
+  body { margin: 0; padding: 26px; background: var(--surface-base); font-family: var(--font-sans); }
+  .lbl { font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); margin-bottom: 10px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 22px; }
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+  const { Badge, Card, Avatar, Button } = window.FlauzinoDesignSystem_b9b227;
+  function Demo() {
+    return (
+      <div>
+        <div className="lbl">Badges</div>
+        <div className="row">
+          <Badge variant="success" dot>Autorizado</Badge>
+          <Badge variant="danger" dot>Negado</Badge>
+          <Badge variant="warning" dot>Em análise</Badge>
+          <Badge variant="accent">LGPD</Badge>
+          <Badge variant="neutral" square>v2.4.1</Badge>
+          <Badge variant="solid">Enterprise</Badge>
+        </div>
+        <div className="lbl">Cards &amp; Avatars</div>
+        <div className="cards">
+          <Card eyebrow="Reconhecimento facial" title="Verificação concluída"
+            headerAction={<Badge variant="success" dot>99,2%</Badge>}
+            footer={<Button size="sm" variant="ghost">Ver registro</Button>}>
+            Identidade de Helena Braga confirmada em 284ms no portão principal.
+          </Card>
+          <Card inverse eyebrow="Operação" title="Sistema operacional"
+            headerAction={<Badge variant="success" dot>Online</Badge>}>
+            <div style={{display:'flex',gap:'10px',alignItems:'center',marginTop:'4px'}}>
+              <Avatar name="Helena Braga" status="online" />
+              <Avatar name="Rafael Lemos" status="away" />
+              <Avatar name="Iris Nunes" status="offline" />
+              <span style={{fontSize:'13px',color:'var(--text-inverse-muted)'}}>3 operadores ativos</span>
+            </div>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+  ReactDOM.createRoot(document.getElementById("root")).render(<Demo/>);
+</script>
+</body>
+</html>

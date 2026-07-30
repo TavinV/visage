@@ -96,7 +96,7 @@ export default function UserDetailPage() {
     mutationFn: () => api.post(`/users/${id}/revoke-consent`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
-      toast.success("Consentimento revogado. Os embeddings foram removidos.");
+      toast.success("Consentimento revogado. O cadastro facial foi removido.");
       setConfirming(null);
     },
     onError: (error) => toast.error(friendlyError(error)),
@@ -305,7 +305,7 @@ export default function UserDetailPage() {
               <div>
                 <p className="text-sm font-medium text-flauzino-navy-900">Revogar consentimento</p>
                 <p className="text-xs text-flauzino-slate-500">
-                  Remove os embeddings faciais imediatamente. O aluno pode consentir de novo no futuro.
+                  Remove o cadastro facial imediatamente. O aluno pode consentir de novo no futuro.
                 </p>
               </div>
               <Button
@@ -324,7 +324,7 @@ export default function UserDetailPage() {
                     Excluir dados biométricos
                   </p>
                   <p className="text-xs text-flauzino-slate-500">
-                    Apaga a biometria (embeddings e tokens de cadastro) em definitivo. O cadastro do
+                    Apaga a biometria (cadastro facial e tokens de cadastro) em definitivo. O cadastro do
                     usuário é mantido.
                   </p>
                 </div>
@@ -392,7 +392,7 @@ export default function UserDetailPage() {
         onClose={() => setConfirming(null)}
         onConfirm={() => revokeConsent.mutate()}
         title="Revogar consentimento biométrico"
-        description={`Os embeddings faciais de ${u.name} serão removidos imediatamente e o reconhecimento deixará de funcionar.`}
+        description={`O cadastro facial de ${u.name} será removido imediatamente e o reconhecimento deixará de funcionar.`}
         confirmLabel="Revogar consentimento"
         danger
         loading={revokeConsent.isPending}
@@ -402,7 +402,7 @@ export default function UserDetailPage() {
         onClose={() => setConfirming(null)}
         onConfirm={() => eraseData.mutate()}
         title="Excluir dados biométricos"
-        description={`Exclusão definitiva da biometria de ${u.name} (embeddings e tokens de cadastro). O cadastro do usuário é mantido. Esta ação não pode ser desfeita.`}
+        description={`Exclusão definitiva da biometria de ${u.name} (cadastro facial e tokens de cadastro). O cadastro do usuário é mantido. Esta ação não pode ser desfeita.`}
         confirmLabel="Excluir definitivamente"
         danger
         loading={eraseData.isPending}

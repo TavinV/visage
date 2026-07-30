@@ -74,23 +74,48 @@ export function useTotemCamera() {
    * Frame atual em JPEG base64 (sem prefixo data:). Padrão 960px/0.85 para o
    * reconhecimento; o cadastro usa 1280px/0.92 — os limites de body das rotas
    * /device e /enrollment (2 MB) acomodam ambos com folga.
+   *
+   * O <video> é exibido com object-cover, que recorta o sensor para caber na
+   * caixa renderizada (retrato vs. paisagem têm proporções diferentes). Sem
+   * espelhar esse recorte aqui, o envio incluía o frame bruto inteiro — em
+   * telas cuja caixa fica mais estreita que o sensor 16:9, alguém fora da
+   * pré-visualização (mas dentro do sensor) ia junto na imagem enviada.
    */
   const captureJpegB64 = useCallback((maxWidth = 960, quality = 0.85): string | null => {
     const video = videoRef.current;
     if (!video || !video.videoWidth) return null;
     if (!captureCanvasRef.current) captureCanvasRef.current = document.createElement("canvas");
     const canvas = captureCanvasRef.current;
-    const scale = Math.min(1, maxWidth / video.videoWidth);
-    canvas.width = Math.round(video.videoWidth * scale);
-    canvas.height = Math.round(video.videoHeight * scale);
+
+    const boxW = video.clientWidth || video.videoWidth;
+    const boxH = video.clientHeight || video.videoHeight;
+    const boxAspect = boxW / boxH;
+    const srcAspect = video.videoWidth / video.videoHeight;
+
+    // Mesmo recorte central que o CSS object-cover aplica visualmente.
+    let sx = 0;
+    let sy = 0;
+    let sw = video.videoWidth;
+    let sh = video.videoHeight;
+    if (srcAspect > boxAspect) {
+      sw = video.videoHeight * boxAspect;
+      sx = (video.videoWidth - sw) / 2;
+    } else if (srcAspect < boxAspect) {
+      sh = video.videoWidth / boxAspect;
+      sy = (video.videoHeight - sh) / 2;
+    }
+
+    const scale = Math.min(1, maxWidth / sw);
+    canvas.width = Math.round(sw * scale);
+    canvas.height = Math.round(sh * scale);
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
     const dataUrl = canvas.toDataURL("image/jpeg", quality);
     return dataUrl.slice(dataUrl.indexOf(",") + 1);
   }, []);
 
-  /** Luminância 64×64 do crop central — variação de pixels (anti-estático). */
+  /** Luminância 64×64 do crop central — detecção de presença por movimento. */
   const grabLuminance = useCallback((): Uint8ClampedArray | null => {
     const video = videoRef.current;
     if (!video || !video.videoWidth) return null;

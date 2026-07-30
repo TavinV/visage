@@ -8,7 +8,7 @@ import helmet from "helmet";
 import { config } from "./lib/config";
 import { logger } from "./lib/logger";
 import { errorHandler } from "./middleware/errorHandler";
-import { createGlobalLimiter, createLoginLimiter, createAuthLimiter } from "./middleware/rateLimit";
+import { createGlobalLimiter, createLoginLimiter, createAuthLimiter, createDemoRequestLimiter } from "./middleware/rateLimit";
 
 // Routes
 import authRoutes from "./routes/auth";
@@ -30,6 +30,7 @@ import createDeviceRouter from "./routes/device";
 import reportsRoutes from "./routes/reports";
 import auditRoutes from "./routes/audit";
 import adminRoutes from "./routes/admin";
+import demoRequestsRoutes from "./routes/demo-requests";
 
 export function createApp(): Express {
   const app = express();
@@ -38,6 +39,7 @@ export function createApp(): Express {
   const globalLimiter = createGlobalLimiter();
   const loginLimiter = createLoginLimiter();
   const authLimiter = createAuthLimiter();
+  const demoRequestLimiter = createDemoRequestLimiter();
 
   // Security
   app.use(helmet());
@@ -107,6 +109,7 @@ export function createApp(): Express {
   app.use("/attendance/reports", reportsRoutes);
   app.use("/audit", auditRoutes);
   app.use("/admin", adminRoutes);
+  app.use("/demo-requests", demoRequestLimiter, demoRequestsRoutes);
 
   // 404 handler
   app.use((_req: Request, res: Response) => {

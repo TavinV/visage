@@ -81,6 +81,23 @@ export interface PasswordResetEmailContext {
   expiresIn: string;
 }
 
+export interface DemoRequestEmailContext {
+  /** Nome da pessoa que solicitou a demonstração */
+  contactName: string;
+  /** Nome da instituição interessada */
+  institutionName: string;
+  /** Quantidade de alunos informada (faixa aproximada) */
+  studentCount: number;
+  /** E-mail de contato do responsável */
+  email: string;
+  /** Telefone de contato formatado */
+  phone: string;
+  /** Plano de interesse */
+  plan: string;
+  /** Data/hora da solicitação formatada */
+  submittedAt: string;
+}
+
 export interface AttendanceReportEmailContext {
   /** Nome do professor */
   teacherName: string;
@@ -134,6 +151,10 @@ const TEMPLATE_REGISTRY = {
     subject: "Suas credenciais de acesso — {{institutionName}}",
     file: "admin-credentials.hbs",
   },
+  "demo-request": {
+    subject: "Nova demonstração solicitada — {{institutionName}}",
+    file: "demo-request.hbs",
+  },
 } as const satisfies Record<string, TemplateManifest>;
 
 export type EmailTemplateId = keyof typeof TEMPLATE_REGISTRY;
@@ -145,6 +166,7 @@ export type TemplateContextMap = {
   "password-reset": PasswordResetEmailContext;
   "attendance-report": AttendanceReportEmailContext;
   "admin-credentials": AdminCredentialsEmailContext;
+  "demo-request": DemoRequestEmailContext;
 };
 
 // ── Options de envio ──────────────────────────────────────────────────────────

@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Canário Capital — Case Flauzino</title>
+<link rel="stylesheet" href="../styles.css">
+<style>
+  html, body { margin: 0; background: var(--white); font-family: var(--font-sans); color: var(--text-body); }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 32px; }
+  .eyebrow { font: 600 12px/1 var(--font-sans); letter-spacing: var(--tracking-eyebrow); text-transform: uppercase; color: var(--accent-500); }
+  .eyebrow.on-light { color: var(--accent-600); }
+
+  nav.nav { display: flex; align-items: center; justify-content: space-between; height: 84px; }
+  .nav__links { display: flex; gap: 40px; font: 500 14px/1 var(--font-sans); color: var(--text-body); }
+  .brandmark { display: flex; align-items: center; gap: 12px; font: 600 17px/1 var(--font-sans); letter-spacing: -.01em; color: var(--text-strong); text-decoration: none; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 20px; border-radius: var(--radius-md); font: 500 var(--text-sm)/1 var(--font-sans); cursor: pointer; border: none; background: var(--accent-600); color: #fff; }
+
+  .hero { background: var(--navy-900); color: #fff; position: relative; overflow: hidden; }
+  .hero::before { content: ""; position: absolute; inset: 0; background-image: linear-gradient(rgba(255,255,255,.045) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.045) 1px, transparent 1px); background-size: 44px 44px; }
+  .hero__inner { position: relative; padding: 80px 0 72px; }
+  .backlink { font: 500 13px/1 var(--font-sans); color: var(--text-inverse-muted); text-decoration: none; }
+  .caselogo { height: 46px; margin: 28px 0 26px; display: block; }
+  h1.h { font: 600 var(--text-3xl)/1.15 var(--font-sans); letter-spacing: var(--tracking-tight); margin: 0 0 18px; max-width: 760px; }
+  p.lede { font: 400 var(--text-md)/1.6 var(--font-sans); color: var(--text-inverse-muted); max-width: 620px; margin: 0; }
+
+  .credline { margin-top: 40px; padding: 22px 26px; border: 1px solid rgba(255,255,255,.16); border-radius: var(--radius-lg); background: rgba(255,255,255,.03); font: 500 15px/1.6 var(--font-sans); max-width: 760px; }
+  .credline b { color: var(--accent-500); font-weight: 600; }
+
+  .statsbar { background: var(--ink-900); color: #fff; }
+  .statsbar__inner { display: grid; grid-template-columns: repeat(4, 1fr); }
+  .stat { padding: 40px 26px; border-left: 1px solid rgba(255,255,255,.1); }
+  .stat:first-child { border-left: none; }
+  .stat b { display: block; font: 600 var(--text-2xl)/1 var(--font-sans); font-family: var(--font-mono); letter-spacing: -0.01em; }
+  .stat span { display: block; margin-top: 8px; font: 400 12.5px/1.5 var(--font-sans); color: var(--text-inverse-muted); }
+
+  section.blk { padding: 88px 0; border-bottom: 1px solid var(--border-subtle); }
+  section.blk:last-of-type { border-bottom: none; }
+  h2.h2 { font: 600 var(--text-2xl)/1.2 var(--font-sans); letter-spacing: var(--tracking-tight); color: var(--text-strong); margin: 12px 0 16px; max-width: 640px; }
+  .lede2 { font: 400 var(--text-md)/1.65 var(--font-sans); color: var(--text-body); max-width: 680px; margin: 0 0 40px; }
+
+  .featgrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+  .feat { border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 30px 28px; background: var(--white); box-shadow: var(--shadow-sm); }
+  .feat b { display: block; font: 600 17px/1.3 var(--font-sans); color: var(--text-strong); margin-bottom: 10px; }
+  .feat p { margin: 0; font: 400 14.5px/1.65 var(--font-sans); }
+  .feat .tag { display: inline-block; margin-top: 14px; font: 500 11.5px/1 var(--font-sans); letter-spacing: .04em; text-transform: uppercase; color: var(--accent-600); background: var(--accent-050); padding: 5px 10px; border-radius: var(--radius-sm); }
+
+  .integrations { display: flex; align-items: center; gap: 36px; padding: 30px 32px; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--surface-base); margin-top: 8px; }
+  .integrations__label { font: 500 13px/1.5 var(--font-sans); color: var(--text-muted); max-width: 220px; }
+  .integrations img { height: 24px; }
+
+  .forensics { background: var(--navy-900); color: #fff; position: relative; overflow: hidden; }
+  .forensics::before { content: ""; position: absolute; inset: 0; background-image: linear-gradient(rgba(255,255,255,.04) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px); background-size: 40px 40px; }
+  .forensics__inner { position: relative; display: grid; grid-template-columns: 1.05fr .95fr; gap: 60px; align-items: center; }
+  .forensics h2 { color: #fff; }
+  .forensics p { color: var(--text-inverse-muted); }
+  .evidencebox { border: 1px solid rgba(255,255,255,.16); border-radius: var(--radius-lg); background: rgba(255,255,255,.03); padding: 26px; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.9; color: #9fb3d4; }
+  .evidencebox .ln1 { color: #5ee6a8; }
+  .evidencebox .ln2 { color: #ffb454; }
+  .evidencebox .head { display: flex; align-items: center; justify-content: space-between; font-family: var(--font-sans); color: var(--text-inverse-muted); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,.1); }
+
+  .quote { padding: 90px 0; text-align: center; }
+  .quote blockquote { font: 500 var(--text-xl)/1.4 var(--font-sans); color: var(--text-strong); letter-spacing: var(--tracking-tight); max-width: 780px; margin: 0 auto 20px; }
+  .quote cite { font: 400 14px/1 var(--font-sans); color: var(--text-muted); font-style: normal; }
+
+  .cta { background: var(--slate-50); text-align: center; padding: 80px 0; }
+  .cta h2 { font: 600 var(--text-2xl)/1.2 var(--font-sans); color: var(--text-strong); margin: 0 0 10px; }
+  .cta p { color: var(--text-body); margin: 0 0 28px; }
+
+  footer.foot { background: var(--ink-900); color: var(--text-inverse-muted); padding: 48px 0; display: flex; justify-content: space-between; align-items: center; }
+  footer.foot .brandmark { color: #fff; }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="wrap hero__inner">
+    <nav class="nav">
+      <a class="brandmark" href="../explorations/homepage-sketches.html" style="color:#fff"><img src="../assets/flauzino-mark.svg" style="height:24px;filter:invert(1)" alt=""> FLAUZINO</a>
+      <div class="nav__links" style="color:#fff"><span>Serviços</span><span>Diferenciais</span><span>Cases</span><span>Contato</span></div>
+      <button class="btn">Falar com especialista</button>
+    </nav>
+
+    <a class="backlink" href="#">← Cases de sucesso</a>
+    <img class="caselogo" src="../assets/logos/canario.png" alt="Canário Capital">
+    <h1 class="h">Responsabilidade técnica sobre uma das maiores mesas proprietárias do Brasil.</h1>
+    <p class="lede">Desenvolvimento, manutenção e sustentação contínua dos sistemas críticos da Canário Capital — da automação de processos de saque à infraestrutura de recepção de ordens da bolsa.</p>
+
+    <div class="credline">Responsabilidade técnica, desenvolvimento e manutenção de sistemas para <b>uma das maiores mesas proprietárias do Brasil</b> — mais de <b>5 mil usuários ativos</b> e mais de <b>15 mil ordens da bolsa de valores</b> recebidas diariamente.</div>
+  </div>
+</div>
+
+<div class="statsbar">
+  <div class="wrap statsbar__inner">
+    <div class="stat"><b>488%</b><span>aumento na velocidade de carregamento de recursos do sistema</span></div>
+    <div class="stat"><b>5.000+</b><span>usuários ativos na plataforma</span></div>
+    <div class="stat"><b>15.000+</b><span>ordens da bolsa recebidas por dia</span></div>
+    <div class="stat"><b>24/7</b><span>sustentação e manutenção contínua</span></div>
+  </div>
+</div>
+
+<section class="blk">
+  <div class="wrap">
+    <div class="eyebrow on-light">O DESAFIO</div>
+    <h2 class="h2">Processos manuais e infraestrutura lenta demais para o volume de uma mesa proprietária.</h2>
+    <p class="lede2">A operação da Canário Capital dependia de fluxos manuais para etapas sensíveis — como solicitações de saque, que exigiam envio e validação humana de nota fiscal — e de uma infraestrutura de carregamento de recursos que não acompanhava o volume diário de ordens.</p>
+
+    <div class="featgrid">
+      <div class="feat">
+        <b>Desempenho de infraestrutura</b>
+        <p>Reengenharia do carregamento de recursos do sistema, resultando em um aumento de até <strong>488% na velocidade de carregamento</strong> — impacto direto na experiência de uso em um ambiente sensível a latência.</p>
+        <span class="tag">Performance</span>
+      </div>
+      <div class="feat">
+        <b>Automação de solicitações de saque</b>
+        <p>Substituição do processo manual por um sistema que recebe, envia e valida notas fiscais automaticamente — reduzindo erro humano e tempo de processamento.</p>
+        <span class="tag">Automação de processos</span>
+      </div>
+    </div>
+
+    <div class="integrations">
+      <div class="integrations__label">Integrações com aplicações externas</div>
+      <img src="../assets/logos/zapsign.svg" alt="ZapSign">
+      <img src="../assets/logos/nelogica.svg" alt="NeLogica">
+    </div>
+  </div>
+</section>
+
+<section class="forensics blk">
+  <div class="wrap forensics__inner">
+    <div>
+      <div class="eyebrow">PERÍCIA TÉCNICA DIGITAL</div>
+      <h2 class="h2">Laudos técnicos com padrão de prova digital forense.</h2>
+      <p class="lede2" style="margin-bottom:0">Quando a Canário Capital precisou anexar evidências a processos judiciais, a Flauzino conduziu a análise técnica dos logs do sistema e produziu laudos periciais estruturados como prova digital — com cadeia de custódia, rastreabilidade de eventos e metodologia auditável, muito além de um simples relatório de sistema.</p>
+    </div>
+    <div class="evidencebox">
+      <div class="head"><span>LAUDO-2024-0417.log</span><span>íntegro · cadeia de custódia validada</span></div>
+      <div><span class="ln1">[OK]</span> hash sha256 verificado — sem adulteração</div>
+      <div><span class="ln1">[OK]</span> timeline de eventos reconstruída</div>
+      <div><span class="ln2">[!]</span> 3 tentativas de acesso fora do padrão sinalizadas</div>
+      <div>evento_id: 88213 · usuário autenticado · ordem #15992</div>
+      <div>evento_id: 88214 · validação nota fiscal · aprovado</div>
+      <div>assinatura pericial: anexada ao processo</div>
+    </div>
+  </div>
+</section>
+
+<div class="quote">
+  <div class="wrap">
+    <blockquote>"Feito para confiar."</blockquote>
+    <cite>Flauzino — desenvolvimento, manutenção e sustentação de sistemas para a Canário Capital</cite>
+  </div>
+</div>
+
+<div class="cta">
+  <div class="wrap">
+    <h2>Sua operação também não pode falhar.</h2>
+    <p>Fale com a Flauzino sobre sistemas sob medida, automação de processos e reconhecimento facial.</p>
+    <button class="btn" style="height:48px;padding:0 28px">Falar com especialista</button>
+  </div>
+</div>
+
+<footer class="foot">
+  <div class="wrap" style="display:flex; justify-content:space-between; width:100%; align-items:center;">
+    <div class="brandmark"><img src="../assets/flauzino-mark.svg" style="height:22px;filter:invert(1)" alt=""> FLAUZINO</div>
+    <span style="font-size:13px">Feito para confiar.</span>
+  </div>
+</footer>
+
+</body>
+</html>

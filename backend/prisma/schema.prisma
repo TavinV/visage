@@ -67,7 +67,6 @@ model TenantSettings {
   recognitionThreshold Float   @default(1.10)
   livenessThreshold    Float   @default(0.85)
   livenessEnabled      Boolean @default(true)
-  staticPixelThreshold Float   @default(3.0)
   allowManualOverride  Boolean @default(true)
 
   // Pré-presença
@@ -540,4 +539,25 @@ model BiometricConsent {
   @@index([tenantId, userId])
   @@index([tenantId, isActive])
   @@map("biometric_consents")
+}
+
+// ============================================================================
+// Marketing — Solicitações de demonstração (landing page pública)
+// ============================================================================
+
+// Leads captados pelo formulário público de "Solicitar demonstração".
+// Sem tenant: a instituição ainda não existe. Email e telefone são únicos —
+// impedem múltiplas tentativas de contato pela mesma pessoa/instituição.
+model DemoRequest {
+  id              String @id @default(uuid())
+  contactName     String @db.VarChar(150)
+  institutionName String @db.VarChar(200)
+  studentCount    Int // faixa aproximada informada pelo responsável
+  email           String @unique @db.VarChar(255)
+  phone           String @unique @db.VarChar(20) // apenas dígitos (DDD + número)
+  plan            String @default("Escola") @db.VarChar(50) // plano de interesse
+
+  createdAt DateTime @default(now()) @db.Timestamptz()
+
+  @@map("demo_requests")
 }

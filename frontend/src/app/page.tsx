@@ -1,20 +1,24 @@
 import Nav from "@/components/landing/Nav";
-import StoryStage from "@/components/landing/StoryStage";
-import AttendanceSection from "@/components/landing/AttendanceSection";
+import Hero from "@/components/landing/Hero";
+import SystemShowcase from "@/components/landing/SystemShowcase";
+import AntifraudSection from "@/components/landing/AntifraudSection";
+import FeaturesSection from "@/components/landing/FeaturesSection";
 import CryptoSection from "@/components/landing/CryptoSection";
 import SpeedSection from "@/components/landing/SpeedSection";
-import CtaSection from "@/components/landing/CtaSection";
+import PlansSection from "@/components/landing/PlansSection";
 import Footer from "@/components/landing/Footer";
 
 export default function Home() {
   return (
     <main className="relative overflow-x-clip bg-white">
       <Nav />
-      <StoryStage />
-      <AttendanceSection />
+      <Hero />
+      <SystemShowcase />
+      <AntifraudSection />
+      <FeaturesSection />
       <CryptoSection />
       <SpeedSection />
-      <CtaSection />
+      <PlansSection />
       <Footer />
     </main>
   );

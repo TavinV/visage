@@ -1,0 +1,25 @@
+<!-- @dsCard group="Spacing" viewport="700x160" name="Radii — restrained & structural" subtitle="8px default; no pill-everything" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; padding: 22px 26px; background: var(--surface-card); font-family: var(--font-sans); }
+  .row { display: flex; gap: 20px; align-items: flex-start; }
+  .item { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .box { width: 72px; height: 72px; background: var(--surface-sunken); border: 1px solid var(--border-default); }
+  .tok { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+</style>
+</head>
+<body>
+  <div class="row">
+    <div class="item"><div class="box" style="border-radius:var(--radius-xs)"></div><span class="tok">xs · 3</span></div>
+    <div class="item"><div class="box" style="border-radius:var(--radius-sm)"></div><span class="tok">sm · 5</span></div>
+    <div class="item"><div class="box" style="border-radius:var(--radius-md)"></div><span class="tok">md · 8</span></div>
+    <div class="item"><div class="box" style="border-radius:var(--radius-lg)"></div><span class="tok">lg · 12</span></div>
+    <div class="item"><div class="box" style="border-radius:var(--radius-xl)"></div><span class="tok">xl · 16</span></div>
+    <div class="item"><div class="box" style="border-radius:var(--radius-pill);width:110px"></div><span class="tok">pill</span></div>
+  </div>
+</body>
+</html>

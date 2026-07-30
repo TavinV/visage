@@ -12,7 +12,6 @@ export interface UpdateTenantSettingsInput {
   recognitionThreshold?: number;
   livenessThreshold?: number;
   livenessEnabled?: boolean;
-  staticPixelThreshold?: number;
   allowManualOverride?: boolean;
   preAttendanceEnabled?: boolean;
   preAttendanceWindowMin?: number;
@@ -32,7 +31,6 @@ export interface TenantSettingsOutput {
   recognitionThreshold: number;
   livenessThreshold: number;
   livenessEnabled: boolean;
-  staticPixelThreshold: number;
   allowManualOverride: boolean;
   preAttendanceEnabled: boolean;
   preAttendanceWindowMin: number;
@@ -79,7 +77,6 @@ class TenantSettingsService extends BaseService {
         ...(input.recognitionThreshold !== undefined && { recognitionThreshold: input.recognitionThreshold }),
         ...(input.livenessThreshold !== undefined && { livenessThreshold: input.livenessThreshold }),
         ...(input.livenessEnabled !== undefined && { livenessEnabled: input.livenessEnabled }),
-        ...(input.staticPixelThreshold !== undefined && { staticPixelThreshold: input.staticPixelThreshold }),
         ...(input.allowManualOverride !== undefined && { allowManualOverride: input.allowManualOverride }),
         ...(input.preAttendanceEnabled !== undefined && { preAttendanceEnabled: input.preAttendanceEnabled }),
         ...(input.preAttendanceWindowMin !== undefined && { preAttendanceWindowMin: input.preAttendanceWindowMin }),
@@ -105,7 +102,6 @@ class TenantSettingsService extends BaseService {
       recognitionThreshold: settings.recognitionThreshold,
       livenessThreshold: settings.livenessThreshold,
       livenessEnabled: settings.livenessEnabled,
-      staticPixelThreshold: settings.staticPixelThreshold,
       allowManualOverride: settings.allowManualOverride,
       preAttendanceEnabled: settings.preAttendanceEnabled,
       preAttendanceWindowMin: settings.preAttendanceWindowMin,

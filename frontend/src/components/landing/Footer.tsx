@@ -1,27 +1,28 @@
+import Link from "next/link";
 import { Wordmark } from "./primitives";
 
 const COLS = [
   {
     title: "Produto",
     links: [
-      { label: "Como funciona", href: "#story" },
-      { label: "Presença", href: "#presenca" },
+      { label: "Como funciona", href: "#plataforma" },
+      { label: "Antifraude", href: "#antifraude" },
+      { label: "Recursos", href: "#recursos" },
       { label: "Segurança", href: "#seguranca" },
-      { label: "Velocidade", href: "#velocidade" },
     ],
   },
   {
     title: "Planos",
     links: [
-      { label: "Starter", href: "#demo" },
-      { label: "Escola", href: "#demo" },
-      { label: "Instituto", href: "#demo" },
+      { label: "Starter", href: "/demonstracao?plano=Starter" },
+      { label: "Escola", href: "/demonstracao?plano=Escola" },
+      { label: "Instituto", href: "/demonstracao?plano=Instituto" },
     ],
   },
   {
     title: "Empresa",
     links: [
-      { label: "Design System", href: "/design-system" },
+      { label: "Demonstração", href: "/demonstracao" },
       { label: "Privacidade & LGPD", href: "#seguranca" },
       { label: "Contato", href: "mailto:contato@visage.app" },
     ],
@@ -36,8 +37,8 @@ export default function Footer() {
           <div className="max-w-xs">
             <Wordmark />
             <p className="mt-4 text-sm leading-relaxed text-slate-500">
-              A chamada que se faz sozinha. Reconhecimento facial para frequência
-              escolar — preciso, seguro e em conformidade com a LGPD.
+              A primeira chamada com reconhecimento facial do Brasil — presença
+              automática, segura e em conformidade com a LGPD.
             </p>
           </div>
           {COLS.map((col) => (
@@ -48,12 +49,12 @@ export default function Footer() {
               <ul className="mt-4 space-y-2.5">
                 {col.links.map((l) => (
                   <li key={l.label}>
-                    <a
+                    <Link
                       href={l.href}
                       className="text-sm text-slate-600 transition-colors hover:text-brand-700"
                     >
                       {l.label}
-                    </a>
+                    </Link>
                   </li>
                 ))}
               </ul>
@@ -63,10 +64,10 @@ export default function Footer() {
 
         <div className="mt-14 flex flex-col items-start justify-between gap-3 border-t border-slate-100 pt-6 sm:flex-row sm:items-center">
           <span className="text-xs text-slate-400">
-            © {new Date().getFullYear()} Visage · Hackathon UMC 2026
+            © {new Date().getFullYear()} Visage · Todos os direitos reservados
           </span>
-          <span className="font-mono text-[11px] text-slate-400">
-            Poppins · Tailwind · Next.js 14
+          <span className="text-xs text-slate-400">
+            contato@visage.app
           </span>
         </div>
       </div>

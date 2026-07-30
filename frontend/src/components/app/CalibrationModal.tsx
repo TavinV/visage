@@ -61,6 +61,8 @@ interface ThresholdAnalysis {
   youden_score: number;
   confidence: "low" | "medium" | "high";
   interpretation: string;
+  /** Apenas em liveness_analysis: média dos scores reais + 0.15, para o cadastro. */
+  suggested_enrollment_value?: number | null;
 }
 
 interface LivenessCalibration {
@@ -200,6 +202,9 @@ export function CalibrationModal({ open, onClose }: CalibrationModalProps) {
       if (selectedOption) patch.recognitionThreshold = selectedOption.threshold;
       if (applyLiveness && liveness) {
         patch.livenessThreshold = liveness.liveness_analysis.suggested_value;
+        if (liveness.liveness_analysis.suggested_enrollment_value != null) {
+          patch.livenessThresholdEnrollment = liveness.liveness_analysis.suggested_enrollment_value;
+        }
       }
       if (Object.keys(patch).length === 0) {
         throw new Error("Nada selecionado para aplicar.");
@@ -240,7 +245,7 @@ export function CalibrationModal({ open, onClose }: CalibrationModalProps) {
       open={open}
       onClose={stopAndClose}
       title="Calibrar reconhecimento e vivacidade"
-      description="A coleta é guiada no totem; os limiares são calculados pelo índice de Youden."
+      description="A coleta é guiada no totem; o sistema calcula automaticamente o ponto de equilíbrio entre segurança e acertos."
       size="lg"
       footer={
         !running ? (
@@ -385,14 +390,23 @@ export function CalibrationModal({ open, onClose }: CalibrationModalProps) {
             {recognition ? (
               <>
                 <div className="mb-3 flex flex-wrap gap-2">
-                  <span className="rounded-full bg-flauzino-slate-100 px-3 py-1 font-mono-ds text-xs text-flauzino-slate-600">
-                    d′ {fmtNum(recognition.dprime)}
+                  <span
+                    title="Separação estatística entre pessoas legítimas e impostores (d′)"
+                    className="rounded-full bg-flauzino-slate-100 px-3 py-1 font-mono-ds text-xs text-flauzino-slate-600"
+                  >
+                    Separação {fmtNum(recognition.dprime)}
                   </span>
-                  <span className="rounded-full bg-flauzino-slate-100 px-3 py-1 font-mono-ds text-xs text-flauzino-slate-600">
-                    AUC {fmtNum(recognition.auc, 3)}
+                  <span
+                    title="Precisão geral do modelo nesta calibração (AUC)"
+                    className="rounded-full bg-flauzino-slate-100 px-3 py-1 font-mono-ds text-xs text-flauzino-slate-600"
+                  >
+                    Precisão {fmtNum(recognition.auc, 3)}
                   </span>
-                  <span className="rounded-full bg-flauzino-slate-100 px-3 py-1 font-mono-ds text-xs text-flauzino-slate-600">
-                    EER {formatPercent(recognition.eer * 100)}
+                  <span
+                    title="Taxa de erro no ponto de equilíbrio entre falsos positivos e negativos (EER)"
+                    className="rounded-full bg-flauzino-slate-100 px-3 py-1 font-mono-ds text-xs text-flauzino-slate-600"
+                  >
+                    Taxa de erro {formatPercent(recognition.eer * 100)}
                   </span>
                   <span className="rounded-full bg-flauzino-slate-100 px-3 py-1 font-mono-ds text-xs text-flauzino-slate-600">
                     <Users size={11} className="mr-1 inline" />
@@ -437,8 +451,11 @@ export function CalibrationModal({ open, onClose }: CalibrationModalProps) {
                           Aceita {formatPercent(option.genuine_accept_rate * 100, 0)} dos legítimos
                           {" · "}bloqueia {formatPercent(option.impostor_reject_rate * 100, 0)} dos impostores
                         </span>
-                        <span className="font-mono-ds text-[11px] text-flauzino-slate-400">
-                          Youden {fmtNum(option.youden_score)}
+                        <span
+                          title="Índice de equilíbrio entre acertos e bloqueios (índice de Youden)"
+                          className="font-mono-ds text-[11px] text-flauzino-slate-400"
+                        >
+                          Equilíbrio {fmtNum(option.youden_score)}
                         </span>
                       </button>
                     );
@@ -470,7 +487,7 @@ export function CalibrationModal({ open, onClose }: CalibrationModalProps) {
             <div className="mb-3 flex items-center justify-between">
               <h4 className="flex items-center gap-2 text-sm font-semibold text-flauzino-navy-900">
                 <ShieldCheck size={16} className="text-flauzino-accent-600" />
-                Vivacidade (anti-spoofing)
+                Vivacidade (proteção contra fraudes)
               </h4>
               {liveness && (
                 <Badge variant={confidenceLabels[liveness.liveness_analysis.confidence].variant}>
@@ -482,13 +499,25 @@ export function CalibrationModal({ open, onClose }: CalibrationModalProps) {
             {liveness ? (
               <div className="rounded-xl border border-flauzino-slate-200 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-medium uppercase tracking-wide text-flauzino-slate-400">
-                      Limiar sugerido
-                    </p>
-                    <p className="font-mono-ds text-2xl font-semibold text-flauzino-navy-900">
-                      {fmtNum(liveness.liveness_analysis.suggested_value)}
-                    </p>
+                  <div className="flex gap-5">
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-flauzino-slate-400">
+                        Limiar sugerido (chamada)
+                      </p>
+                      <p className="font-mono-ds text-2xl font-semibold text-flauzino-navy-900">
+                        {fmtNum(liveness.liveness_analysis.suggested_value)}
+                      </p>
+                    </div>
+                    {liveness.liveness_analysis.suggested_enrollment_value != null && (
+                      <div>
+                        <p className="text-xs font-medium uppercase tracking-wide text-flauzino-slate-400">
+                          Limiar sugerido (cadastro)
+                        </p>
+                        <p className="font-mono-ds text-2xl font-semibold text-flauzino-navy-900">
+                          {fmtNum(liveness.liveness_analysis.suggested_enrollment_value)}
+                        </p>
+                      </div>
+                    )}
                   </div>
                   <div className="text-right text-[12px] text-flauzino-slate-500">
                     <p>
@@ -510,7 +539,7 @@ export function CalibrationModal({ open, onClose }: CalibrationModalProps) {
                 </p>
                 <div className="mt-4 border-t border-flauzino-slate-200 pt-3">
                   <Checkbox
-                    label="Aplicar limiar de vivacidade sugerido"
+                    label="Aplicar limiares de vivacidade sugeridos (chamada e cadastro)"
                     checked={applyLiveness}
                     onChange={(e) => setApplyLiveness(e.target.checked)}
                   />
