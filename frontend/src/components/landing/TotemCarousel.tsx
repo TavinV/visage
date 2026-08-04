@@ -47,10 +47,11 @@ function LiveClock({ size }: { size: DeviceSize }) {
       }).format(now)
     : "";
 
+  const laptop = size === "laptop";
   const clockSize = {
     phone: "text-[2.9rem]",
     tablet: "text-[4.2rem]",
-    laptop: "text-[3.6rem]",
+    laptop: "text-[clamp(1.6rem,7.5vw,2.5rem)]",
   }[size];
 
   return (
@@ -61,7 +62,13 @@ function LiveClock({ size }: { size: DeviceSize }) {
         {get("hour")}:{get("minute")}
         <span className="text-flauzino-slate-300">:{get("second")}</span>
       </p>
-      <p className="mt-3 text-sm capitalize text-flauzino-slate-500">{date}</p>
+      <p
+        className={`capitalize text-flauzino-slate-500 ${
+          laptop ? "mt-1 text-[11px]" : "mt-3 text-sm"
+        }`}
+      >
+        {date}
+      </p>
     </div>
   );
 }
@@ -69,76 +76,93 @@ function LiveClock({ size }: { size: DeviceSize }) {
 export type TotemDeviceSize = DeviceSize;
 
 export function TotemIdleScreen({ size }: { size: DeviceSize }) {
-  const stacked = size !== "laptop";
+  const laptop = size === "laptop";
+
   return (
     <div
       className={`flex h-full w-full select-none flex-col items-center justify-between bg-white ${
-        size === "laptop"
-          ? "px-10 py-6"
+        laptop
+          ? "px-[clamp(1rem,5.5vw,2rem)] py-[clamp(0.6rem,3.5vw,1.1rem)]"
           : size === "phone"
             ? "px-4 pb-6 pt-9"
             : "px-8 py-8"
       }`}
     >
-      {/* marca no topo */}
-      <span className="flex shrink-0 items-center gap-2 text-flauzino-navy-900">
-        <EagleMark size={size === "phone" ? 26 : 32} />
-        <span
-          className={`font-semibold tracking-tight ${
-            size === "phone" ? "text-[15px]" : "text-[17px]"
-          }`}
-        >
-          Visage
+      {/* marca no topo — some no notebook: a tela é rasa e a marca já
+          aparece no cabeçalho da seção, então aqui ela só ocuparia espaço */}
+      {!laptop && (
+        <span className="flex shrink-0 items-center gap-2 text-flauzino-navy-900">
+          <EagleMark size={size === "phone" ? 26 : 32} />
+          <span
+            className={`font-semibold tracking-tight ${
+              size === "phone" ? "text-[15px]" : "text-[17px]"
+            }`}
+          >
+            Visage
+          </span>
         </span>
-      </span>
+      )}
 
       {/* relógio central */}
-      <div className="flex w-full flex-1 flex-col items-center justify-center gap-2.5">
+      <div
+        className={`flex w-full flex-1 flex-col items-center justify-center ${laptop ? "gap-1.5" : "gap-2"}`}
+      >
         <LiveClock size={size} />
-        <p
-          className={`max-w-full text-balance text-center leading-snug text-flauzino-slate-600 ${
-            size === "phone" ? "text-xs" : "text-[15px]"
-          }`}
-        >
-          Totem de chamada · Totem da sala 12
-        </p>
+        {!laptop && (
+          <p className="max-w-full text-balance text-center text-[15px] leading-snug text-flauzino-slate-600">
+            Totem de chamada · Totem da sala 12
+          </p>
+        )}
         <span
-          className={`inline-flex max-w-[94%] items-center justify-center gap-2 rounded-2xl border border-flauzino-accent-100 bg-flauzino-accent-50 px-3.5 py-1.5 text-center font-medium leading-snug text-flauzino-accent-700 ${
-            size === "phone" ? "text-[10.5px]" : "text-[13px]"
+          className={`inline-flex max-w-[94%] items-center justify-center gap-2 rounded-2xl border border-flauzino-accent-100 bg-flauzino-accent-50 text-center font-medium leading-snug text-flauzino-accent-700 ${
+            size === "phone"
+              ? "px-3.5 py-1.5 text-[10.5px]"
+              : laptop
+                ? "px-3 py-1 text-[11px]"
+                : "px-3.5 py-1.5 text-[13px]"
           }`}
         >
           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-flauzino-accent-600" />
-          <span className="min-w-0 text-balance">
-            Chamada aberta · Engenharia de Software 1 - C
+          <span className={`min-w-0 ${laptop ? "whitespace-nowrap" : "text-balance"}`}>
+            {laptop ? "Chamada aberta · Sala 12" : "Chamada aberta · Engenharia de Software 1 - C"}
           </span>
         </span>
       </div>
 
-      {/* ações — empilhadas (uma sobre a outra) no celular e no tablet */}
-      <div className="flex w-full max-w-md shrink-0 flex-col items-center gap-3">
-        <div
-          className={`flex w-full gap-2.5 ${stacked ? "flex-col" : "flex-col sm:flex-row"}`}
-        >
+      {/* ações — lado a lado no notebook (tela larga e rasa, cabe numa
+          linha só); empilhadas no celular e no tablet (tela estreita) */}
+      <div className="flex w-full max-w-md shrink-0 flex-col items-center gap-2">
+        <div className={`flex w-full gap-2 ${laptop ? "flex-row" : "flex-col gap-2.5"}`}>
           <span
-            className={`flex flex-1 items-center justify-center gap-2.5 whitespace-nowrap rounded-xl bg-flauzino-navy-900 font-semibold text-white shadow-fl-md ${
-              size === "phone" ? "py-3 text-sm" : "py-3.5 text-[15px]"
+            className={`flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl bg-flauzino-navy-900 font-semibold text-white shadow-fl-md ${
+              laptop
+                ? "gap-1 px-1.5 py-2 text-[11px]"
+                : size === "phone"
+                  ? "gap-2.5 py-3 text-sm"
+                  : "gap-2.5 py-3.5 text-[15px]"
             }`}
           >
-            <ScanFace size={20} strokeWidth={1.75} />
+            <ScanFace size={laptop ? 14 : 20} strokeWidth={1.75} />
             Registrar presença
           </span>
           <span
-            className={`flex flex-1 items-center justify-center gap-2.5 whitespace-nowrap rounded-xl border border-flauzino-slate-300 bg-white font-semibold text-flauzino-navy-900 shadow-fl-xs ${
-              size === "phone" ? "py-3 text-sm" : "py-3.5 text-[15px]"
+            className={`flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-flauzino-slate-300 bg-white font-semibold text-flauzino-navy-900 shadow-fl-xs ${
+              laptop
+                ? "gap-1 px-1.5 py-2 text-[11px]"
+                : size === "phone"
+                  ? "gap-2.5 py-3 text-sm"
+                  : "gap-2.5 py-3.5 text-[15px]"
             }`}
           >
-            <UserPlus size={20} strokeWidth={1.75} />
+            <UserPlus size={laptop ? 14 : 20} strokeWidth={1.75} />
             Cadastrar biometria
           </span>
         </div>
-        <p className="text-center text-[11px] leading-snug tracking-wide text-flauzino-slate-400">
-          Desenvolvido pela Flauzino · Feito para confiar.
-        </p>
+        {!laptop && (
+          <p className="text-center text-[11px] leading-snug tracking-wide text-flauzino-slate-400">
+            Desenvolvido pela Flauzino · Feito para confiar.
+          </p>
+        )}
       </div>
     </div>
   );
@@ -175,7 +199,7 @@ function LaptopFrame() {
     <div className="w-[min(660px,92vw)]">
       <div className="relative rounded-t-2xl border-[12px] border-b-0 border-slate-900 bg-slate-900 shadow-lift">
         <div className="absolute left-1/2 top-[3px] z-20 h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-slate-700" />
-        <div className="relative aspect-[16/10] overflow-hidden rounded-t-lg">
+        <div className="relative aspect-[16/11] overflow-hidden rounded-t-lg">
           <TotemIdleScreen size="laptop" />
         </div>
       </div>

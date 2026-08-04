@@ -11,6 +11,7 @@ const VIEWS: {
   bullets: string[];
   mockup: React.ReactNode;
   reverse?: boolean;
+  centered?: boolean;
 }[] = [
   {
     title: "O professor acompanha tudo ao vivo",
@@ -32,6 +33,7 @@ const VIEWS: {
       "Captura guiada em segundos: centro, direita e esquerda.",
     ],
     mockup: <EnrollMockup />,
+    centered: true,
   },
 ];
 
@@ -68,21 +70,31 @@ export default function SystemShowcase() {
               key={view.title}
               className="grid grid-cols-1 items-center gap-14 lg:grid-cols-2 lg:gap-20"
             >
-              <div className={view.reverse ? "lg:order-2" : ""}>
+              <div
+                className={`${view.reverse ? "lg:order-2" : ""} ${view.centered ? "text-center" : ""}`}
+              >
                 <Reveal>
                   <h3 className="text-balance text-3xl font-semibold tracking-tight text-brand-950 lg:text-4xl">
                     {view.title}
                   </h3>
                 </Reveal>
                 <Reveal delay={0.06}>
-                  <p className="mt-5 max-w-lg text-balance text-lg leading-relaxed text-slate-600">
+                  <p
+                    className={`mt-5 max-w-lg text-balance text-lg leading-relaxed text-slate-600 ${
+                      view.centered ? "mx-auto" : ""
+                    }`}
+                  >
                     {view.desc}
                   </p>
                 </Reveal>
                 <div className="mt-8 space-y-4">
                   {view.bullets.map((bullet, i) => (
                     <Reveal key={bullet} delay={0.08 + i * 0.05}>
-                      <div className="flex items-start gap-3">
+                      <div
+                        className={`flex items-start gap-3 ${
+                          view.centered ? "mx-auto max-w-md justify-center text-left" : ""
+                        }`}
+                      >
                         <CheckCircle2 className="mt-0.5 h-5 w-5 flex-none text-brand-600" />
                         <p className="text-[15px] leading-relaxed text-slate-600">
                           {bullet}
