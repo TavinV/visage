@@ -26,16 +26,19 @@ export default function Hero() {
         <Reveal>
           <a
             href="#plataforma"
-            className="group inline-flex max-w-full flex-wrap items-center justify-center gap-2 rounded-full border border-slate-200 bg-white/80 px-4 py-2 shadow-soft backdrop-blur transition-colors hover:border-brand-200 hover:bg-brand-50/60"
+            className="group inline-flex max-w-full items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-4 py-2 shadow-soft backdrop-blur transition-colors hover:border-brand-200 hover:bg-brand-50/60"
           >
-            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-600">
+            <span className="inline-flex shrink-0 items-center gap-1.5 text-xs font-semibold text-brand-600">
               <Sparkles className="h-3.5 w-3.5" />
               Novo
             </span>
-            <span className="text-xs text-slate-500">
+            <span className="hidden truncate text-xs text-slate-500 sm:inline">
               Funciona com qualquer celular ou tablet da escola
             </span>
-            <ArrowRight className="h-3 w-3 text-slate-400 transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-brand-600" />
+            <span className="truncate text-xs text-slate-500 sm:hidden">
+              Para qualquer celular da escola
+            </span>
+            <ArrowRight className="h-3 w-3 shrink-0 text-slate-400 transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-brand-600" />
           </a>
         </Reveal>
 

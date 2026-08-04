@@ -14,9 +14,9 @@ const COLS = [
   {
     title: "Planos",
     links: [
-      { label: "Starter", href: "/demonstracao?plano=Starter" },
       { label: "Escola", href: "/demonstracao?plano=Escola" },
-      { label: "Instituto", href: "/demonstracao?plano=Instituto" },
+      { label: "Campus", href: "/demonstracao?plano=Campus" },
+      { label: "Personalizado", href: "/demonstracao?plano=Personalizado" },
     ],
   },
   {
@@ -37,7 +37,7 @@ export default function Footer() {
           <div className="max-w-xs">
             <Wordmark />
             <p className="mt-4 text-sm leading-relaxed text-slate-500">
-              A primeira chamada com reconhecimento facial do Brasil — presença
+              A primeira chamada com reconhecimento facial do Brasil: presença
               automática, segura e em conformidade com a LGPD.
             </p>
           </div>

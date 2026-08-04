@@ -341,21 +341,23 @@ function AuditReplica() {
   return (
     <div ref={containerRef} className="relative" aria-hidden="true">
       <WindowFrame url="console.visage.app/dashboard/auditoria">
-        <div className="bg-flauzino-slate-50 p-6 lg:p-9">
+        <div className="bg-flauzino-slate-50 p-4 sm:p-6 lg:p-9">
           {/* cabeçalho da página, como no console */}
-          <div className="flex flex-wrap items-center gap-4">
-            <span className="flex h-11 w-11 items-center justify-center rounded-lg bg-flauzino-accent-50 text-flauzino-accent-600">
-              <ShieldAlert className="h-5 w-5" strokeWidth={1.75} />
-            </span>
-            <span className="leading-tight">
-              <span className="block text-lg font-semibold tracking-tight text-flauzino-navy-900 lg:text-xl">
-                Auditoria de reconhecimento
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="flex h-10 w-10 flex-none items-center justify-center rounded-lg bg-flauzino-accent-50 text-flauzino-accent-600 lg:h-11 lg:w-11">
+                <ShieldAlert className="h-5 w-5" strokeWidth={1.75} />
               </span>
-              <span className="block text-sm text-flauzino-slate-500">
-                Todos os eventos da instituição, incluindo tentativas de fraude.
+              <span className="min-w-0 leading-tight">
+                <span className="block truncate text-[15px] font-semibold tracking-tight text-flauzino-navy-900 sm:text-lg lg:text-xl">
+                  Auditoria de reconhecimento
+                </span>
+                <span className="block text-xs text-flauzino-slate-500 sm:text-sm">
+                  Todos os eventos da instituição, incluindo tentativas de fraude.
+                </span>
               </span>
-            </span>
-            <span className="ml-auto hidden gap-2.5 md:flex">
+            </div>
+            <span className="hidden gap-2.5 sm:ml-auto md:flex">
               <span className="rounded-lg border border-flauzino-slate-200 bg-white px-4 py-2 text-sm font-medium text-flauzino-slate-500">
                 19/07/2026
               </span>

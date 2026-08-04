@@ -7,7 +7,7 @@ import {
   CalendarCheck2,
   Clock3,
   FileCheck2,
-  QrCode,
+  Tablet,
   ScanFace,
   Users,
 } from "lucide-react";
@@ -22,9 +22,9 @@ import { TeacherIllustration } from "./illustrations";
 const MOMENTS = [
   {
     time: "1ª semana",
-    icon: QrCode,
+    icon: Tablet,
     title: "Implantação leve",
-    desc: "Alunos cadastrados por QR Code e cada tablet calibrado para a iluminação da sua sala. Sem projeto de TI, sem consultoria.",
+    desc: "Cada aluno se cadastra direto no totem, com CPF e consentimento em tela. Os tablets são calibrados para a iluminação de cada sala. Sem projeto de TI, sem consultoria.",
     highlight: true,
   },
   {
@@ -61,7 +61,7 @@ const MOMENTS = [
     time: "Fim do mês",
     icon: CalendarCheck2,
     title: "Sem surpresas",
-    desc: "Plano mensal a partir de R$89, sem contrato de fidelidade. Cancele quando quiser.",
+    desc: "Plano mensal a partir de R$399, sem contrato de fidelidade. Cancele quando quiser.",
   },
 ];
 
@@ -175,7 +175,7 @@ export default function FeaturesSection() {
           </Reveal>
           <Reveal delay={0.12}>
             <p className="mx-auto mt-6 max-w-xl text-balance text-lg leading-relaxed text-slate-600">
-              Da primeira chamada da manhã ao fechamento do mês — a plataforma
+              Da primeira chamada da manhã ao fechamento do mês, a plataforma
               trabalha pela escola em cada momento.
             </p>
           </Reveal>

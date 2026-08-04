@@ -25,7 +25,7 @@ const VIEWS: {
   },
   {
     title: "Cadastro em minutos, com consentimento",
-    desc: "Sem papel e sem fila: o aluno digita o CPF no próprio totem, confirma quem é, aceita o termo de consentimento e faz a captura guiada — pronto para a próxima chamada.",
+    desc: "Sem papel e sem fila: o aluno digita o CPF no próprio totem, confirma quem é, aceita o termo de consentimento e faz a captura guiada. Pronto para a próxima chamada.",
     bullets: [
       "O aluno digita o CPF direto no totem — sem convite impresso.",
       "Termo de consentimento claro, em conformidade com a LGPD.",

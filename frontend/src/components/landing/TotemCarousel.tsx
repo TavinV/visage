@@ -204,7 +204,7 @@ const HOLD_MS = 2600;
 const TOTEM_BULLETS = [
   "Calibração personalizada para cada dispositivo: o sistema se ajusta à câmera e à iluminação de cada sala.",
   "Orientações na tela guiam o aluno do início ao fim.",
-  "O equipamento que a escola já tem — sem comprar nada novo.",
+  "O equipamento que a escola já tem, sem comprar nada novo.",
 ];
 
 /** Digita, segura, apaga e troca de dispositivo — tudo em um relógio só. */

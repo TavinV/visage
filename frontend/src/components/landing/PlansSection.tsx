@@ -6,10 +6,10 @@ import { Eyebrow, Item, Reveal, Stagger } from "./primitives";
 
 const PLANS = [
   {
-    name: "Starter",
-    price: "R$89",
-    scope: "Até 5 turmas",
-    desc: "Para escolas que querem começar pequeno e ver o resultado.",
+    name: "Escola",
+    price: "R$399",
+    scope: "Até 1.000 alunos",
+    desc: "Para escolas de porte médio que já sabem o que precisam resolver.",
     features: [
       "Totens ilimitados nos dispositivos da escola",
       "Proteção contra fraudes incluída",
@@ -17,27 +17,28 @@ const PLANS = [
     ],
   },
   {
-    name: "Escola",
-    price: "R$149",
-    scope: "Até 20 turmas",
-    desc: "O equilíbrio ideal para a maioria das instituições.",
+    name: "Campus",
+    price: "R$799",
+    scope: "Até 3.000 alunos",
+    desc: "O equilíbrio ideal para redes com mais de uma unidade.",
     features: [
-      "Tudo do Starter",
+      "Tudo do plano Escola",
       "Auditoria completa para a coordenação",
       "Suporte prioritário",
     ],
     highlight: true,
   },
   {
-    name: "Instituto",
-    price: "R$249",
-    scope: "Turmas ilimitadas",
-    desc: "Para redes e instituições de ensino superior.",
+    name: "Personalizado",
+    price: "Sob consulta",
+    scope: "Acima de 3.000 alunos",
+    desc: "Para instituições de ensino superior e redes de grande porte.",
     features: [
-      "Tudo do plano Escola",
+      "Tudo do plano Campus",
       "Múltiplos períodos letivos",
       "Acompanhamento dedicado na implantação",
     ],
+    custom: true,
   },
 ];
 
@@ -85,10 +86,14 @@ export default function PlansSection() {
                   {plan.name}
                 </span>
                 <div className="mt-3 flex items-baseline gap-1.5">
-                  <span className="text-4xl font-semibold tracking-tight text-brand-950">
+                  <span
+                    className={`font-semibold tracking-tight text-brand-950 ${
+                      plan.custom ? "text-3xl" : "text-4xl"
+                    }`}
+                  >
                     {plan.price}
                   </span>
-                  <span className="text-sm text-slate-500">/mês</span>
+                  {!plan.custom && <span className="text-sm text-slate-500">/mês</span>}
                 </div>
                 <span className="mt-1 text-sm font-medium text-slate-500">
                   {plan.scope}
@@ -116,7 +121,7 @@ export default function PlansSection() {
                       : "border border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:text-brand-800"
                   }`}
                 >
-                  Solicitar demonstração
+                  {plan.custom ? "Falar com o time" : "Solicitar demonstração"}
                   <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
                 </Link>
               </div>

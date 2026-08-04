@@ -18,6 +18,7 @@ import {
   X,
 } from "lucide-react";
 import { Wordmark } from "@/components/landing/primitives";
+import { SecurityOnIllustration, TeacherIllustration } from "@/components/landing/illustrations";
 import { api, ApiError } from "@/lib/api";
 
 /* ================================================================== */
@@ -28,9 +29,9 @@ import { api, ApiError } from "@/lib/api";
 /* ================================================================== */
 
 const PLANS = [
-  { name: "Starter", scope: "Até 5 turmas" },
-  { name: "Escola", scope: "Até 20 turmas" },
-  { name: "Instituto", scope: "Turmas ilimitadas" },
+  { name: "Escola", scope: "Até 1.000 alunos" },
+  { name: "Campus", scope: "Até 3.000 alunos" },
+  { name: "Personalizado", scope: "Acima de 3.000 alunos" },
 ] as const;
 
 type PlanName = (typeof PLANS)[number]["name"];
@@ -61,6 +62,22 @@ const STEPS = [
 ] as const;
 
 type StepKey = (typeof STEPS)[number]["key"] | "done";
+
+/* ilustrações unDraw recoloridas para a marca — uma por etapa, trocam com
+   fade ao lado do cartão (só no desktop, onde há espaço para as duas colunas) */
+const STEP_ILLUSTRATIONS: Partial<Record<StepKey, React.ReactNode>> = {
+  name: <TeacherIllustration className="mx-auto w-full max-w-[400px] text-brand-500" />,
+  institution: <TeacherIllustration className="mx-auto w-full max-w-[400px] text-brand-500" />,
+  scope: <SecurityOnIllustration className="mx-auto w-full max-w-[400px]" />,
+  contact: <SecurityOnIllustration className="mx-auto w-full max-w-[400px]" />,
+};
+
+const STEP_CAPTIONS: Partial<Record<StepKey, string>> = {
+  name: "Leva menos de dois minutos para começar.",
+  institution: "Cada escola tem seu ritmo. A gente se adapta ao seu.",
+  scope: "Do jeito que a sua instituição precisa, sem pacote fechado.",
+  contact: "Seus dados ficam protegidos do início ao fim, como em toda a Visage.",
+};
 
 interface FormState {
   contactName: string;
@@ -216,8 +233,28 @@ function DemoWizard() {
       )}
 
       {/* conteúdo do passo */}
-      <div className="mx-auto flex w-full max-w-2xl flex-1 items-center py-8">
-        <div className="w-full">
+      <div className="mx-auto flex w-full max-w-5xl flex-1 items-center gap-12 py-8 lg:gap-20">
+        {/* ilustração — só no desktop, troca com a etapa */}
+        {!done && (
+          <div className="hidden flex-1 lg:block">
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={step}
+                initial={{ opacity: 0, y: 14 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -14 }}
+                transition={{ duration: 0.4, ease: "easeOut" }}
+              >
+                {STEP_ILLUSTRATIONS[step]}
+                <p className="mx-auto mt-6 max-w-xs text-balance text-center text-[15px] leading-relaxed text-slate-500">
+                  {STEP_CAPTIONS[step]}
+                </p>
+              </motion.div>
+            </AnimatePresence>
+          </div>
+        )}
+
+        <div className={`w-full max-w-2xl ${done ? "mx-auto" : "lg:max-w-md lg:flex-1"}`}>
           <AnimatePresence mode="popLayout" initial={false}>
             <motion.div
               key={step}
@@ -246,7 +283,9 @@ function DemoWizard() {
                         maxLength={150}
                       />
                     </Field>
-                    <ContinueButton disabled={false} />
+                    <div className="mt-6">
+                      <ContinueButton disabled={false} />
+                    </div>
                   </FieldForm>
                 </StepCard>
               )}
@@ -482,7 +521,7 @@ function ContinueButton({ disabled }: { disabled: boolean }) {
     <button
       type="submit"
       disabled={disabled}
-      className="mt-6 flex min-h-[52px] w-full items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 text-base font-semibold text-white shadow-pop transition-all duration-200 hover:bg-brand-700 hover:shadow-lift disabled:cursor-not-allowed disabled:opacity-60 lg:flex-1"
+      className="flex min-h-[52px] w-full items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 text-base font-semibold text-white shadow-pop transition-all duration-200 hover:bg-brand-700 hover:shadow-lift disabled:cursor-not-allowed disabled:opacity-60 lg:flex-1"
     >
       Continuar
     </button>
