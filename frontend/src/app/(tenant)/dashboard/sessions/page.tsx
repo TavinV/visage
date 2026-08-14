@@ -6,11 +6,18 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Plus, Square, Ban, ClipboardList } from "lucide-react";
+import { Plus, Square, Ban, ClipboardList, Clock } from "lucide-react";
 import { api, qs } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import type { ClassItem, ClassSession, Location, Paginated, User } from "@/lib/types";
-import { formatDateTime, shortId } from "@/lib/format";
+import {
+  formatDateTime,
+  formatDuration,
+  formatLessons,
+  formatTime,
+  shortId,
+  toDateTimeLocalValue,
+} from "@/lib/format";
 import { friendlyError } from "@/lib/apiError";
 import {
   PageHeader,
@@ -30,15 +37,14 @@ import {
 } from "@/components/ui";
 import { SessionStatusBadge } from "@/components/app/badges";
 
+// O professor escolhe apenas a sala e a hora real em que a aula começou —
+// quanto a chamada vale vem da disciplina, definida pela secretaria.
 const SessionSchema = z.object({
   classId: z.string().min(1, "Selecione a turma."),
+  classSubjectId: z.string().min(1, "Selecione a disciplina."),
   teacherId: z.string().optional().or(z.literal("")),
   locationId: z.string().optional().or(z.literal("")),
-  classesWorth: z
-    .number("Informe um número.")
-    .int("Use um número inteiro.")
-    .positive("Deve ser maior que zero.")
-    .optional(),
+  startedAt: z.string().min(1, "Informe a hora de início."),
 });
 
 type SessionForm = z.infer<typeof SessionSchema>;
@@ -87,14 +93,25 @@ export default function SessionsPage() {
   const classById = new Map(classes.data?.data.map((c) => [c.id, c]) ?? []);
 
   const form = useForm<SessionForm>({ resolver: zodResolver(SessionSchema) });
+  const selectedClassId = form.watch("classId");
+  const selectedClassSubjectId = form.watch("classSubjectId");
+  const startedAtValue = form.watch("startedAt");
+  const selectedClass = classById.get(selectedClassId);
+  // Professor só abre as disciplinas que ele leciona naquela turma
+  const subjectOptions = (selectedClass?.subjects ?? [])
+    .filter((cs) => !isTeacher || cs.teacherId === user?.id)
+    .map((cs) => ({ value: cs.id, label: cs.subjectName }));
+  const selectedSubject = selectedClass?.subjects.find((cs) => cs.id === selectedClassSubjectId);
 
   const create = useMutation({
     mutationFn: (v: SessionForm) =>
       api.post("/class-sessions", {
-        classId: v.classId,
+        classSubjectId: v.classSubjectId,
         teacherId: isTeacher ? undefined : v.teacherId || undefined,
         locationId: v.locationId || undefined,
-        classesWorth: v.classesWorth,
+        // datetime-local devolve hora local sem fuso; o backend espera ISO
+        // com offset para não interpretar como UTC
+        startedAt: new Date(v.startedAt).toISOString(),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["class-sessions"] });
@@ -125,7 +142,14 @@ export default function SessionsPage() {
   });
 
   const openCreate = () => {
-    form.reset({ classId: "", teacherId: "", locationId: "", classesWorth: 1 });
+    form.reset({
+      classId: "",
+      classSubjectId: "",
+      teacherId: "",
+      locationId: "",
+      // Agora por padrão; quem abriu com atraso corrige para a hora real
+      startedAt: toDateTimeLocalValue(new Date()),
+    });
     setCreating(true);
   };
 
@@ -133,7 +157,9 @@ export default function SessionsPage() {
   const onClassChange = (classId: string) => {
     const cls = classById.get(classId);
     if (cls?.locationId) form.setValue("locationId", cls.locationId);
-    if (!isTeacher && cls) form.setValue("teacherId", cls.teacherId);
+    // A turma tem várias disciplinas agora — a escolha anterior não vale mais
+    form.setValue("classSubjectId", "");
+    form.setValue("teacherId", "");
   };
 
   return (
@@ -187,6 +213,7 @@ export default function SessionsPage() {
               <Th>Professor</Th>
               <Th>Sala</Th>
               <Th>Início</Th>
+              <Th>Fecha às</Th>
               <Th>Vale por</Th>
               <Th>Status</Th>
               <Th className="w-52 text-right">Ações</Th>
@@ -194,7 +221,7 @@ export default function SessionsPage() {
           </thead>
           <tbody>
             <TableState
-              colSpan={7}
+              colSpan={8}
               loading={list.isPending}
               error={list.error ? friendlyError(list.error) : null}
               empty={list.data?.data.length === 0}
@@ -210,12 +237,23 @@ export default function SessionsPage() {
                   >
                     {s.className ?? shortId(s.classId)}
                   </Link>
+                  {s.subjectName && (
+                    <span className="block text-xs text-flauzino-slate-500">{s.subjectName}</span>
+                  )}
                 </Td>
                 <Td>{s.teacherName ?? shortId(s.teacherId)}</Td>
                 <Td>{s.locationName ?? "—"}</Td>
                 <Td className="font-mono-ds text-xs">{formatDateTime(s.startedAt)}</Td>
-                <Td>{s.classesWorth} {s.classesWorth === 1 ? "aula" : "aulas"}</Td>
-                <Td><SessionStatusBadge status={s.status} /></Td>
+                <Td className="font-mono-ds text-xs">
+                  {s.status === "open" ? formatTime(s.scheduledEndsAt) : "—"}
+                </Td>
+                <Td>{formatLessons(s.classesWorth)}</Td>
+                <Td>
+                  <SessionStatusBadge status={s.status} />
+                  {s.autoClosed && (
+                    <span className="ml-1.5 text-xs text-flauzino-slate-500">automático</span>
+                  )}
+                </Td>
                 <Td>
                   <div className="flex justify-end gap-2">
                     <Link href={`/dashboard/sessions/${s.id}`}>
@@ -257,7 +295,7 @@ export default function SessionsPage() {
         open={creating}
         onClose={() => setCreating(false)}
         title="Abrir chamada"
-        description="Escolha a sala onde a aula vai acontecer — o totem daquela sala passa a reconhecer os alunos desta turma."
+        description="Informe a sala e a hora em que a aula começou. Quantas aulas a chamada vale já vem da disciplina."
         size="sm"
         footer={
           <>
@@ -283,13 +321,37 @@ export default function SessionsPage() {
             error={form.formState.errors.classId?.message}
             {...form.register("classId", { onChange: (e) => onClassChange(e.target.value) })}
           />
+          <Select
+            label="Disciplina"
+            required
+            disabled={!selectedClass}
+            placeholder={
+              !selectedClass
+                ? "Escolha a turma primeiro"
+                : subjectOptions.length === 0
+                  ? isTeacher
+                    ? "Você não leciona nenhuma disciplina desta turma"
+                    : "A turma não tem disciplinas na grade"
+                  : "Selecione a disciplina"
+            }
+            hint="A chamada é de uma disciplina — a frequência é contada separadamente em cada uma."
+            options={subjectOptions}
+            error={form.formState.errors.classSubjectId?.message}
+            {...form.register("classSubjectId", {
+              onChange: (e) => {
+                // Admin abre para o professor daquela disciplina
+                const cs = selectedClass?.subjects.find((x) => x.id === e.target.value);
+                if (!isTeacher && cs) form.setValue("teacherId", cs.teacherId);
+              },
+            })}
+          />
           {!isTeacher && (
             <Select
               label="Professor responsável"
               required
               placeholder="Selecione o professor"
               options={teacherOptions}
-              hint="Pré-selecionado pelo responsável da turma."
+              hint="Pré-selecionado pelo professor da disciplina."
               error={form.formState.errors.teacherId?.message}
               {...form.register("teacherId")}
             />
@@ -303,15 +365,38 @@ export default function SessionsPage() {
             {...form.register("locationId")}
           />
           <Input
-            label="Vale por quantas aulas"
-            type="number"
-            min={1}
-            hint="Aulas geminadas contam mais de uma vez na frequência."
-            error={form.formState.errors.classesWorth?.message}
-            {...form.register("classesWorth", {
-              setValueAs: (v) => (v === "" || v === null || v === undefined ? undefined : Number(v)),
-            })}
+            label="A aula começou às"
+            required
+            type="datetime-local"
+            hint="Informe o horário real de início, mesmo que a chamada esteja sendo aberta com atraso — é dele que sai o fechamento automático."
+            error={form.formState.errors.startedAt?.message}
+            {...form.register("startedAt")}
           />
+
+          {selectedSubject && (
+            <div className="flex items-start gap-2 rounded-lg bg-flauzino-accent-50 px-3 py-2.5 text-sm text-flauzino-navy-900">
+              <Clock size={15} className="mt-0.5 shrink-0 text-flauzino-accent-600" />
+              <span>
+                <strong>{selectedSubject.subjectName}</strong> · vale{" "}
+                <strong>{formatLessons(selectedSubject.lessonsPerSession)}</strong> e fecha
+                sozinha após {formatDuration(selectedSubject.sessionDurationMin)}
+                {startedAtValue && !Number.isNaN(new Date(startedAtValue).getTime()) && (
+                  <>
+                    , às{" "}
+                    <strong>
+                      {formatTime(
+                        new Date(
+                          new Date(startedAtValue).getTime() +
+                            selectedSubject.sessionDurationMin * 60_000
+                        ).toISOString()
+                      )}
+                    </strong>
+                  </>
+                )}
+                .
+              </span>
+            </div>
+          )}
         </form>
       </Modal>
 

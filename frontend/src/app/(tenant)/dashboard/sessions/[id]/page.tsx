@@ -7,17 +7,24 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   Ban,
+  DoorOpen,
   Eye,
   MapPin,
   ScanFace,
   Square,
+  Timer,
   UserRound,
   Users,
 } from "lucide-react";
 import { api, fetchAuthenticatedBlobUrl } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import type { Rollcall, RollcallStudent, SessionFrame } from "@/lib/types";
-import { formatDateTime, formatPercent } from "@/lib/format";
+import type { Rollcall, RollcallStudent, SessionFrame, TenantSettings } from "@/lib/types";
+import {
+  formatDateTime,
+  formatLessons,
+  formatPercent,
+  formatTime,
+} from "@/lib/format";
 import { friendlyError } from "@/lib/apiError";
 import { cn } from "@/lib/cn";
 import {
@@ -82,6 +89,116 @@ function CountedSelect({
   );
 }
 
+/**
+ * Contagem regressiva até o fechamento automático.
+ *
+ * A chamada encerra sozinha ao fim do período (aulas × duração da aula), e o
+ * professor precisa ver isso chegando — não descobrir depois que fechou.
+ */
+function AutoCloseCountdown({ scheduledEndsAt }: { scheduledEndsAt: string }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const remainingMs = new Date(scheduledEndsAt).getTime() - now;
+  // O job varre a cada minuto: entre o prazo vencer e a sessão fechar existe
+  // uma janela curta em que a tela ainda está aberta
+  if (remainingMs <= 0) {
+    return (
+      <span className="flex items-center gap-1.5 text-sm font-medium text-flauzino-warning-600">
+        <Timer size={14} /> Encerrando…
+      </span>
+    );
+  }
+
+  const totalMinutes = Math.floor(remainingMs / 60_000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  const seconds = Math.floor((remainingMs % 60_000) / 1000);
+  const label =
+    hours > 0
+      ? `${hours}h${String(minutes).padStart(2, "0")}`
+      : `${minutes}:${String(seconds).padStart(2, "0")}`;
+
+  return (
+    <span
+      className={cn(
+        "flex items-center gap-1.5 font-mono-ds text-sm font-medium",
+        remainingMs < 5 * 60_000
+          ? "text-flauzino-warning-600"
+          : "text-flauzino-slate-500"
+      )}
+      title={`Fecha automaticamente às ${formatTime(scheduledEndsAt)}`}
+    >
+      <Timer size={14} /> {label}
+    </span>
+  );
+}
+
+/**
+ * Checkout individual: o professor libera a saída e o totem grava o horário
+ * quando o aluno passa. As aulas cumpridas são recalculadas a partir da hora
+ * real de início da aula.
+ */
+function CheckoutCell({
+  student,
+  disabled,
+  onRelease,
+  onRevoke,
+  saving,
+}: {
+  student: RollcallStudent;
+  disabled: boolean;
+  onRelease: () => void;
+  onRevoke: () => void;
+  saving: boolean;
+}) {
+  if (student.checkedOutAt) {
+    return (
+      <span className="flex items-center justify-end gap-2">
+        <Badge variant="warning">Saiu {formatTime(student.checkedOutAt)}</Badge>
+      </span>
+    );
+  }
+
+  if (student.checkoutReleased) {
+    return (
+      <span className="flex items-center justify-end gap-2">
+        <Badge variant="accent" dot>
+          Liberado
+        </Badge>
+        {!disabled && (
+          <Button variant="ghost" size="sm" onClick={onRevoke} loading={saving}>
+            Desfazer
+          </Button>
+        )}
+      </span>
+    );
+  }
+
+  // Só faz sentido liberar a saída de quem está presente
+  if (student.status !== "present" || disabled) {
+    return <span className="block text-right text-xs text-flauzino-slate-400">—</span>;
+  }
+
+  return (
+    <div className="flex justify-end">
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onRelease}
+        loading={saving}
+        iconLeft={<DoorOpen size={13} />}
+      >
+        Liberar saída
+      </Button>
+    </div>
+  );
+}
+
 function FrameModal({ sessionId, frame, onClose }: { sessionId: string; frame: SessionFrame; onClose: () => void }) {
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -131,9 +248,15 @@ export default function RollcallPage() {
   const { user } = useAuth();
 
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
+  const [checkoutUserId, setCheckoutUserId] = useState<string | null>(null);
   const [closing, setClosing] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [viewingFrame, setViewingFrame] = useState<SessionFrame | null>(null);
+
+  const settings = useQuery({
+    queryKey: ["tenant-settings"],
+    queryFn: () => api.get<{ data: TenantSettings }>("/tenant-settings"),
+  });
 
   const rollcall = useQuery({
     queryKey: ["rollcall", id],
@@ -157,6 +280,28 @@ export default function RollcallPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["rollcall", id] }),
     onError: (error) => toast.error(friendlyError(error)),
     onSettled: () => setSavingUserId(null),
+  });
+
+  const releaseCheckout = useMutation({
+    mutationFn: (userId: string) => api.post(`/class-sessions/${id}/checkout/${userId}`),
+    onMutate: (userId) => setCheckoutUserId(userId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["rollcall", id] });
+      toast.success("Saída liberada. O horário será gravado quando o aluno passar no totem.");
+    },
+    onError: (error) => toast.error(friendlyError(error)),
+    onSettled: () => setCheckoutUserId(null),
+  });
+
+  const revokeCheckout = useMutation({
+    mutationFn: (userId: string) => api.delete(`/class-sessions/${id}/checkout/${userId}`),
+    onMutate: (userId) => setCheckoutUserId(userId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["rollcall", id] });
+      toast.success("Liberação desfeita.");
+    },
+    onError: (error) => toast.error(friendlyError(error)),
+    onSettled: () => setCheckoutUserId(null),
   });
 
   const close = useMutation({
@@ -207,6 +352,8 @@ export default function RollcallPage() {
   const canWrite =
     user?.role === "admin" || user?.role === "super_admin" || session.teacherId === user?.id;
   const worth = session.classesWorth;
+  const checkoutEnabled = settings.data?.data.individualCheckoutEnabled ?? false;
+  const showCheckout = checkoutEnabled && (isOpen || students.some((s) => s.checkedOutAt));
 
   return (
     <div>
@@ -221,13 +368,26 @@ export default function RollcallPage() {
 
       <PageHeader
         title={session.className ?? "Chamada"}
-        description={`${session.teacherName ?? "—"} · iniciada em ${formatDateTime(session.startedAt)} · vale ${worth} ${worth === 1 ? "aula" : "aulas"}`}
+        description={[
+          session.subjectName,
+          session.teacherName ?? "—",
+          `aula iniciada em ${formatDateTime(session.startedAt)}`,
+          `vale ${formatLessons(worth)}`,
+          session.status === "closed" && session.autoClosed
+            ? "encerrada automaticamente no fim do período"
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
         actions={
           <div className="flex items-center gap-3">
             {session.locationName && (
               <span className="flex items-center gap-1.5 text-sm text-flauzino-slate-500">
                 <MapPin size={14} /> {session.locationName}
               </span>
+            )}
+            {isOpen && session.scheduledEndsAt && (
+              <AutoCloseCountdown scheduledEndsAt={session.scheduledEndsAt} />
             )}
             <SessionStatusBadge status={session.status} />
             {isOpen && canWrite && (
@@ -283,7 +443,9 @@ export default function RollcallPage() {
           title="Lista de chamada"
           description={
             isOpen
-              ? "Atualiza sozinha conforme os alunos passam no totem. Ajuste as aulas contadas quando necessário — 0 marca ausência."
+              ? showCheckout
+                ? "Atualiza sozinha conforme os alunos passam no totem. Ao liberar uma saída, o aluno passa no totem de novo e as aulas cumpridas são recalculadas pelo tempo em sala."
+                : "Atualiza sozinha conforme os alunos passam no totem. Ajuste as aulas contadas quando necessário — 0 marca ausência."
               : session.status === "cancelled"
                 ? "Chamada cancelada — nenhum registro foi contabilizado."
                 : "Chamada encerrada — a frequência já foi consolidada."
@@ -296,12 +458,13 @@ export default function RollcallPage() {
               <Th>Aluno</Th>
               <Th>Matrícula</Th>
               <Th>Entrada</Th>
+              {showCheckout && <Th className="text-right">Saída</Th>}
               <Th className="text-right">Aulas contadas</Th>
             </tr>
           </thead>
           <tbody>
             <TableState
-              colSpan={4}
+              colSpan={showCheckout ? 5 : 4}
               empty={students.length === 0}
               emptyTitle="Nenhum aluno matriculado nesta turma."
             />
@@ -333,6 +496,17 @@ export default function RollcallPage() {
                     <Badge variant="danger">Ausente</Badge>
                   )}
                 </Td>
+                {showCheckout && (
+                  <Td>
+                    <CheckoutCell
+                      student={s}
+                      disabled={!isOpen || !canWrite}
+                      saving={checkoutUserId === s.userId}
+                      onRelease={() => releaseCheckout.mutate(s.userId)}
+                      onRevoke={() => revokeCheckout.mutate(s.userId)}
+                    />
+                  </Td>
+                )}
                 <Td>
                   <CountedSelect
                     student={s}

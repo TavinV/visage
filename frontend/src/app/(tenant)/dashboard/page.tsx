@@ -6,7 +6,7 @@ import { Users, GraduationCap, MonitorSmartphone, ScanFace, BarChart3 } from "lu
 import { api, qs } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import type { ClassItem, ClassSession, Device, Paginated, User } from "@/lib/types";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, formatLessons, formatTime } from "@/lib/format";
 import { friendlyError } from "@/lib/apiError";
 import {
   PageHeader,
@@ -167,13 +167,14 @@ export default function TenantOverviewPage() {
             <tr>
               <Th>Sessão</Th>
               <Th>Início</Th>
+              <Th>Fecha às</Th>
               <Th>Vale por</Th>
               <Th>Status</Th>
             </tr>
           </thead>
           <tbody>
             <TableState
-              colSpan={4}
+              colSpan={5}
               loading={openSessions.isPending}
               error={openSessions.error ? friendlyError(openSessions.error) : null}
               empty={openSessions.data?.data.length === 0}
@@ -184,7 +185,8 @@ export default function TenantOverviewPage() {
               <Tr key={s.id}>
                 <Td className="font-mono-ds text-xs">{s.id.slice(0, 8)}…</Td>
                 <Td className="font-mono-ds text-xs">{formatDateTime(s.startedAt)}</Td>
-                <Td>{s.classesWorth} {s.classesWorth === 1 ? "aula" : "aulas"}</Td>
+                <Td className="font-mono-ds text-xs">{formatTime(s.scheduledEndsAt)}</Td>
+                <Td>{formatLessons(s.classesWorth)}</Td>
                 <Td><SessionStatusBadge status={s.status} /></Td>
               </Tr>
             ))}

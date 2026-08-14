@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api, qs } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import type {
+  ClassEnrollment,
   ClassItem,
   FrequencyReport,
   Paginated,
@@ -43,27 +44,53 @@ const attendanceStatusLabel: Record<string, string> = {
 
 export default function ReportsPage() {
   const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
+  const isAdmin = user?.role === "admin" || user?.role === "super_admin";
+  const isTeacher = user?.role === "teacher";
   const [classId, setClassId] = useState("");
   const [studentId, setStudentId] = useState("");
 
-  // Turmas: professor/coordenação não têm GET /classes — o filtro fica para admin
+  // Professor TEM acesso a GET /classes — o backend já devolve só as turmas
+  // dele. Manter isso travado em admin deixava o professor sem seletor e,
+  // portanto, sem relatório nenhum.
   const classes = useQuery({
     queryKey: ["classes", "options"],
     queryFn: () => api.get<Paginated<ClassItem>>(`/classes${qs({ limit: 100 })}`),
-    enabled: isAdmin,
   });
 
+  // GET /users é admin-only; o professor chega aos alunos pelas matrículas
+  // da turma selecionada
   const students = useQuery({
     queryKey: ["users", "students-options"],
     queryFn: () => api.get<Paginated<User>>(`/users${qs({ role: "student", limit: 100 })}`),
     enabled: isAdmin,
   });
 
+  const classEnrollments = useQuery({
+    queryKey: ["class-enrollments", "report-students", classId],
+    queryFn: () =>
+      api.get<Paginated<ClassEnrollment>>(
+        `/class-enrollments${qs({ classId, limit: 100 })}`
+      ),
+    enabled: isTeacher && classId !== "",
+  });
+
+  const studentOptions = isAdmin
+    ? (students.data?.data.map((s) => ({
+        value: s.id,
+        label: s.enrollmentCode ? `${s.name} (${s.enrollmentCode})` : s.name,
+      })) ?? [])
+    : (classEnrollments.data?.data.map((e) => ({
+        value: e.userId,
+        label: e.student?.enrollmentCode
+          ? `${e.student.name} (${e.student.enrollmentCode})`
+          : (e.student?.name ?? e.userId),
+      })) ?? []);
+
+  // Uma entrada por disciplina da turma — a frequência é contada por disciplina
   const frequency = useQuery({
     queryKey: ["report-frequency", classId],
     queryFn: () =>
-      api.get<{ data: FrequencyReport }>(
+      api.get<{ data: FrequencyReport[] }>(
         `/attendance/reports/frequency${qs({ class_id: classId })}`
       ),
     enabled: classId !== "",
@@ -96,69 +123,101 @@ export default function ReportsPage() {
           <CardHeader
             title="Frequência por turma"
             actions={
-              isAdmin ? (
-                <Select
-                  value={classId}
-                  onChange={(e) => setClassId(e.target.value)}
-                  placeholder="Selecione a turma"
-                  options={classes.data?.data.map((c) => ({ value: c.id, label: c.name })) ?? []}
-                  className="w-64"
-                />
-              ) : undefined
+              <Select
+                value={classId}
+                onChange={(e) => {
+                  setClassId(e.target.value);
+                  // O aluno escolhido pertencia à turma anterior
+                  if (isTeacher) setStudentId("");
+                }}
+                placeholder={
+                  classes.isPending
+                    ? "Carregando turmas…"
+                    : classes.data?.data.length === 0
+                      ? "Nenhuma turma disponível"
+                      : "Selecione a turma"
+                }
+                options={
+                  classes.data?.data.map((c) => ({
+                    value: c.id,
+                    label: c.name,
+                  })) ?? []
+                }
+                className="w-72"
+              />
             }
           />
-          {!isAdmin && (
-            <div className="border-b border-flauzino-slate-200 px-5 py-3 text-xs text-flauzino-slate-500">
-              Peça à administração o vínculo das turmas — a seleção direta requer perfil administrador.
-            </div>
-          )}
           {classId === "" ? (
             <EmptyState
               title="Selecione uma turma para ver a frequência."
               description="O relatório mostra presenças, faltas e percentual por aluno."
             />
+          ) : frequency.isPending ? (
+            <p className="px-5 py-6 text-sm text-flauzino-slate-500">Carregando…</p>
+          ) : frequency.isError ? (
+            <p className="px-5 py-6 text-sm text-flauzino-danger-600">
+              {friendlyError(frequency.error)}
+            </p>
+          ) : (frequency.data?.data.length ?? 0) === 0 ? (
+            <EmptyState
+              title="Esta turma não tem disciplinas na grade."
+              description="Monte a grade da turma para acompanhar a frequência."
+            />
           ) : (
-            <>
-              {frequency.data && (
-                <div className="border-b border-flauzino-slate-200 px-5 py-3 text-sm text-flauzino-slate-500">
-                  <b className="font-semibold text-flauzino-navy-900">
-                    {frequency.data.data.className}
-                  </b>{" "}
-                  · {frequency.data.data.totalClassesPlanned} aulas previstas
+            frequency.data!.data.map((f) => (
+              <div
+                key={f.classSubjectId}
+                className="border-b border-flauzino-slate-200 last:border-0"
+              >
+                <div className="flex flex-wrap items-baseline justify-between gap-2 px-5 py-3">
+                  <span className="text-sm font-semibold text-flauzino-navy-900">
+                    {f.subjectName}
+                    <span className="ml-2 font-normal text-flauzino-slate-500">
+                      {f.teacherName}
+                    </span>
+                  </span>
+                  <span className="font-mono-ds text-xs text-flauzino-slate-500">
+                    {f.lessonsSoFar} de {f.totalClassesPlanned} aulas dadas
+                  </span>
                 </div>
-              )}
-              <Table>
-                <thead>
-                  <tr>
-                    <Th>Aluno</Th>
-                    <Th>Presenças</Th>
-                    <Th>Faltas</Th>
-                    <Th>Frequência</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <TableState
-                    colSpan={4}
-                    loading={frequency.isPending}
-                    error={frequency.error ? friendlyError(frequency.error) : null}
-                    empty={frequency.data?.data.students.length === 0}
-                    emptyTitle="Nenhum registro de presença nesta turma."
-                  />
-                  {frequency.data?.data.students.map((s) => (
-                    <Tr key={s.userId}>
-                      <Td className="font-medium text-flauzino-navy-900">{s.name}</Td>
-                      <Td className="font-mono-ds">{s.attended}</Td>
-                      <Td className="font-mono-ds">{s.absent}</Td>
-                      <Td>
-                        <Badge variant={frequencyTone(s.frequencyPercent)}>
-                          {formatPercent(s.frequencyPercent)}
-                        </Badge>
-                      </Td>
-                    </Tr>
-                  ))}
-                </tbody>
-              </Table>
-            </>
+                {f.students.length === 0 ? (
+                  <p className="px-5 pb-4 text-xs text-flauzino-slate-400">
+                    Nenhuma chamada encerrada ainda nesta disciplina.
+                  </p>
+                ) : (
+                  <Table>
+                    <thead>
+                      <tr>
+                        <Th>Aluno</Th>
+                        <Th>Presenças</Th>
+                        <Th>Faltas</Th>
+                        <Th>Frequência</Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {f.students.map((s) => (
+                        <Tr key={s.userId}>
+                          <Td className="font-medium text-flauzino-navy-900">{s.name}</Td>
+                          <Td className="font-mono-ds">{s.attended}</Td>
+                          <Td className="font-mono-ds">{s.absent}</Td>
+                          <Td>
+                            <Badge variant={frequencyTone(s.frequencyPercent)}>
+                              {formatPercent(s.frequencyPercent)}
+                            </Badge>
+                            <span
+                              className="ml-2 text-xs text-flauzino-slate-500"
+                              title="Sobre as aulas que já aconteceram"
+                            >
+                              {formatPercent(s.partialPercent)} do dado
+                            </span>
+                          </Td>
+                        </Tr>
+                      ))}
+                    </tbody>
+                  </Table>
+                )}
+              </div>
+            ))
           )}
         </Card>
 
@@ -167,26 +226,30 @@ export default function ReportsPage() {
           <CardHeader
             title="Histórico do aluno"
             actions={
-              isAdmin ? (
-                <Select
-                  value={studentId}
-                  onChange={(e) => setStudentId(e.target.value)}
-                  placeholder="Selecione o aluno"
-                  options={
-                    students.data?.data.map((s) => ({
-                      value: s.id,
-                      label: s.enrollmentCode ? `${s.name} (${s.enrollmentCode})` : s.name,
-                    })) ?? []
-                  }
-                  className="w-64"
-                />
-              ) : undefined
+              <Select
+                value={studentId}
+                onChange={(e) => setStudentId(e.target.value)}
+                disabled={isTeacher && classId === ""}
+                placeholder={
+                  isTeacher && classId === ""
+                    ? "Escolha a turma acima"
+                    : studentOptions.length === 0
+                      ? "Nenhum aluno disponível"
+                      : "Selecione o aluno"
+                }
+                options={studentOptions}
+                className="w-64"
+              />
             }
           />
           {studentId === "" ? (
             <EmptyState
               title="Selecione um aluno para ver o histórico."
-              description="Resumo por turma e a lista completa de presenças e ausências."
+              description={
+                isTeacher
+                  ? "Escolha uma das suas turmas acima e depois o aluno."
+                  : "Resumo por turma e a lista completa de presenças e ausências."
+              }
             />
           ) : (
             <div className="grid grid-cols-1 gap-0 xl:grid-cols-2 xl:divide-x xl:divide-flauzino-slate-200">
@@ -250,7 +313,10 @@ export default function ReportsPage() {
                     {history.data?.data.map((h) => (
                       <Tr key={h.id}>
                         <Td className="font-medium text-flauzino-navy-900">
-                          {h.classSession.class.name}
+                          {h.classSession.classSubject.class.name}
+                          <span className="block text-xs font-normal text-flauzino-slate-500">
+                            {h.classSession.classSubject.subject.name}
+                          </span>
                         </Td>
                         <Td className="font-mono-ds text-xs">
                           {formatDateTime(h.classSession.startedAt)}
