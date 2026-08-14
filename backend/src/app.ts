@@ -20,6 +20,7 @@ import devicesRoutes from "./routes/devices";
 import locationsRoutes from "./routes/locations";
 import academicPeriodsRoutes from "./routes/academic-periods";
 import coursesRoutes from "./routes/courses";
+import subjectsRoutes from "./routes/subjects";
 import classesRoutes from "./routes/classes";
 import classEnrollmentsRoutes from "./routes/class-enrollments";
 import classSessionsRoutes from "./routes/class-sessions";
@@ -99,6 +100,7 @@ export function createApp(): Express {
   app.use("/locations", locationsRoutes);
   app.use("/academic-periods", academicPeriodsRoutes);
   app.use("/courses", coursesRoutes);
+  app.use("/subjects", subjectsRoutes);
   app.use("/classes", classesRoutes);
   app.use("/class-enrollments", classEnrollmentsRoutes);
   app.use("/class-sessions", classSessionsRoutes);
