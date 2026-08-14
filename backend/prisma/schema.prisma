@@ -36,6 +36,11 @@ model Tenant {
   trialEndsAt     DateTime? @db.Timestamptz()
   timezone        String    @default("America/Sao_Paulo") @db.VarChar(50)
 
+  // Logo da instituição — caminho relativo dentro de PROFILE_PHOTOS_STORAGE_PATH.
+  // Servido por GET /tenants/:id/logo (nunca exposto como caminho de disco).
+  logoPath      String?   @db.VarChar(500)
+  logoUpdatedAt DateTime? @db.Timestamptz()
+
   // Relations
   settings          TenantSettings?
   keys              TenantKeys?
@@ -43,7 +48,9 @@ model Tenant {
   locations         Location[]
   academicPeriods   AcademicPeriod[]
   courses           Course[]
+  subjects          Subject[]
   classes           Class[]
+  classSubjects     ClassSubject[]
   devices           Device[]
   facialEmbeddings  FacialEmbedding[]
   classSessions     ClassSession[]
@@ -138,9 +145,15 @@ model User {
   // Senha temporária (gerada na criação/reset) exige troca no primeiro acesso
   mustChangePassword Boolean @default(false)
 
+  // Foto de perfil — caminho relativo dentro de PROFILE_PHOTOS_STORAGE_PATH.
+  // Enviada pelo próprio usuário. Alunos NÃO têm foto de perfil: o rosto deles
+  // só existe como embedding cifrado (LGPD).
+  photoPath      String?   @db.VarChar(500)
+  photoUpdatedAt DateTime? @db.Timestamptz()
+
   // Relations
   facialEmbeddings        FacialEmbedding[]
-  taughtClasses           Class[]            @relation("TeacherClasses")
+  taughtClassSubjects     ClassSubject[]     @relation("TeacherClassSubjects")
   createdClassSessions    ClassSession[]     @relation("CreatedBy")
   taughtClassSessions     ClassSession[]     @relation("TeacherClass")
   classEnrollments        ClassEnrollment[]
@@ -202,6 +215,15 @@ model Device {
   // Libera o fluxo de cadastro biométrico por CPF na tela deste totem
   allowEnrollment Boolean @default(false)
   lastSeenAt DateTime? @db.Timestamptz()
+
+  // Calibração por totem — câmera, iluminação e ângulo variam de sala para
+  // sala. NULL herda o valor do tenant; preenchido, sobrepõe o tenant.
+  recognitionThreshold Float?
+  livenessThreshold    Float?
+  livenessEnabled      Boolean?
+  calibratedAt         DateTime? @db.Timestamptz()
+  // Totem de origem quando a calibração foi copiada de outro dispositivo
+  calibrationSourceId  String?   @db.VarChar(36)
 
   recognitionLogs RecognitionLog[]
 
@@ -267,11 +289,46 @@ model Course {
 
   name String @db.VarChar(200)
 
-  classes Class[]
+  // Grade do curso, definida pela secretaria: quantas aulas cabem num dia e
+  // quanto dura cada uma. A unidade é só de apresentação — lessonDurationMin
+  // (derivado) é o que o backend usa em cálculo de tempo.
+  lessonsPerDay      Int    @default(4)
+  lessonDuration     Int    @default(50)
+  lessonDurationUnit String @default("minutes") @db.VarChar(10) // 'minutes' | 'hours'
+
+  subjects Subject[]
+  classes  Class[]
 
   createdAt DateTime @default(now()) @db.Timestamptz()
 
   @@map("courses")
+}
+
+/// Catálogo de disciplinas de um curso (ex.: "Matemática" em Técnico em
+/// Mecânica). Só o nome — quem leciona e quanta carga tem é decidido por
+/// turma, em ClassSubject: a mesma Matemática pode ter professores e cargas
+/// diferentes no 3ºA e no 3ºB.
+model Subject {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  courseId String
+  course   Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  name String  @db.VarChar(200)
+  code String? @db.VarChar(30) // sigla institucional (ex.: "MAT101")
+
+  isActive Boolean @default(true)
+
+  classSubjects ClassSubject[]
+
+  createdAt DateTime @default(now()) @db.Timestamptz()
+  updatedAt DateTime @updatedAt @db.Timestamptz()
+
+  @@unique([courseId, name])
+  @@index([tenantId, courseId])
+  @@map("subjects")
 }
 
 model Class {
@@ -282,23 +339,57 @@ model Class {
   courseId String
   course   Course @relation(fields: [courseId], references: [id])
 
-  name      String @db.VarChar(100)
-  teacherId String
-  teacher   User   @relation("TeacherClasses", fields: [teacherId], references: [id])
+  name String @db.VarChar(100)
 
   room       String?   @db.VarChar(50)
   locationId String?
   location   Location? @relation(fields: [locationId], references: [id])
 
-  totalClassesPlanned Int @default(0)
+  // A turma é o GRUPO DE ALUNOS; as disciplinas que ela cursa (cada uma com
+  // seu professor e sua carga) vivem em ClassSubject.
+  classSubjects ClassSubject[]
+  enrollments   ClassEnrollment[]
 
-  enrollments      ClassEnrollment[]
+  createdAt DateTime @default(now()) @db.Timestamptz()
+
+  @@index([tenantId, courseId])
+  @@map("classes")
+}
+
+/// Uma disciplina cursada por uma turma: o professor dela naquela turma e a
+/// carga horária. É aqui que a chamada e a frequência se penduram — o aluno
+/// pode ter 90% em Matemática e 40% em Física na mesma turma.
+model ClassSubject {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  classId String
+  class   Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  subjectId String
+  subject   Subject @relation(fields: [subjectId], references: [id])
+
+  /// Professor desta disciplina NESTA turma.
+  teacherId String
+  teacher   User   @relation("TeacherClassSubjects", fields: [teacherId], references: [id])
+
+  /// Aulas seguidas que uma chamada desta disciplina ocupa (geminada = 2).
+  /// Base do classesWorth da sessão e do fechamento automático.
+  lessonsPerSession Int @default(1)
+
+  /// Aulas previstas no período — denominador real da frequência.
+  totalLessonsPlanned Int @default(0)
+
   classSessions    ClassSession[]
   studentSummaries StudentClassSummary[]
 
   createdAt DateTime @default(now()) @db.Timestamptz()
+  updatedAt DateTime @updatedAt @db.Timestamptz()
 
-  @@map("classes")
+  @@unique([classId, subjectId])
+  @@index([tenantId, teacherId])
+  @@map("class_subjects")
 }
 
 model ClassEnrollment {
@@ -314,9 +405,10 @@ model ClassEnrollment {
   @@map("class_enrollments")
 }
 
+/// Frequência acumulada do aluno POR DISCIPLINA da turma.
 model StudentClassSummary {
-  classId String
-  class   Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+  classSubjectId String
+  classSubject   ClassSubject @relation(fields: [classSubjectId], references: [id], onDelete: Cascade)
 
   userId String
 
@@ -324,7 +416,7 @@ model StudentClassSummary {
   classesAbsent   Int      @default(0)
   lastUpdatedAt   DateTime @default(now()) @updatedAt @db.Timestamptz()
 
-  @@id([classId, userId])
+  @@id([classSubjectId, userId])
   @@index([userId])
   @@map("student_class_summary")
 }
@@ -338,9 +430,12 @@ model ClassSession {
   tenantId String
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  classId String
-  class   Class  @relation(fields: [classId], references: [id])
+  // A chamada é de uma DISCIPLINA de uma turma, não da turma inteira.
+  classSubjectId String
+  classSubject   ClassSubject @relation(fields: [classSubjectId], references: [id])
 
+  // Quem efetivamente deu a aula — normalmente o professor da disciplina,
+  // mas pode ser um substituto.
   teacherId String
   teacher   User   @relation("TeacherClass", fields: [teacherId], references: [id])
 
@@ -352,15 +447,32 @@ model ClassSession {
   locationId String?
   location   Location? @relation(fields: [locationId], references: [id])
 
-  startedAt    DateTime  @default(now()) @db.Timestamptz()
-  endedAt      DateTime? @db.Timestamptz()
-  status       String    @default("open") @db.VarChar(20) // 'open' | 'closed' | 'cancelled'
-  classesWorth Int       @default(1)
+  // Hora REAL em que a aula começou, informada pelo professor ao abrir a
+  // chamada. Pode ser anterior a createdAt (professor abriu a chamada 40min
+  // depois do início) — é a base do fechamento automático e do cálculo de
+  // aulas no checkout individual.
+  startedAt DateTime  @default(now()) @db.Timestamptz()
+  endedAt   DateTime? @db.Timestamptz()
+  status    String    @default("open") @db.VarChar(20) // 'open' | 'closed' | 'cancelled'
+
+  // Derivado da disciplina (subject.lessonsPerSession) — o professor não
+  // escolhe. Congelado na sessão para o histórico não mudar se a secretaria
+  // reconfigurar a disciplina depois.
+  classesWorth Int @default(1)
+
+  // Duração de uma aula em minutos, congelada do curso pelo mesmo motivo.
+  lessonDurationMin Int @default(50)
+
+  // startedAt + classesWorth × lessonDurationMin. O job de fechamento
+  // automático encerra a chamada quando este instante passa.
+  scheduledEndsAt DateTime? @db.Timestamptz()
+  autoClosed      Boolean   @default(false)
 
   attendanceRecords AttendanceRecord[]
 
   createdAt DateTime @default(now()) @db.Timestamptz()
 
+  @@index([status, scheduledEndsAt])
   @@map("class_sessions")
 }
 
@@ -377,10 +489,15 @@ model AttendanceRecord {
 
   status       String    @db.VarChar(20) // 'present' | 'absent' | 'manual' | 'early_checkout'
   recognizedAt DateTime? @db.Timestamptz()
+  // Momento em que o totem reconheceu a saída (só depois da liberação)
   checkedOutAt DateTime? @db.Timestamptz()
 
+  // Checkout individual: o professor libera a saída no painel e o totem
+  // registra o horário quando o aluno passa. Sem liberação, passar de novo
+  // no totem não faz nada.
   checkoutReleasedById String?
-  checkoutReleasedBy   User?   @relation("CheckoutReleasedBy", fields: [checkoutReleasedById], references: [id])
+  checkoutReleasedBy   User?     @relation("CheckoutReleasedBy", fields: [checkoutReleasedById], references: [id])
+  checkoutReleasedAt   DateTime? @db.Timestamptz()
 
   confidence       Float?
   livenessScore    Float?
