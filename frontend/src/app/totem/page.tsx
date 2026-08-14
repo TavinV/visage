@@ -29,10 +29,26 @@ function resultFor(
   status: string,
   personName?: string,
   preAttendance?: boolean,
-  confidence?: number
+  confidence?: number,
+  checkout?: boolean,
+  classesCounted?: number
 ): TotemResult {
   switch (status) {
     case "identified":
+      // Saída liberada pelo professor: o aluno precisa ver quantas aulas
+      // ficaram registradas, não um "boa aula" que não faz sentido
+      if (checkout) {
+        const lessons =
+          classesCounted === undefined
+            ? ""
+            : ` ${classesCounted} ${classesCounted === 1 ? "aula registrada" : "aulas registradas"}.`;
+        return {
+          kind: "success",
+          title: "Saída registrada",
+          message: `Até logo, ${personName ?? "aluno"}.${lessons}`,
+          confidence,
+        };
+      }
       return preAttendance
         ? {
             kind: "success",
@@ -203,7 +219,16 @@ export default function TotemPage() {
       setProcessing(true);
       try {
         const data = await deviceApi.recognize(imageB64);
-        presentResult(resultFor(data.status, data.personName, data.preAttendance, data.confidence));
+        presentResult(
+          resultFor(
+            data.status,
+            data.personName,
+            data.preAttendance,
+            data.confidence,
+            data.checkout,
+            data.classesCounted
+          )
+        );
       } catch (error) {
         if (error instanceof DeviceApiError && error.status === 401) {
           presentResult({

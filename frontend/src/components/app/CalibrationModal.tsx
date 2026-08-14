@@ -198,23 +198,34 @@ export function CalibrationModal({ open, onClose }: CalibrationModalProps) {
 
   const apply = useMutation({
     mutationFn: async () => {
-      const patch: Record<string, number> = {};
-      if (selectedOption) patch.recognitionThreshold = selectedOption.threshold;
+      // A calibração vale para ESTE totem: a câmera e a iluminação medidas
+      // aqui não são as do totem da sala ao lado
+      const devicePatch: Record<string, number> = {};
+      if (selectedOption) devicePatch.recognitionThreshold = selectedOption.threshold;
       if (applyLiveness && liveness) {
-        patch.livenessThreshold = liveness.liveness_analysis.suggested_value;
-        if (liveness.liveness_analysis.suggested_enrollment_value != null) {
-          patch.livenessThresholdEnrollment = liveness.liveness_analysis.suggested_enrollment_value;
-        }
+        devicePatch.livenessThreshold = liveness.liveness_analysis.suggested_value;
       }
-      if (Object.keys(patch).length === 0) {
+      if (Object.keys(devicePatch).length === 0) {
         throw new Error("Nada selecionado para aplicar.");
       }
-      await api.patch("/tenant-settings", patch);
+      await api.put(`/devices/${deviceId}/calibration/settings`, devicePatch);
+
+      // O limiar do cadastro biométrico é da instituição — não existe por
+      // totem no modelo, e o cadastro é um fluxo único
+      const enrollmentValue =
+        applyLiveness && liveness
+          ? liveness.liveness_analysis.suggested_enrollment_value
+          : null;
+      if (enrollmentValue != null) {
+        await api.patch("/tenant-settings", { livenessThresholdEnrollment: enrollmentValue });
+      }
+
       await api.delete(`/devices/${deviceId}/calibration`);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tenant-settings"] });
-      toast.success("Limiares calibrados aplicados às configurações.");
+      queryClient.invalidateQueries({ queryKey: ["devices"] });
+      toast.success("Calibração aplicada a este totem.");
       setRunning(false);
       setDeviceId("");
       setSelectedProfile(null);
@@ -245,7 +256,7 @@ export function CalibrationModal({ open, onClose }: CalibrationModalProps) {
       open={open}
       onClose={stopAndClose}
       title="Calibrar reconhecimento e vivacidade"
-      description="A coleta é guiada no totem; o sistema calcula automaticamente o ponto de equilíbrio entre segurança e acertos."
+      description="A coleta é guiada no totem escolhido e o resultado vale só para ele — câmera e iluminação mudam de sala para sala. Depois dá para copiar a calibração para outros totens."
       size="lg"
       footer={
         !running ? (
@@ -269,7 +280,7 @@ export function CalibrationModal({ open, onClose }: CalibrationModalProps) {
               disabled={!selectedOption && !(applyLiveness && liveness)}
               iconLeft={<CheckCircle2 size={15} />}
             >
-              Aplicar seleção
+              Aplicar a este totem
             </Button>
           </>
         ) : (

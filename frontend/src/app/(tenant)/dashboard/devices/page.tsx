@@ -5,7 +5,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Plus, Pencil, Trash2, Search, Copy, AlertTriangle, KeyRound } from "lucide-react";
+import {
+  Plus,
+  Pencil,
+  Trash2,
+  Search,
+  Copy,
+  AlertTriangle,
+  KeyRound,
+  SlidersHorizontal,
+} from "lucide-react";
 import { api, qs } from "@/lib/api";
 import type { Device, Location, Paginated } from "@/lib/types";
 import { formatDateTime } from "@/lib/format";
@@ -30,6 +39,7 @@ import {
   useToast,
 } from "@/components/ui";
 import { ActiveBadge } from "@/components/app/badges";
+import { DeviceCalibrationModal } from "@/components/app/DeviceCalibrationModal";
 
 const DeviceSchema = z.object({
   deviceFingerprint: z.string().min(1, "Informe o identificador do dispositivo."),
@@ -51,6 +61,7 @@ export default function DevicesPage() {
   const [editing, setEditing] = useState<Device | null>(null);
   const [deleting, setDeleting] = useState<Device | null>(null);
   const [regenerating, setRegenerating] = useState<Device | null>(null);
+  const [calibrating, setCalibrating] = useState<Device | null>(null);
   const [createdKey, setCreatedKey] = useState<{ label: string; apiKey: string } | null>(null);
 
   const list = useQuery({
@@ -182,14 +193,15 @@ export default function DevicesPage() {
               <Th>Identificador</Th>
               <Th>Sala de aula</Th>
               <Th>Cadastro</Th>
+              <Th>Calibração</Th>
               <Th>Status</Th>
               <Th>Visto por último</Th>
-              <Th className="w-24 text-right">Ações</Th>
+              <Th className="w-32 text-right">Ações</Th>
             </tr>
           </thead>
           <tbody>
             <TableState
-              colSpan={7}
+              colSpan={8}
               loading={list.isPending}
               error={list.error ? friendlyError(list.error) : null}
               empty={list.data?.data.length === 0}
@@ -208,10 +220,34 @@ export default function DevicesPage() {
                     <Badge variant="neutral">Bloqueado</Badge>
                   )}
                 </Td>
+                <Td>
+                  {d.calibration?.isCalibrated ? (
+                    <span className="flex flex-col">
+                      <Badge variant="accent" dot className="w-fit">
+                        Própria
+                      </Badge>
+                      <span className="mt-0.5 font-mono-ds text-[11px] text-flauzino-slate-500">
+                        rec {d.calibration.effectiveRecognitionThreshold.toFixed(2)} · viv{" "}
+                        {d.calibration.effectiveLivenessThreshold.toFixed(2)}
+                      </span>
+                    </span>
+                  ) : (
+                    <Badge variant="neutral">Herdada</Badge>
+                  )}
+                </Td>
                 <Td><ActiveBadge active={d.isActive} /></Td>
                 <Td className="font-mono-ds text-xs">{formatDateTime(d.lastSeenAt)}</Td>
                 <Td>
                   <div className="flex justify-end gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setCalibrating(d)}
+                      aria-label={`Calibração de ${d.label ?? d.deviceFingerprint}`}
+                      title="Calibração do totem"
+                    >
+                      <SlidersHorizontal size={15} />
+                    </Button>
                     <Button variant="ghost" size="sm" onClick={() => openEdit(d)} aria-label={`Editar ${d.label ?? d.deviceFingerprint}`}>
                       <Pencil size={15} />
                     </Button>
@@ -344,6 +380,10 @@ export default function DevicesPage() {
         danger
         loading={regenerateKey.isPending}
       />
+
+      {calibrating && (
+        <DeviceCalibrationModal device={calibrating} onClose={() => setCalibrating(null)} />
+      )}
     </div>
   );
 }
