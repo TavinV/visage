@@ -78,6 +78,8 @@ export interface TenantSettings {
   livenessThresholdEnrollment: number;
   totemPanelPassword: string | null;
   totemClockTimezone: string;
+  hasLogo: boolean;
+  logoUpdatedAt?: string;
   updatedAt: string;
 }
 
@@ -94,6 +96,9 @@ export interface User {
   document?: string;
   enrollmentCode?: string;
   facialStatus: FacialStatus;
+  /** Tem foto de perfil enviada — alunos nunca têm. */
+  hasPhoto: boolean;
+  photoUpdatedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -107,6 +112,22 @@ export interface Location {
   createdAt: string;
 }
 
+/** Calibração de um totem — null em um campo significa "herda do tenant". */
+export interface DeviceCalibration {
+  recognitionThreshold: number | null;
+  livenessThreshold: number | null;
+  livenessEnabled: boolean | null;
+  /** Valores realmente usados no reconhecimento (override ?? tenant). */
+  effectiveRecognitionThreshold: number;
+  effectiveLivenessThreshold: number;
+  effectiveLivenessEnabled: boolean;
+  isCalibrated: boolean;
+  calibratedAt?: string;
+  /** Totem de origem, quando a calibração veio copiada. */
+  calibrationSourceId?: string;
+  calibrationSourceLabel?: string;
+}
+
 export interface Device {
   id: string;
   tenantId: string;
@@ -118,6 +139,7 @@ export interface Device {
   allowEnrollment: boolean;
   lastSeenAt?: string;
   createdAt: string;
+  calibration?: DeviceCalibration;
   /** Presente somente na resposta do POST — nunca é retornada de novo. */
   apiKey?: string;
 }
@@ -132,23 +154,68 @@ export interface AcademicPeriod {
   createdAt: string;
 }
 
+export type LessonDurationUnit = "minutes" | "hours";
+
 export interface Course {
   id: string;
   tenantId: string;
   academicPeriodId: string;
+  periodName?: string;
   name: string;
+  /** Quantas aulas cabem num dia letivo. */
+  lessonsPerDay: number;
+  /** Duração de uma aula na unidade escolhida pela secretaria. */
+  lessonDuration: number;
+  lessonDurationUnit: LessonDurationUnit;
+  /** Mesmo valor em minutos — o que o backend usa nos cálculos. */
+  lessonDurationMin: number;
+  subjectCount?: number;
   createdAt: string;
+}
+
+/** Catálogo: só o nome da disciplina no currículo do curso. */
+export interface Subject {
+  id: string;
+  tenantId: string;
+  courseId: string;
+  courseName?: string;
+  name: string;
+  code?: string;
+  isActive: boolean;
+  /** Em quantas turmas é cursada. */
+  classCount?: number;
+  createdAt: string;
+}
+
+/** Uma disciplina cursada por uma turma: professor e carga próprios. */
+export interface ClassSubject {
+  id: string;
+  subjectId: string;
+  subjectName: string;
+  subjectCode?: string;
+  teacherId: string;
+  teacherName: string;
+  lessonsPerSession: number;
+  totalLessonsPlanned: number;
+  sessionDurationMin: number;
 }
 
 export interface ClassItem {
   id: string;
   tenantId: string;
   courseId: string;
+  courseName?: string;
   name: string;
-  teacherId: string;
   room?: string;
   locationId?: string;
-  totalClassesPlanned: number;
+  locationName?: string;
+  /** Grade do curso — a turma só exibe. */
+  lessonDurationMin: number;
+  lessonsPerDay: number;
+  subjects: ClassSubject[];
+  /** Soma das aulas por chamada de todas as disciplinas. */
+  lessonsAssigned: number;
+  enrolledCount: number;
   createdAt: string;
 }
 
@@ -169,18 +236,28 @@ export type SessionStatus = "open" | "closed" | "cancelled";
 export interface ClassSession {
   id: string;
   tenantId: string;
+  /** A chamada é de uma disciplina da turma. */
+  classSubjectId: string;
   classId: string;
   className?: string;
+  subjectId?: string;
+  subjectName?: string;
   teacherId: string;
   teacherName?: string;
   createdById: string;
   /** Sala escolhida ao abrir a chamada (sobrepõe a sala padrão da turma). */
   locationId?: string;
   locationName?: string;
+  /** Hora REAL de início da aula, informada pelo professor. */
   startedAt: string;
   endedAt?: string;
   status: SessionStatus;
+  /** Vem da disciplina — o professor não escolhe. */
   classesWorth: number;
+  lessonDurationMin: number;
+  /** startedAt + classesWorth × lessonDurationMin. */
+  scheduledEndsAt?: string;
+  autoClosed: boolean;
   createdAt: string;
 }
 
@@ -195,6 +272,11 @@ export interface RollcallStudent {
   confidence?: number;
   classesCounted: number;
   adjusted: boolean;
+  /** Checkout individual: professor liberou a saída. */
+  checkoutReleased: boolean;
+  checkoutReleasedAt?: string;
+  /** Preenchido quando o totem reconheceu a saída. */
+  checkedOutAt?: string;
 }
 
 export interface Rollcall {
@@ -243,23 +325,38 @@ export interface FrequencyReportStudent {
   name: string;
   attended: number;
   absent: number;
+  /** Presenças ÷ aulas previstas no período. */
   frequencyPercent: number;
+  /** Presenças ÷ aulas que já aconteceram. */
+  partialPercent: number;
 }
 
 export interface FrequencyReport {
+  classSubjectId: string;
   classId: string;
   className: string;
+  subjectName: string;
+  teacherName: string;
   periodId?: string;
+  periodName?: string;
+  /** Aulas previstas no período — denominador da frequência. */
   totalClassesPlanned: number;
+  /** Aulas já lançadas. */
+  lessonsSoFar: number;
   students: FrequencyReportStudent[];
 }
 
 export interface StudentClassSummary {
+  classSubjectId: string;
   classId: string;
+  /** "3º A — Matemática" */
   name: string;
+  className: string;
+  subjectName: string;
   attended: number;
   absent: number;
   frequencyPercent: number;
+  totalClassesPlanned: number;
 }
 
 export interface StudentHistoryEntry {
@@ -273,6 +370,10 @@ export interface StudentHistoryEntry {
     startedAt: string;
     endedAt?: string | null;
     classesWorth: number;
-    class: { id: string; name: string };
+    classSubject: {
+      id: string;
+      subject: { name: string };
+      class: { id: string; name: string };
+    };
   };
 }

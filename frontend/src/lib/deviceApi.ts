@@ -64,6 +64,10 @@ export interface RecognizeResult {
   personName?: string;
   confidence?: number;
   preAttendance?: boolean;
+  /** Este reconhecimento registrou a SAÍDA do aluno, não a entrada. */
+  checkout?: boolean;
+  /** Aulas cumpridas até a saída. */
+  classesCounted?: number;
 }
 
 export interface CurrentSession {
@@ -72,6 +76,8 @@ export interface CurrentSession {
   className: string;
   startedAt: string;
   classesWorth: number;
+  /** Fim previsto da chamada — fecha sozinha nesse instante. */
+  scheduledEndsAt?: string;
 }
 
 export interface DeviceContext {

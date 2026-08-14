@@ -37,6 +37,40 @@ export function formatPercent(value?: number | null, digits = 1): string {
   return `${value.toFixed(digits).replace(".", ",")}%`;
 }
 
+export function formatTime(value?: string | null): string {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+}
+
+/** Duração em minutos legível: "50 min", "1h", "1h30". */
+export function formatDuration(minutes?: number | null): string {
+  if (minutes === undefined || minutes === null || Number.isNaN(minutes)) return "—";
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest === 0 ? `${hours}h` : `${hours}h${String(rest).padStart(2, "0")}`;
+}
+
+/** "2 aulas" / "1 aula" — concordância aparece em muitas telas. */
+export function formatLessons(count: number): string {
+  return `${count} ${count === 1 ? "aula" : "aulas"}`;
+}
+
+/**
+ * Converte um instante para o formato de <input type="datetime-local">, que
+ * espera hora LOCAL sem fuso (toISOString devolveria UTC e adiantaria o
+ * relógio do professor em 3h no Brasil).
+ */
+export function toDateTimeLocalValue(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    `T${pad(date.getHours())}:${pad(date.getMinutes())}`
+  );
+}
+
 /** IDs longos (UUID) exibidos de forma compacta em células mono. */
 export function shortId(id?: string | null): string {
   if (!id) return "—";
