@@ -51,6 +51,9 @@ export interface UserOutput {
   enrollmentCode?: string;
   facialStatus: string;
   mustChangePassword: boolean;
+  /** Tem foto de perfil enviada — alunos nunca têm. */
+  hasPhoto: boolean;
+  photoUpdatedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -500,6 +503,7 @@ class UsersService extends BaseService {
       enrollmentCode: true,
       facialStatus: true,
       mustChangePassword: true,
+      photoUpdatedAt: true,
       createdAt: true,
       updatedAt: true,
     };
@@ -520,6 +524,10 @@ class UsersService extends BaseService {
       enrollmentCode: user.enrollmentCode ?? undefined,
       facialStatus: user.facialStatus,
       mustChangePassword: user.mustChangePassword ?? false,
+      // O painel usa isto para decidir entre buscar GET /users/:id/photo e
+      // desenhar as iniciais; o timestamp também quebra o cache do <img>
+      hasPhoto: user.photoUpdatedAt != null,
+      photoUpdatedAt: user.photoUpdatedAt ?? undefined,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };

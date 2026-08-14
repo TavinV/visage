@@ -43,6 +43,9 @@ export interface TenantSettingsOutput {
   livenessThresholdEnrollment: number;
   totemPanelPassword: string | null;
   totemClockTimezone: string;
+  /** Logo da instituição já enviada — o painel decide se busca a imagem. */
+  hasLogo: boolean;
+  logoUpdatedAt?: Date;
   updatedAt: Date;
 }
 
@@ -53,11 +56,15 @@ class TenantSettingsService extends BaseService {
    * Obtém configurações de um tenant.
    */
   async getByTenant(tenantId: string): Promise<TenantSettingsOutput> {
-    const settings = await this.prisma.tenantSettings.findUnique({
-      where: { tenantId },
-    });
+    const [settings, tenant] = await Promise.all([
+      this.prisma.tenantSettings.findUnique({ where: { tenantId } }),
+      this.prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { logoUpdatedAt: true },
+      }),
+    ]);
     if (!settings) throw new NotFoundError("Tenant settings not found");
-    return this.toOutput(settings);
+    return this.toOutput(settings, tenant?.logoUpdatedAt ?? null);
   }
 
   /**
@@ -71,7 +78,7 @@ class TenantSettingsService extends BaseService {
     const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId } });
     if (!tenant) throw new NotFoundError("Tenant not found");
 
-    const updated = await this.prisma.tenantSettings.update({
+    await this.prisma.tenantSettings.update({
       where: { tenantId },
       data: {
         ...(input.recognitionThreshold !== undefined && { recognitionThreshold: input.recognitionThreshold }),
@@ -93,10 +100,10 @@ class TenantSettingsService extends BaseService {
     });
 
     this.logger.info({ tenantId }, "Tenant settings updated");
-    return this.toOutput(updated);
+    return this.getByTenant(tenantId);
   }
 
-  private toOutput(settings: any): TenantSettingsOutput {
+  private toOutput(settings: any, logoUpdatedAt: Date | null): TenantSettingsOutput {
     return {
       tenantId: settings.tenantId,
       recognitionThreshold: settings.recognitionThreshold,
@@ -114,6 +121,8 @@ class TenantSettingsService extends BaseService {
       livenessThresholdEnrollment: settings.livenessThresholdEnrollment,
       totemPanelPassword: settings.totemPanelPassword ?? null,
       totemClockTimezone: settings.totemClockTimezone ?? "local",
+      hasLogo: logoUpdatedAt != null,
+      logoUpdatedAt: logoUpdatedAt ?? undefined,
       updatedAt: settings.updatedAt,
     };
   }

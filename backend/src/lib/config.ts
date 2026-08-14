@@ -65,6 +65,10 @@ export const config = {
   fraudFramesStoragePath: getEnv("FRAUD_FRAMES_STORAGE_PATH", "./fraud_frames"),
   fraudRetentionHours: parseInt(getEnv("FRAUD_RETENTION_HOURS", "24"), 10),
 
+  // Fotos de perfil e logos — sem expiração, ao contrário dos fraud frames.
+  // Em deploy sem volume persistente as imagens somem no redeploy.
+  profilePhotosStoragePath: getEnv("PROFILE_PHOTOS_STORAGE_PATH", "./profile_photos"),
+
   // SMTP
   smtpHost: getEnv("SMTP_HOST", "localhost"),
   smtpPort: parseInt(getEnv("SMTP_PORT", "587"), 10),

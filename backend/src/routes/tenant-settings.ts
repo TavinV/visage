@@ -5,8 +5,10 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { tenantSettingsService } from "../services/tenant-settings.service";
+import { profilePhotosService } from "../services/profile-photos.service";
 import { authenticate } from "../middleware/authenticate";
 import { validate } from "../middleware/validate";
+import { logger } from "../lib/logger";
 
 const router = Router();
 
@@ -29,6 +31,10 @@ const UpdateSettingsSchema = z.object({
   // Senha do painel do totem — template com {{data}}/{{hora}}; null desativa
   totemPanelPassword: z.string().max(200).nullable().optional(),
   totemClockTimezone: z.string().max(50).optional(),
+});
+
+const LogoUploadSchema = z.object({
+  imageB64: z.string().min(100),
 });
 
 type UpdateSettingsRequest = z.infer<typeof UpdateSettingsSchema>;
@@ -79,5 +85,76 @@ router.patch(
     }
   }
 );
+
+/**
+ * GET /tenant-settings/logo
+ * Logo da instituição — visível para qualquer usuário autenticado do tenant
+ */
+router.get("/logo", authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { tenantId } = req.tenant!;
+    const { stream, contentType } = await profilePhotosService.getTenantLogoStream(tenantId);
+
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "private, max-age=0, must-revalidate");
+    stream.on("error", (error) => {
+      logger.error({ error, tenantId }, "Tenant logo stream error");
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Failed to read logo", code: "internal_error" });
+      } else {
+        res.end();
+      }
+    });
+    stream.pipe(res);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * PUT /tenant-settings/logo
+ * Envia a logo da instituição (admin only)
+ */
+router.put(
+  "/logo",
+  authenticate,
+  validate(LogoUploadSchema),
+  async (
+    req: Request<{}, {}, z.infer<typeof LogoUploadSchema>>,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const { tenantId, role } = req.tenant!;
+      if (role !== "admin" && role !== "super_admin") {
+        res.status(403).json({ error: "Forbidden", code: "forbidden" });
+        return;
+      }
+
+      const result = await profilePhotosService.setTenantLogo(tenantId, req.body.imageB64);
+      res.json({ data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * DELETE /tenant-settings/logo
+ */
+router.delete("/logo", authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { tenantId, role } = req.tenant!;
+    if (role !== "admin" && role !== "super_admin") {
+      res.status(403).json({ error: "Forbidden", code: "forbidden" });
+      return;
+    }
+
+    await profilePhotosService.deleteTenantLogo(tenantId);
+    res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
 
 export default router;

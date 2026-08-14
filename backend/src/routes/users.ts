@@ -9,9 +9,11 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { usersService } from "../services/users.service";
+import { profilePhotosService } from "../services/profile-photos.service";
 import { authenticate } from "../middleware/authenticate";
 import { requireRole } from "../middleware/authenticate";
 import { validate } from "../middleware/validate";
+import { logger } from "../lib/logger";
 import { EmailSchema } from "../types";
 
 const router = Router();
@@ -39,6 +41,12 @@ const UpdateUserSchema = z.object({
 const ChangePasswordSchema = z.object({
   currentPassword: z.string().min(1),
   newPassword: z.string().min(8).max(100),
+});
+
+// JPEG/PNG em base64, já redimensionado pelo navegador. O formato real é
+// conferido pelos magic bytes no service.
+const PhotoUploadSchema = z.object({
+  imageB64: z.string().min(100),
 });
 
 type CreateUserRequest = z.infer<typeof CreateUserSchema>;
@@ -121,6 +129,135 @@ router.get(
       const result = await usersService.findById(userId, tenantId);
 
       res.json({ data: result });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+/**
+ * PUT /users/me/photo
+ * Foto de perfil do próprio usuário — self-service, qualquer cargo que tenha
+ * acesso ao painel (alunos não têm login nem foto de perfil)
+ * ⚠️ DEVE VIR ANTES de PUT /:id para não conflitar
+ */
+router.put(
+  "/me/photo",
+  authenticate,
+  validate(PhotoUploadSchema),
+  async (
+    req: Request<{}, {}, z.infer<typeof PhotoUploadSchema>>,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const { tenantId, userId } = req.tenant!;
+      const result = await profilePhotosService.setUserPhoto(
+        tenantId,
+        userId,
+        req.body.imageB64,
+      );
+      res.json({ data: result });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+/**
+ * DELETE /users/me/photo
+ * Remove a própria foto de perfil
+ */
+router.delete(
+  "/me/photo",
+  authenticate,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { tenantId, userId } = req.tenant!;
+      await profilePhotosService.deleteUserPhoto(tenantId, userId);
+      res.status(204).send();
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+/**
+ * GET /users/:id/photo
+ * Serve a foto de perfil. Visível para qualquer usuário autenticado do mesmo
+ * tenant — é a foto que aparece ao lado do nome no painel.
+ */
+router.get(
+  "/:id/photo",
+  authenticate,
+  async (req: Request<{ id: string }>, res: Response, next: NextFunction) => {
+    try {
+      const { tenantId } = req.tenant!;
+      const { stream, contentType } = await profilePhotosService.getUserPhotoStream(
+        tenantId,
+        req.params.id,
+      );
+
+      res.setHeader("Content-Type", contentType);
+      // Privado e revalidado: a foto muda e não pode ficar em cache
+      // compartilhado entre usuários
+      res.setHeader("Cache-Control", "private, max-age=0, must-revalidate");
+      stream.on("error", (error) => {
+        logger.error({ error, userId: req.params.id }, "Profile photo stream error");
+        if (!res.headersSent) {
+          res.status(500).json({ error: "Failed to read photo", code: "internal_error" });
+        } else {
+          res.end();
+        }
+      });
+      stream.pipe(res);
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+/**
+ * PUT /users/:id/photo
+ * Foto de perfil de outro usuário (admin/manager) — útil quando a secretaria
+ * cadastra a equipe
+ */
+router.put(
+  "/:id/photo",
+  authenticate,
+  requireRole("admin", "manager", "super_admin"),
+  validate(PhotoUploadSchema),
+  async (
+    req: Request<{ id: string }, {}, z.infer<typeof PhotoUploadSchema>>,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const { tenantId } = req.tenant!;
+      const result = await profilePhotosService.setUserPhoto(
+        tenantId,
+        req.params.id,
+        req.body.imageB64,
+      );
+      res.json({ data: result });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+/**
+ * DELETE /users/:id/photo
+ */
+router.delete(
+  "/:id/photo",
+  authenticate,
+  requireRole("admin", "manager", "super_admin"),
+  async (req: Request<{ id: string }>, res: Response, next: NextFunction) => {
+    try {
+      const { tenantId } = req.tenant!;
+      await profilePhotosService.deleteUserPhoto(tenantId, req.params.id);
+      res.status(204).send();
     } catch (error) {
       next(error);
     }

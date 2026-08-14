@@ -35,3 +35,6 @@ Thumbs.db
 
 # Prisma
 .prisma/
+
+# Fotos de perfil e logos
+profile_photos/
