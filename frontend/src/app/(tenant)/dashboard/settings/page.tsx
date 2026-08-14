@@ -1,7 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ScanFace, ClipboardCheck, ShieldAlert, IdCard, MonitorSmartphone, Activity } from "lucide-react";
+import {
+  ScanFace,
+  ClipboardCheck,
+  ShieldAlert,
+  IdCard,
+  MonitorSmartphone,
+  Activity,
+  Image as ImageIcon,
+} from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -23,6 +31,9 @@ import {
   useToast,
 } from "@/components/ui";
 import { CalibrationModal } from "@/components/app/CalibrationModal";
+import { PhotoUpload } from "@/components/app/PhotoUpload";
+import { useAuthenticatedImage } from "@/lib/useAuthenticatedImage";
+import { useAuth } from "@/lib/auth";
 
 // O backend não impõe teto — o limiar de reconhecimento pode passar de 1
 // (escala de distância, ex.: 1.1 com thresholds dinâmicos).
@@ -63,12 +74,21 @@ const asNumber = {
 export default function SettingsPage() {
   const queryClient = useQueryClient();
   const toast = useToast();
+  const { user } = useAuth();
   const [calibrating, setCalibrating] = useState(false);
 
   const settings = useQuery({
     queryKey: ["tenant-settings"],
     queryFn: () => api.get<{ data: TenantSettings }>("/tenant-settings"),
   });
+
+  const hasLogo = settings.data?.data.hasLogo ?? false;
+  const logoUrl = useAuthenticatedImage("/tenant-settings/logo", {
+    enabled: hasLogo,
+    cacheKey: settings.data?.data.logoUpdatedAt,
+  });
+
+  const refreshLogo = () => queryClient.invalidateQueries({ queryKey: ["tenant-settings"] });
 
   const form = useForm<SettingsForm>({ resolver: zodResolver(SettingsSchema) });
   const initialized = useRef(false);
@@ -145,6 +165,34 @@ export default function SettingsPage() {
       />
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+        {/* Identidade visual fica fora do submit — upload é imediato */}
+        <Card className="xl:col-span-2">
+          <CardHeader
+            title="Identidade visual"
+            description="Logo da instituição, exibida no console e nas telas do totem."
+            icon={<ImageIcon size={18} strokeWidth={1.75} />}
+          />
+          <CardBody>
+            <PhotoUpload
+              name={user?.name ?? "Instituição"}
+              shape="square"
+              currentUrl={logoUrl}
+              hasPhoto={hasLogo}
+              hint="JPEG ou PNG, recortada em quadrado. Prefira fundo transparente ou branco."
+              onUpload={async (imageB64) => {
+                await api.put("/tenant-settings/logo", { imageB64 });
+                await refreshLogo();
+                toast.success("Logo atualizada.");
+              }}
+              onRemove={async () => {
+                await api.delete("/tenant-settings/logo");
+                await refreshLogo();
+                toast.success("Logo removida.");
+              }}
+            />
+          </CardBody>
+        </Card>
+
         <Card>
           <CardHeader
             title="Reconhecimento"
