@@ -7,11 +7,22 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm, Controller } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowLeft, Copy, ScanFace, ShieldOff, Trash2, KeyRound, UserRound, ShieldCheck } from "lucide-react";
+import {
+  ArrowLeft,
+  Copy,
+  ScanFace,
+  ShieldOff,
+  Trash2,
+  KeyRound,
+  UserRound,
+  ShieldCheck,
+  Image as ImageIcon,
+} from "lucide-react";
 import { api } from "@/lib/api";
 import type { User } from "@/lib/types";
 import { friendlyError } from "@/lib/apiError";
 import { maskCpf } from "@/lib/masks";
+import { useAuthenticatedImage } from "@/lib/useAuthenticatedImage";
 import {
   PageHeader,
   Card,
@@ -27,6 +38,7 @@ import {
 } from "@/components/ui";
 import { UserStatusBadge, FacialStatusBadge } from "@/components/app/badges";
 import { RolePicker } from "@/components/app/RolePicker";
+import { PhotoUpload } from "@/components/app/PhotoUpload";
 
 const UpdateUserSchema = z.object({
   name: z.string().min(1, "Informe o nome."),
@@ -57,6 +69,11 @@ export default function UserDetailPage() {
   const user = useQuery({
     queryKey: ["users", id],
     queryFn: () => api.get<{ data: User }>(`/users/${id}`),
+  });
+
+  const photoUrl = useAuthenticatedImage(`/users/${id}/photo`, {
+    enabled: user.data?.data.hasPhoto ?? false,
+    cacheKey: user.data?.data.photoUpdatedAt,
   });
 
   const form = useForm<UpdateUserForm>({ resolver: zodResolver(UpdateUserSchema) });
@@ -175,6 +192,34 @@ export default function UserDetailPage() {
       />
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+        {/* Foto de perfil — alunos não têm (o rosto só existe como biometria) */}
+        {u.role !== "student" && (
+          <Card className="xl:col-span-2">
+            <CardHeader
+              title="Foto de perfil"
+              description="Normalmente o próprio usuário envia pela tela Minha conta. A secretaria pode enviar por aqui."
+              icon={<ImageIcon size={18} strokeWidth={1.75} />}
+            />
+            <CardBody>
+              <PhotoUpload
+                name={u.name}
+                currentUrl={photoUrl}
+                hasPhoto={u.hasPhoto}
+                onUpload={async (imageB64) => {
+                  await api.put(`/users/${id}/photo`, { imageB64 });
+                  await queryClient.invalidateQueries({ queryKey: ["users", id] });
+                  toast.success("Foto atualizada.");
+                }}
+                onRemove={async () => {
+                  await api.delete(`/users/${id}/photo`);
+                  await queryClient.invalidateQueries({ queryKey: ["users", id] });
+                  toast.success("Foto removida.");
+                }}
+              />
+            </CardBody>
+          </Card>
+        )}
+
         {/* Dados cadastrais */}
         <Card className="xl:col-span-2">
           <CardHeader title="Dados cadastrais" icon={<UserRound size={18} strokeWidth={1.75} />} />

@@ -4,6 +4,7 @@ import {
   Users,
   CalendarRange,
   BookOpen,
+  Library,
   GraduationCap,
   MapPin,
   MonitorSmartphone,
@@ -44,6 +45,8 @@ export const tenantNav: NavSection[] = [
     label: "Estrutura acadêmica",
     items: [
       { href: "/dashboard/periods", label: "Períodos", icon: CalendarRange, roles: ["admin"] },
+      // Disciplinas vivem dentro do curso (catálogo) e da turma (grade) —
+      // não têm página própria
       { href: "/dashboard/courses", label: "Cursos", icon: BookOpen, roles: ["admin", "teacher"] },
       { href: "/dashboard/classes", label: "Turmas", icon: GraduationCap, roles: ["admin", "teacher"] },
       { href: "/dashboard/locations", label: "Salas de aula", icon: MapPin, roles: ["admin", "teacher"] },
@@ -61,6 +64,7 @@ export const tenantNav: NavSection[] = [
     label: "Sistema",
     items: [
       { href: "/dashboard/audit", label: "Auditoria", icon: ShieldCheck, roles: ["admin", "manager"] },
+      { href: "/dashboard/account", label: "Minha conta", icon: KeyRound },
       { href: "/dashboard/settings", label: "Configurações", icon: Settings, roles: ["admin"] },
     ],
   },

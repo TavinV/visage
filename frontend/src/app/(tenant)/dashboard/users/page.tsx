@@ -25,10 +25,10 @@ import {
   Input,
   Select,
   Modal,
-  Avatar,
   useToast,
 } from "@/components/ui";
 import { UserStatusBadge, FacialStatusBadge } from "@/components/app/badges";
+import { UserAvatar } from "@/components/app/UserAvatar";
 import { roleOptions, roleLabel } from "@/components/app/labels";
 import { RolePicker } from "@/components/app/RolePicker";
 
@@ -180,7 +180,12 @@ export default function UsersPage() {
               <Tr key={u.id}>
                 <Td>
                   <Link href={`/dashboard/users/${u.id}`} className="flex items-center gap-3">
-                    <Avatar name={u.name} size="sm" />
+                    <UserAvatar
+                      userId={u.id}
+                      name={u.name}
+                      hasPhoto={u.hasPhoto}
+                      photoUpdatedAt={u.photoUpdatedAt}
+                    />
                     <span>
                       <b className="block text-[13px] font-semibold text-flauzino-navy-900">
                         {u.name}

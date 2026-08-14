@@ -11,6 +11,7 @@ import { api } from "@/lib/api";
 import type { Tenant, User } from "@/lib/types";
 import { Logo } from "@/components/ui/Logo";
 import { Avatar } from "@/components/ui/Avatar";
+import { useAuthenticatedImage } from "@/lib/useAuthenticatedImage";
 import { adminNav, tenantNav } from "./nav";
 
 const roleLabels: Record<string, string> = {
@@ -50,6 +51,12 @@ export function AppShell({ variant, children }: AppShellProps) {
   });
   const institutionName =
     variant === "tenant" ? tenant.data?.data.name : "Administração da plataforma";
+
+  const me = profile.data?.data;
+  const myPhotoUrl = useAuthenticatedImage(me ? `/users/${me.id}/photo` : null, {
+    enabled: me?.hasPhoto ?? false,
+    cacheKey: me?.photoUpdatedAt,
+  });
 
   const visibleSections = sections
     .map((section) => ({
@@ -121,9 +128,25 @@ export function AppShell({ variant, children }: AppShellProps) {
         ))}
       </nav>
       <div className="mt-4 flex items-center gap-2.5 border-t border-white/10 pt-4">
-        {user && <Avatar name={user.name} size="sm" className="bg-flauzino-accent-600" />}
+        {user && (
+          <Avatar
+            name={user.name}
+            size="sm"
+            src={myPhotoUrl}
+            className="bg-flauzino-accent-600"
+          />
+        )}
         <div className="min-w-0 flex-1 leading-tight">
-          <p className="truncate text-[13px] font-semibold">{user?.name}</p>
+          {variant === "tenant" ? (
+            <Link
+              href="/dashboard/account"
+              className="block truncate text-[13px] font-semibold text-white hover:text-flauzino-accent-500"
+            >
+              {user?.name}
+            </Link>
+          ) : (
+            <p className="truncate text-[13px] font-semibold">{user?.name}</p>
+          )}
           <p className="truncate text-[11px] text-white/50">
             {user ? roleLabels[user.role] ?? user.role : ""}
           </p>
