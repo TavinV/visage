@@ -38,10 +38,15 @@ router.get(
       }
 
       if (role === "teacher") {
+        // Basta lecionar UMA disciplina da turma para ver os matriculados
         const classId = req.query.classId as string | undefined;
         const ownClass = classId
           ? await prisma.class.findFirst({
-              where: { id: classId, tenantId, teacherId: userId },
+              where: {
+                id: classId,
+                tenantId,
+                classSubjects: { some: { teacherId: userId } },
+              },
               select: { id: true },
             })
           : null;

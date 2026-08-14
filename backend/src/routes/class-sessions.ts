@@ -22,17 +22,21 @@ const router = Router();
 
 // ── Schemas de validação ──────────────────────────────────────────────────────
 
+// O professor informa apenas a sala e a hora real em que a aula começou.
+// Quanto a chamada vale em aulas vem da disciplina (secretaria).
 const CreateSessionSchema = z.object({
-  classId: z.string().uuid(),
+  /** A chamada é de uma disciplina da turma. */
+  classSubjectId: z.string().uuid(),
   /** Ignorado para professores — a sessão é sempre deles. */
   teacherId: z.string().uuid().optional(),
-  classesWorth: z.number().int().positive().optional(),
   locationId: z.string().uuid().optional(),
+  /** ISO 8601. Default: agora. Aceita passado (chamada aberta com atraso). */
+  startedAt: z.string().datetime({ offset: true }).optional(),
 });
 
 const UpdateSessionSchema = z.object({
   status: z.enum(["open", "closed"]).optional(),
-  classesWorth: z.number().int().positive().optional(),
+  startedAt: z.string().datetime({ offset: true }).optional(),
 });
 
 const SetAttendanceSchema = z.object({
@@ -88,6 +92,7 @@ router.get(
         sortBy: req.query.sortBy as string | undefined,
         sortOrder: req.query.sortOrder as "asc" | "desc" | undefined,
         classId: req.query.classId as string | undefined,
+        classSubjectId: req.query.classSubjectId as string | undefined,
         status: req.query.status as "open" | "closed" | "cancelled" | undefined,
         // Professor: escopo travado nas próprias sessões
         teacherId: role === "teacher" ? userId : undefined,
@@ -130,10 +135,10 @@ router.post(
       const result = await classSessionsService.create({
         tenantId,
         createdById: userId,
-        classId: req.body.classId,
+        classSubjectId: req.body.classSubjectId,
         teacherId,
-        classesWorth: req.body.classesWorth,
         locationId: req.body.locationId,
+        startedAt: req.body.startedAt ? new Date(req.body.startedAt) : undefined,
       });
 
       res.status(201).json({ data: result });
@@ -176,7 +181,10 @@ router.patch(
       const { tenantId } = req.tenant!;
       if (!(await assertSessionAccess(req, res, { write: true }))) return;
 
-      const result = await classSessionsService.update(req.params.id, tenantId, req.body);
+      const result = await classSessionsService.update(req.params.id, tenantId, {
+        status: req.body.status,
+        startedAt: req.body.startedAt ? new Date(req.body.startedAt) : undefined,
+      });
       res.json({ data: result });
     } catch (error) {
       next(error);
@@ -227,6 +235,64 @@ router.put(
         req.params.userId,
         req.body.classesCounted,
         adjustedById
+      );
+      res.json({ data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * POST /class-sessions/:id/checkout/:userId
+ * Libera a saída antecipada do aluno. O horário só é gravado quando ele
+ * passa no totem — aqui apenas a autorização do professor é registrada.
+ */
+router.post(
+  "/:id/checkout/:userId",
+  authenticate,
+  async (
+    req: Request<{ id: string; userId: string }>,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const { tenantId, userId: releasedById } = req.tenant!;
+      if (!(await assertSessionAccess(req as unknown as Request<{ id: string }>, res, { write: true }))) return;
+
+      const result = await classSessionsService.releaseCheckout(
+        req.params.id,
+        tenantId,
+        req.params.userId,
+        releasedById
+      );
+      res.json({ data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * DELETE /class-sessions/:id/checkout/:userId
+ * Desfaz a liberação, enquanto o aluno ainda não passou no totem
+ */
+router.delete(
+  "/:id/checkout/:userId",
+  authenticate,
+  async (
+    req: Request<{ id: string; userId: string }>,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const { tenantId } = req.tenant!;
+      if (!(await assertSessionAccess(req as unknown as Request<{ id: string }>, res, { write: true }))) return;
+
+      const result = await classSessionsService.revokeCheckoutRelease(
+        req.params.id,
+        tenantId,
+        req.params.userId
       );
       res.json({ data: result });
     } catch (error) {

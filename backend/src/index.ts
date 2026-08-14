@@ -10,6 +10,7 @@ import { connectRedis, disconnectRedis } from "./lib/redis";
 import { disconnectPrisma, prisma } from "./lib/prisma";
 import { adminService } from "./services/admin.service";
 import { startFraudFrameCleanupJob } from "./jobs/cleanupFraudFrames";
+import { startAutoCloseSessionsJob } from "./jobs/autoCloseSessions";
 
 async function bootstrap() {
   try {
@@ -43,6 +44,9 @@ async function bootstrap() {
 
     // Job diário de limpeza de fraud frames (03:00)
     startFraudFrameCleanupJob();
+
+    // Fecha chamadas cujo período (aulas × duração) já venceu
+    startAutoCloseSessionsJob();
 
     // Criar e iniciar app (Redis e banco já estão prontos)
     const app = createApp();

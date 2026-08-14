@@ -15,11 +15,19 @@ const router = Router();
 const CreateCourseSchema = z.object({
   academicPeriodId: z.string().uuid(),
   name: z.string().min(1).max(200),
+  // Duração de uma aula — a faixa operável é validada no service, que
+  // normaliza a unidade para minutos
+  lessonsPerDay: z.number().int().min(1).max(20).optional(),
+  lessonDuration: z.number().int().min(1).max(480).optional(),
+  lessonDurationUnit: z.enum(["minutes", "hours"]).optional(),
 });
 
 const UpdateCourseSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   academicPeriodId: z.string().uuid().optional(),
+  lessonsPerDay: z.number().int().min(1).max(20).optional(),
+  lessonDuration: z.number().int().min(1).max(480).optional(),
+  lessonDurationUnit: z.enum(["minutes", "hours"]).optional(),
 });
 
 type CreateCourseRequest = z.infer<typeof CreateCourseSchema>;

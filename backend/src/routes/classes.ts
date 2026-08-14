@@ -12,21 +12,29 @@ const router = Router();
 
 // ── Schemas de validação ──────────────────────────────────────────────────────
 
+// A turma é o grupo de alunos de um curso; a grade de disciplinas (cada uma
+// com professor e carga própria) vem junto na criação.
+const ClassSubjectSchema = z.object({
+  subjectId: z.string().uuid(),
+  teacherId: z.string().uuid(),
+  lessonsPerSession: z.number().int().min(1).max(12).optional(),
+  totalLessonsPlanned: z.number().int().min(0).max(1000).optional(),
+});
+
 const CreateClassSchema = z.object({
   courseId: z.string().uuid(),
   name: z.string().min(1).max(100),
-  teacherId: z.string().uuid(),
   room: z.string().max(50).optional(),
   locationId: z.string().uuid().optional(),
-  totalClassesPlanned: z.number().int().optional(),
+  subjects: z.array(ClassSubjectSchema).min(1),
 });
 
 const UpdateClassSchema = z.object({
   name: z.string().min(1).max(100).optional(),
-  teacherId: z.string().uuid().optional(),
   room: z.string().max(50).optional(),
   locationId: z.string().uuid().optional(),
-  totalClassesPlanned: z.number().int().optional(),
+  /** Presente = substitui a grade inteira. */
+  subjects: z.array(ClassSubjectSchema).min(1).optional(),
 });
 
 type CreateClassRequest = z.infer<typeof CreateClassSchema>;
@@ -56,6 +64,7 @@ router.get(
         sortOrder: req.query.sortOrder as "asc" | "desc" | undefined,
         search: req.query.search as string | undefined,
         courseId: req.query.courseId as string | undefined,
+        subjectId: req.query.subjectId as string | undefined,
         // Professor: escopo travado nas próprias turmas
         teacherId: role === "teacher" ? userId : (req.query.teacherId as string | undefined),
       });
@@ -113,7 +122,8 @@ router.get(
       }
 
       const result = await classesService.findById(req.params.id, tenantId);
-      if (role === "teacher" && result.teacherId !== userId) {
+      // Professor enxerga a turma se leciona QUALQUER disciplina dela
+      if (role === "teacher" && !result.subjects.some((s) => s.teacherId === userId)) {
         res.status(403).json({ error: "Forbidden", code: "forbidden" });
         return;
       }

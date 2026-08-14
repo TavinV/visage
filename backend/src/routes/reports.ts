@@ -10,8 +10,11 @@ import { authenticate, requireRole } from "../middleware/authenticate";
 const router = Router();
 
 /**
- * GET /attendance/reports/frequency?class_id&period_id
- * Frequência agregada por turma (admin/manager/teacher)
+ * GET /attendance/reports/frequency?class_subject_id | ?class_id
+ *
+ * Com class_subject_id devolve a frequência daquela disciplina; com class_id
+ * devolve uma entrada por disciplina da turma — que é como o professor abre
+ * a turma dele e vê todo mundo de uma vez.
  */
 router.get(
   "/frequency",
@@ -20,15 +23,24 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { tenantId } = req.tenant!;
+      const classSubjectId = req.query.class_subject_id as string | undefined;
       const classId = req.query.class_id as string | undefined;
-      const periodId = req.query.period_id as string | undefined;
 
-      if (!classId) {
-        res.status(400).json({ error: "class_id é obrigatório", code: "validation_error" });
+      if (classSubjectId) {
+        const result = await reportsService.frequencyByClassSubject(tenantId, classSubjectId);
+        res.json({ data: result });
         return;
       }
 
-      const result = await reportsService.frequencyByClass(tenantId, classId, periodId);
+      if (!classId) {
+        res.status(400).json({
+          error: "Informe class_subject_id ou class_id",
+          code: "validation_error",
+        });
+        return;
+      }
+
+      const result = await reportsService.frequencyByClass(tenantId, classId);
       res.json({ data: result });
     } catch (error) {
       next(error);
