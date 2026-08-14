@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
@@ -9,7 +10,7 @@ import { Plus, Pencil, Trash2, Search } from "lucide-react";
 import { api, qs } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import type { AcademicPeriod, Course, Paginated } from "@/lib/types";
-import { formatDate } from "@/lib/format";
+import { formatDate, formatDuration } from "@/lib/format";
 import { friendlyError } from "@/lib/apiError";
 import { useDebounced } from "@/lib/useDebounced";
 import {
@@ -32,9 +33,24 @@ import {
 const CourseSchema = z.object({
   name: z.string().min(1, "Informe o nome."),
   academicPeriodId: z.string().min(1, "Selecione o período."),
+  lessonsPerDay: z
+    .number({ message: "Informe quantas aulas." })
+    .int("Use um número inteiro.")
+    .min(1, "Mínimo 1.")
+    .max(20, "Máximo 20."),
+  lessonDuration: z
+    .number({ message: "Informe a duração." })
+    .int("Use um número inteiro.")
+    .min(1, "Mínimo 1."),
+  lessonDurationUnit: z.enum(["minutes", "hours"]),
 });
 
 type CourseForm = z.infer<typeof CourseSchema>;
+
+const UNIT_OPTIONS = [
+  { value: "minutes", label: "minutos" },
+  { value: "hours", label: "horas" },
+];
 
 export default function CoursesPage() {
   const queryClient = useQueryClient();
@@ -91,13 +107,25 @@ export default function CoursesPage() {
   });
 
   const openCreate = () => {
-    form.reset({ name: "", academicPeriodId: "" });
+    form.reset({
+      name: "",
+      academicPeriodId: "",
+      lessonsPerDay: 4,
+      lessonDuration: 50,
+      lessonDurationUnit: "minutes",
+    });
     setEditing(null);
     setCreating(true);
   };
 
   const openEdit = (c: Course) => {
-    form.reset({ name: c.name, academicPeriodId: c.academicPeriodId });
+    form.reset({
+      name: c.name,
+      academicPeriodId: c.academicPeriodId,
+      lessonsPerDay: c.lessonsPerDay,
+      lessonDuration: c.lessonDuration,
+      lessonDurationUnit: c.lessonDurationUnit,
+    });
     setCreating(false);
     setEditing(c);
   };
@@ -111,7 +139,7 @@ export default function CoursesPage() {
     <div>
       <PageHeader
         title="Cursos"
-        description="Matérias e disciplinas oferecidas em cada período acadêmico."
+        description="Cada curso agrupa suas disciplinas e define quanto tempo dura uma aula."
         actions={
           !isTeacher && (
             <Button onClick={openCreate} iconLeft={<Plus size={16} />}>
@@ -150,13 +178,15 @@ export default function CoursesPage() {
             <tr>
               <Th>Nome</Th>
               <Th>Período</Th>
+              <Th>Grade do dia</Th>
+              <Th>Disciplinas</Th>
               <Th>Criado em</Th>
               <Th className="w-24 text-right">Ações</Th>
             </tr>
           </thead>
           <tbody>
             <TableState
-              colSpan={4}
+              colSpan={6}
               loading={list.isPending}
               error={list.error ? friendlyError(list.error) : null}
               empty={list.data?.data.length === 0}
@@ -165,8 +195,26 @@ export default function CoursesPage() {
             />
             {list.data?.data.map((c) => (
               <Tr key={c.id}>
-                <Td className="font-medium text-flauzino-navy-900">{c.name}</Td>
+                <Td>
+                  <Link
+                    href={`/dashboard/courses/${c.id}`}
+                    className="font-medium text-flauzino-navy-900 hover:text-flauzino-accent-600"
+                  >
+                    {c.name}
+                  </Link>
+                </Td>
                 <Td>{periodNameById.get(c.academicPeriodId) ?? "—"}</Td>
+                <Td className="font-mono-ds text-xs">
+                  {c.lessonsPerDay} × {formatDuration(c.lessonDurationMin)}
+                </Td>
+                <Td>
+                  <Link
+                    href={`/dashboard/courses/${c.id}`}
+                    className="font-mono-ds text-xs text-flauzino-accent-600 hover:underline"
+                  >
+                    {c.subjectCount ?? 0}
+                  </Link>
+                </Td>
                 <Td className="font-mono-ds text-xs">{formatDate(c.createdAt)}</Td>
                 <Td>
                   {!isTeacher && (
@@ -217,6 +265,40 @@ export default function CoursesPage() {
             error={form.formState.errors.academicPeriodId?.message}
             {...form.register("academicPeriodId")}
           />
+          <div>
+            <div className="flex items-end gap-3">
+              <Input
+                label="Aulas por dia"
+                required
+                type="number"
+                min={1}
+                max={20}
+                className="w-28"
+                error={form.formState.errors.lessonsPerDay?.message}
+                {...form.register("lessonsPerDay", { valueAsNumber: true })}
+              />
+              <Input
+                label="Duração de uma aula"
+                required
+                type="number"
+                min={1}
+                className="w-32"
+                error={form.formState.errors.lessonDuration?.message}
+                {...form.register("lessonDuration", { valueAsNumber: true })}
+              />
+              <Select
+                aria-label="Unidade da duração"
+                options={UNIT_OPTIONS}
+                className="w-32"
+                {...form.register("lessonDurationUnit")}
+              />
+            </div>
+            <p className="mt-1.5 text-xs text-flauzino-slate-500">
+              A grade vale para todas as disciplinas do curso. A duração da aula é o que
+              define quando a chamada fecha sozinha e quantas aulas o aluno cumpriu ao sair
+              mais cedo.
+            </p>
+          </div>
         </form>
       </Modal>
 
@@ -225,7 +307,7 @@ export default function CoursesPage() {
         onClose={() => setDeleting(null)}
         onConfirm={() => deleting && remove.mutate(deleting)}
         title="Excluir curso"
-        description={`"${deleting?.name}" será removido. Turmas vinculadas a ele podem ficar órfãs.`}
+        description={`"${deleting?.name}" e suas disciplinas serão removidos. Não é possível excluir um curso que ainda tenha turmas.`}
         confirmLabel="Excluir curso"
         danger
         loading={remove.isPending}
