@@ -1,13 +1,46 @@
 /**
  * DevicesService
  * Gerencia dispositivos por tenant.
+ *
+ * Calibração é POR TOTEM: câmera, iluminação e ângulo variam de sala para
+ * sala, e um threshold bom no corredor pode ser inutilizável no laboratório.
+ * Os campos de threshold no Device são overrides — NULL herda do tenant.
+ * Uma calibração boa pode ser copiada para outros totens equivalentes.
  */
 
 import { BaseService, ListParams, PaginatedResult } from "./base.service";
-import { NotFoundError } from "../utils/errors";
+import { NotFoundError, ValidationError } from "../utils/errors";
 import crypto from "crypto";
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
+
+/** Faixas operáveis — espelham o clamp do hot path do reconhecimento. */
+const RECOGNITION_RANGE = { min: 0.3, max: 2.0 };
+const LIVENESS_RANGE = { min: 0.5, max: 0.95 };
+
+export interface DeviceCalibrationInput {
+  /** null limpa o override e volta a herdar do tenant. */
+  recognitionThreshold?: number | null;
+  livenessThreshold?: number | null;
+  livenessEnabled?: boolean | null;
+}
+
+export interface DeviceCalibrationOutput {
+  /** Override do totem — null significa "herda do tenant". */
+  recognitionThreshold: number | null;
+  livenessThreshold: number | null;
+  livenessEnabled: boolean | null;
+  /** Valores realmente usados no reconhecimento (override ?? tenant). */
+  effectiveRecognitionThreshold: number;
+  effectiveLivenessThreshold: number;
+  effectiveLivenessEnabled: boolean;
+  /** true quando ao menos um threshold é próprio do totem. */
+  isCalibrated: boolean;
+  calibratedAt?: Date;
+  /** Totem de origem, quando a calibração veio copiada. */
+  calibrationSourceId?: string;
+  calibrationSourceLabel?: string;
+}
 
 export interface CreateDeviceInput {
   tenantId: string;
@@ -34,6 +67,8 @@ export interface DeviceOutput {
   allowEnrollment: boolean;
   lastSeenAt?: Date;
   createdAt: Date;
+  /** Presente quando o chamador pediu os dados de calibração. */
+  calibration?: DeviceCalibrationOutput;
 }
 
 export interface ListDevicesParams extends ListParams {
@@ -69,13 +104,27 @@ class DevicesService extends BaseService {
       ...(searchOr && { OR: searchOr }),
     };
 
-    const [devices, total] = await this.prisma.$transaction([
+    const [devices, total, defaults] = await this.prisma.$transaction([
       this.prisma.device.findMany({ where, take, skip, orderBy }),
       this.prisma.device.count({ where }),
+      this.prisma.tenantSettings.findUnique({ where: { tenantId: params.tenantId } }),
     ]);
 
+    // Rótulo do totem de origem resolvido em lote — a lista mostra "copiado
+    // de X" sem um fetch por linha
+    const sourceIds = [
+      ...new Set(devices.map((d) => d.calibrationSourceId).filter((id): id is string => !!id)),
+    ];
+    const sources = sourceIds.length
+      ? await this.prisma.device.findMany({
+          where: { id: { in: sourceIds }, tenantId: params.tenantId },
+          select: { id: true, label: true },
+        })
+      : [];
+    const sourceLabels = new Map(sources.map((s) => [s.id, s.label ?? undefined]));
+
     return this.buildPaginatedResult(
-      devices.map(this.toOutput),
+      devices.map((d) => this.toOutput(d, defaults, sourceLabels.get(d.calibrationSourceId ?? ""))),
       total,
       page,
       limit
@@ -86,11 +135,172 @@ class DevicesService extends BaseService {
    * Obtém um dispositivo pelo ID.
    */
   async findById(id: string, tenantId: string): Promise<DeviceOutput> {
+    const [device, defaults] = await Promise.all([
+      this.prisma.device.findFirst({ where: { id, tenantId } }),
+      this.prisma.tenantSettings.findUnique({ where: { tenantId } }),
+    ]);
+    if (!device) throw new NotFoundError("Device not found");
+
+    const source = device.calibrationSourceId
+      ? await this.prisma.device.findFirst({
+          where: { id: device.calibrationSourceId, tenantId },
+          select: { label: true },
+        })
+      : null;
+
+    return this.toOutput(device, defaults, source?.label ?? undefined);
+  }
+
+  // ── Calibração por totem ────────────────────────────────────────────────────
+
+  /**
+   * Grava os thresholds próprios do totem. null em um campo limpa aquele
+   * override específico, voltando a herdar o valor do tenant.
+   */
+  async applyCalibration(
+    id: string,
+    tenantId: string,
+    input: DeviceCalibrationInput
+  ): Promise<DeviceOutput> {
     const device = await this.prisma.device.findFirst({
       where: { id, tenantId },
+      select: { id: true },
     });
     if (!device) throw new NotFoundError("Device not found");
-    return this.toOutput(device);
+
+    if (input.recognitionThreshold != null) {
+      this.assertRange(
+        input.recognitionThreshold,
+        RECOGNITION_RANGE,
+        "O limiar de reconhecimento"
+      );
+    }
+    if (input.livenessThreshold != null) {
+      this.assertRange(input.livenessThreshold, LIVENESS_RANGE, "O limiar de vivacidade");
+    }
+
+    await this.prisma.device.update({
+      where: { id },
+      data: {
+        ...(input.recognitionThreshold !== undefined && {
+          recognitionThreshold: input.recognitionThreshold,
+        }),
+        ...(input.livenessThreshold !== undefined && {
+          livenessThreshold: input.livenessThreshold,
+        }),
+        ...(input.livenessEnabled !== undefined && { livenessEnabled: input.livenessEnabled }),
+        calibratedAt: new Date(),
+        // Valor ajustado à mão deixa de ser cópia de outro totem
+        calibrationSourceId: null,
+      },
+    });
+
+    this.logger.info({ deviceId: id, tenantId, ...input }, "Device calibration applied");
+    return this.findById(id, tenantId);
+  }
+
+  /**
+   * Remove a calibração do totem — volta a usar os valores do tenant.
+   */
+  async resetCalibration(id: string, tenantId: string): Promise<DeviceOutput> {
+    const device = await this.prisma.device.findFirst({
+      where: { id, tenantId },
+      select: { id: true },
+    });
+    if (!device) throw new NotFoundError("Device not found");
+
+    await this.prisma.device.update({
+      where: { id },
+      data: {
+        recognitionThreshold: null,
+        livenessThreshold: null,
+        livenessEnabled: null,
+        calibratedAt: null,
+        calibrationSourceId: null,
+      },
+    });
+
+    this.logger.info({ deviceId: id, tenantId }, "Device calibration reset to tenant defaults");
+    return this.findById(id, tenantId);
+  }
+
+  /**
+   * Copia a calibração de um totem para outros — totens de salas parecidas
+   * não precisam repetir a coleta guiada inteira.
+   *
+   * Retorna quantos totens receberam a calibração.
+   */
+  async copyCalibration(
+    sourceId: string,
+    tenantId: string,
+    targetIds: string[]
+  ): Promise<{ copied: number; targets: DeviceOutput[] }> {
+    const source = await this.prisma.device.findFirst({
+      where: { id: sourceId, tenantId },
+      select: {
+        id: true,
+        recognitionThreshold: true,
+        livenessThreshold: true,
+        livenessEnabled: true,
+        calibratedAt: true,
+      },
+    });
+    if (!source) throw new NotFoundError("Totem de origem não encontrado");
+
+    if (source.calibratedAt === null) {
+      throw new ValidationError(
+        "O totem de origem ainda não foi calibrado — não há o que copiar",
+        "SOURCE_NOT_CALIBRATED"
+      );
+    }
+
+    const targets = [...new Set(targetIds)].filter((id) => id !== sourceId);
+    if (targets.length === 0) {
+      throw new ValidationError(
+        "Escolha pelo menos um totem de destino diferente da origem",
+        "NO_CALIBRATION_TARGETS"
+      );
+    }
+
+    const found = await this.prisma.device.findMany({
+      where: { id: { in: targets }, tenantId },
+      select: { id: true },
+    });
+    if (found.length !== targets.length) {
+      throw new NotFoundError("Um ou mais totens de destino não foram encontrados");
+    }
+
+    const result = await this.prisma.device.updateMany({
+      where: { id: { in: targets }, tenantId },
+      data: {
+        recognitionThreshold: source.recognitionThreshold,
+        livenessThreshold: source.livenessThreshold,
+        livenessEnabled: source.livenessEnabled,
+        calibratedAt: new Date(),
+        calibrationSourceId: sourceId,
+      },
+    });
+
+    this.logger.info(
+      { tenantId, sourceId, targets: targets.length },
+      "Device calibration copied to other totems"
+    );
+
+    const updated = await Promise.all(targets.map((id) => this.findById(id, tenantId)));
+    return { copied: result.count, targets: updated };
+  }
+
+  private assertRange(
+    value: number,
+    range: { min: number; max: number },
+    label: string
+  ): void {
+    if (value < range.min || value > range.max) {
+      throw new ValidationError(
+        `${label} deve ficar entre ${range.min} e ${range.max}`,
+        "THRESHOLD_OUT_OF_RANGE"
+      );
+    }
   }
 
   /**
@@ -127,7 +337,7 @@ class DevicesService extends BaseService {
     });
 
     this.logger.info({ deviceId: device.id, tenantId: input.tenantId }, "Device created");
-    return { ...this.toOutput(device), apiKey };
+    return { ...(await this.findById(device.id, input.tenantId)), apiKey };
   }
 
   /**
@@ -151,7 +361,7 @@ class DevicesService extends BaseService {
       if (!location) throw new NotFoundError("Location not found in this tenant");
     }
 
-    const updated = await this.prisma.device.update({
+    await this.prisma.device.update({
       where: { id },
       data: {
         ...(input.label !== undefined && { label: input.label }),
@@ -162,7 +372,7 @@ class DevicesService extends BaseService {
     });
 
     this.logger.info({ deviceId: id, tenantId }, "Device updated");
-    return this.toOutput(updated);
+    return this.findById(id, tenantId);
   }
 
   /**
@@ -178,13 +388,13 @@ class DevicesService extends BaseService {
     const apiKey = crypto.randomBytes(32).toString("hex");
     const apiKeyHash = crypto.createHash("sha256").update(apiKey).digest("hex");
 
-    const updated = await this.prisma.device.update({
+    await this.prisma.device.update({
       where: { id },
       data: { apiKeyHash },
     });
 
     this.logger.info({ deviceId: id, tenantId }, "Device API key regenerated");
-    return { ...this.toOutput(updated), apiKey };
+    return { ...(await this.findById(id, tenantId)), apiKey };
   }
 
   /**
@@ -200,7 +410,15 @@ class DevicesService extends BaseService {
     this.logger.info({ deviceId: id, tenantId }, "Device deleted");
   }
 
-  private toOutput(device: any): DeviceOutput {
+  private toOutput(
+    device: any,
+    tenantDefaults?: {
+      recognitionThreshold: number;
+      livenessThreshold: number;
+      livenessEnabled: boolean;
+    } | null,
+    calibrationSourceLabel?: string
+  ): DeviceOutput {
     return {
       id: device.id,
       tenantId: device.tenantId,
@@ -211,6 +429,21 @@ class DevicesService extends BaseService {
       allowEnrollment: device.allowEnrollment ?? false,
       lastSeenAt: device.lastSeenAt ?? undefined,
       createdAt: device.createdAt,
+      calibration: {
+        recognitionThreshold: device.recognitionThreshold ?? null,
+        livenessThreshold: device.livenessThreshold ?? null,
+        livenessEnabled: device.livenessEnabled ?? null,
+        effectiveRecognitionThreshold:
+          device.recognitionThreshold ?? tenantDefaults?.recognitionThreshold ?? 1.1,
+        effectiveLivenessThreshold:
+          device.livenessThreshold ?? tenantDefaults?.livenessThreshold ?? 0.85,
+        effectiveLivenessEnabled:
+          device.livenessEnabled ?? tenantDefaults?.livenessEnabled ?? true,
+        isCalibrated: device.calibratedAt != null,
+        calibratedAt: device.calibratedAt ?? undefined,
+        calibrationSourceId: device.calibrationSourceId ?? undefined,
+        calibrationSourceLabel,
+      },
     };
   }
 }

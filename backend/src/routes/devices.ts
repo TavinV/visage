@@ -27,6 +27,22 @@ const UpdateDeviceSchema = z.object({
   allowEnrollment: z.boolean().optional(),
 });
 
+// Calibração do totem. null em um campo limpa aquele override e volta a
+// herdar o valor do tenant.
+const ApplyCalibrationSchema = z
+  .object({
+    recognitionThreshold: z.number().min(0.3).max(2).nullable().optional(),
+    livenessThreshold: z.number().min(0.5).max(0.95).nullable().optional(),
+    livenessEnabled: z.boolean().nullable().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, {
+    message: "Informe ao menos um valor de calibração",
+  });
+
+const CopyCalibrationSchema = z.object({
+  targetDeviceIds: z.array(z.string().uuid()).min(1).max(50),
+});
+
 type CreateDeviceRequest = z.infer<typeof CreateDeviceSchema>;
 type UpdateDeviceRequest = z.infer<typeof UpdateDeviceSchema>;
 
@@ -223,6 +239,87 @@ router.post(
         return;
       }
       const result = await calibrationService.compute(tenantId, req.params.id);
+      res.json({ data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * PUT /devices/:id/calibration/settings
+ * Grava os thresholds próprios deste totem — normalmente com o resultado da
+ * calibração guiada, mas aceita ajuste fino manual (admin only)
+ */
+router.put(
+  "/:id/calibration/settings",
+  authenticate,
+  validate(ApplyCalibrationSchema),
+  async (
+    req: Request<{ id: string }, {}, z.infer<typeof ApplyCalibrationSchema>>,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const { tenantId, role } = req.tenant!;
+      if (role !== "admin" && role !== "super_admin") {
+        res.status(403).json({ error: "Forbidden", code: "forbidden" });
+        return;
+      }
+      const result = await devicesService.applyCalibration(req.params.id, tenantId, req.body);
+      res.json({ data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * DELETE /devices/:id/calibration/settings
+ * Descarta a calibração do totem — volta a herdar os valores da instituição
+ */
+router.delete(
+  "/:id/calibration/settings",
+  authenticate,
+  async (req: Request<{ id: string }>, res: Response, next: NextFunction) => {
+    try {
+      const { tenantId, role } = req.tenant!;
+      if (role !== "admin" && role !== "super_admin") {
+        res.status(403).json({ error: "Forbidden", code: "forbidden" });
+        return;
+      }
+      const result = await devicesService.resetCalibration(req.params.id, tenantId);
+      res.json({ data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * POST /devices/:id/calibration/copy
+ * Copia a calibração deste totem para outros (admin only)
+ */
+router.post(
+  "/:id/calibration/copy",
+  authenticate,
+  validate(CopyCalibrationSchema),
+  async (
+    req: Request<{ id: string }, {}, z.infer<typeof CopyCalibrationSchema>>,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const { tenantId, role } = req.tenant!;
+      if (role !== "admin" && role !== "super_admin") {
+        res.status(403).json({ error: "Forbidden", code: "forbidden" });
+        return;
+      }
+      const result = await devicesService.copyCalibration(
+        req.params.id,
+        tenantId,
+        req.body.targetDeviceIds
+      );
       res.json({ data: result });
     } catch (error) {
       next(error);

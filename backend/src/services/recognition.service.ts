@@ -20,6 +20,7 @@ import { redis } from "../lib/redis";
 import { config } from "../lib/config";
 import { engineRecognize } from "../lib/faceEngine";
 import { getTenantDekPayload, getCandidatesForClass, getCandidatesForLocation } from "./facial-payload";
+import { lessonsCompletedOnCheckout } from "./class-sessions.service";
 import { sseService } from "./sse.service";
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
@@ -36,6 +37,10 @@ export interface RecognizeDeviceOutput {
   personName?: string;
   confidence?: number;
   preAttendance?: boolean;
+  /** Este reconhecimento registrou a SAÍDA do aluno, não a entrada. */
+  checkout?: boolean;
+  /** Aulas cumpridas até a saída — o totem mostra na confirmação. */
+  classesCounted?: number;
 }
 
 export interface CurrentSessionOutput {
@@ -44,6 +49,7 @@ export interface CurrentSessionOutput {
   className: string;
   startedAt: Date;
   classesWorth: number;
+  scheduledEndsAt?: Date;
 }
 
 interface ActiveSession {
@@ -52,6 +58,8 @@ interface ActiveSession {
   className: string;
   startedAt: Date;
   classesWorth: number;
+  lessonDurationMin: number;
+  scheduledEndsAt: Date | null;
 }
 
 // ── Serviço ───────────────────────────────────────────────────────────────────
@@ -63,9 +71,14 @@ class RecognitionService extends BaseService {
   async recognize(input: RecognizeDeviceInput): Promise<RecognizeDeviceOutput> {
     const { tenantId, deviceId, locationId } = input;
 
-    const settings = await this.prisma.tenantSettings.findUnique({
-      where: { tenantId },
-    });
+    const [settings, device] = await Promise.all([
+      this.prisma.tenantSettings.findUnique({ where: { tenantId } }),
+      // Calibração é por totem: câmera e iluminação mudam de sala para sala
+      this.prisma.device.findUnique({
+        where: { id: deviceId },
+        select: { recognitionThreshold: true, livenessThreshold: true, livenessEnabled: true },
+      }),
+    ]);
 
     const session = await this.findActiveSession(tenantId, locationId);
     const preAttendanceMode = !session && (settings?.preAttendanceEnabled ?? false);
@@ -87,10 +100,16 @@ class RecognitionService extends BaseService {
         : getCandidatesForLocation(tenantId, locationId),
     ]);
 
+    // Threshold do totem quando calibrado; senão, o do tenant
+    const recognitionThreshold =
+      device?.recognitionThreshold ?? settings?.recognitionThreshold;
     // Calibração com poucas amostras pode gravar um threshold de liveness
     // absurdo (ex.: 0.99) que bloqueia rostos reais em câmeras ruins —
     // o clamp garante uma faixa operável sem desligar o anti-spoofing
-    const livenessThreshold = this.clampLiveness(tenantId, settings?.livenessThreshold);
+    const livenessThreshold = this.clampLiveness(
+      tenantId,
+      device?.livenessThreshold ?? settings?.livenessThreshold
+    );
 
     const engineResult = await engineRecognize({
       tenantId,
@@ -98,7 +117,7 @@ class RecognitionService extends BaseService {
       dek,
       candidates,
       thresholds: {
-        recognitionThreshold: settings?.recognitionThreshold,
+        recognitionThreshold,
         livenessThreshold,
       },
     });
@@ -119,7 +138,8 @@ class RecognitionService extends BaseService {
         saturationMean: engineResult.saturation_mean,
         saturationStd: engineResult.saturation_std,
         bestDistance: engineResult.best_distance_raw,
-        recognitionThreshold: settings?.recognitionThreshold ?? 1.1,
+        recognitionThreshold: recognitionThreshold ?? 1.1,
+        deviceCalibrated: device?.recognitionThreshold != null,
         candidates: candidates.length,
         processingMs: engineResult.processing_ms,
       },
@@ -165,6 +185,19 @@ class RecognitionService extends BaseService {
     const personName = person?.name ?? "Aluno";
 
     if (session) {
+      // Aluno com saída liberada pelo professor: este reconhecimento é a
+      // SAÍDA, não uma segunda entrada
+      if (settings?.individualCheckoutEnabled) {
+        const checkout = await this.tryRegisterCheckout(
+          tenantId,
+          deviceId,
+          session,
+          personId,
+          personName
+        );
+        if (checkout) return { status, personName, confidence, ...checkout };
+      }
+
       await this.registerAttendance(tenantId, deviceId, session, personId, personName, {
         confidence,
         livenessScore,
@@ -205,6 +238,7 @@ class RecognitionService extends BaseService {
       className: session.className,
       startedAt: session.startedAt,
       classesWorth: session.classesWorth,
+      scheduledEndsAt: session.scheduledEndsAt ?? undefined,
     };
   }
 
@@ -247,17 +281,34 @@ class RecognitionService extends BaseService {
       where: {
         tenantId,
         status: "open",
+        // O job de fechamento roda a cada minuto; sem este filtro o totem
+        // ainda aceitaria presença numa aula que já acabou
+        OR: [{ scheduledEndsAt: null }, { scheduledEndsAt: { gt: new Date() } }],
         ...(locationId && {
-          OR: [{ locationId }, { locationId: null, class: { locationId } }],
+          AND: [
+            {
+              OR: [
+                { locationId },
+                { locationId: null, classSubject: { class: { locationId } } },
+              ],
+            },
+          ],
         }),
       },
       orderBy: { startedAt: "desc" },
       select: {
         id: true,
-        classId: true,
         startedAt: true,
         classesWorth: true,
-        class: { select: { name: true } },
+        lessonDurationMin: true,
+        scheduledEndsAt: true,
+        classSubject: {
+          select: {
+            classId: true,
+            subject: { select: { name: true } },
+            class: { select: { name: true } },
+          },
+        },
       },
     });
 
@@ -265,10 +316,13 @@ class RecognitionService extends BaseService {
 
     return {
       id: session.id,
-      classId: session.classId,
-      className: session.class.name,
+      classId: session.classSubject.classId,
+      // O totem mostra a disciplina: a turma pode ter várias no mesmo dia
+      className: `${session.classSubject.class.name} — ${session.classSubject.subject.name}`,
       startedAt: session.startedAt,
       classesWorth: session.classesWorth,
+      lessonDurationMin: session.lessonDurationMin,
+      scheduledEndsAt: session.scheduledEndsAt,
     };
   }
 
@@ -316,6 +370,71 @@ class RecognitionService extends BaseService {
       personName,
       confidence: scores.confidence,
     });
+  }
+
+  /**
+   * Registra a saída antecipada quando o professor já liberou este aluno.
+   *
+   * Retorna null quando não há saída a registrar (sem liberação, ou já
+   * registrada) — o chamador segue o fluxo normal de entrada.
+   *
+   * As aulas cumpridas são contadas a partir da hora REAL de início da aula
+   * informada pelo professor, não de quando a chamada foi aberta no sistema.
+   */
+  private async tryRegisterCheckout(
+    tenantId: string,
+    deviceId: string,
+    session: ActiveSession,
+    userId: string,
+    personName: string
+  ): Promise<{ checkout: true; classesCounted: number } | null> {
+    const record = await this.prisma.attendanceRecord.findFirst({
+      where: {
+        tenantId,
+        classSessionId: session.id,
+        userId,
+        checkoutReleasedById: { not: null },
+        checkedOutAt: null,
+      },
+      select: { id: true },
+    });
+    if (!record) return null;
+
+    const checkedOutAt = new Date();
+    const classesCounted = lessonsCompletedOnCheckout(
+      session.startedAt,
+      checkedOutAt,
+      session.lessonDurationMin,
+      session.classesWorth
+    );
+
+    // Condição no WHERE mantém a operação idempotente: dois frames seguidos
+    // do mesmo aluno não gravam duas saídas
+    const updated = await this.prisma.attendanceRecord.updateMany({
+      where: { id: record.id, checkedOutAt: null },
+      data: { status: "early_checkout", checkedOutAt, classesCounted },
+    });
+    if (updated.count === 0) return null;
+
+    sseService.broadcast(sseService.sessionChannel(tenantId, session.id), "checkout", {
+      sessionId: session.id,
+      userId,
+      name: personName,
+      checkedOutAt: checkedOutAt.toISOString(),
+      classesCounted,
+    });
+    sseService.broadcast(sseService.deviceChannel(tenantId, deviceId), "recognition", {
+      status: "identified",
+      personName,
+      checkout: true,
+      classesCounted,
+    });
+
+    this.logger.info(
+      { tenantId, sessionId: session.id, userId, classesCounted },
+      "Early checkout registered"
+    );
+    return { checkout: true, classesCounted };
   }
 
   /**
