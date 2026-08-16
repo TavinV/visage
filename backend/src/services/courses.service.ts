@@ -11,6 +11,17 @@
 import { BaseService, ListParams, PaginatedResult } from "./base.service";
 import { NotFoundError, ValidationError } from "../utils/errors";
 import { lessonDurationToMinutes } from "./subjects.service";
+import { auditService } from "./audit.service";
+import { snapshot } from "../utils/diff";
+
+/** Campos do curso acompanhados pela trilha de auditoria. */
+const COURSE_FIELDS = [
+  "name",
+  "academicPeriodId",
+  "lessonsPerDay",
+  "lessonDuration",
+  "lessonDurationUnit",
+] as const;
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -54,6 +65,45 @@ export interface CourseOutput {
 export interface ListCoursesParams extends ListParams {
   tenantId: string;
   academicPeriodId?: string;
+}
+
+// ── Aplicação da grade do curso nas turmas ───────────────────────────────────
+
+export interface CurriculumSubjectInput {
+  subjectId: string;
+  /** Professores alocados; o primeiro vira o responsável. */
+  teacherIds: string[];
+  /** Sem valor, usa a carga padrão da disciplina no currículo. */
+  lessonsPerSession?: number;
+  totalLessonsPlanned?: number;
+}
+
+export interface ApplyCurriculumInput {
+  /** Turmas alvo. Vazio/ausente = todas as turmas do curso. */
+  classIds?: string[];
+  subjects: CurriculumSubjectInput[];
+  /**
+   * Como tratar a disciplina que a turma JÁ cursa:
+   * - "skip": não toca (padrão) — só preenche o que falta
+   * - "sync": atualiza a carga
+   * - "replace": atualiza a carga e troca o time de professores
+   */
+  existing?: "skip" | "sync" | "replace";
+}
+
+export interface ApplyCurriculumOutput {
+  classesAffected: number;
+  created: number;
+  updated: number;
+  skipped: number;
+  /** Turmas que ficaram de fora de alguma disciplina e por quê. */
+  details: Array<{
+    classId: string;
+    className: string;
+    subjectName: string;
+    action: "created" | "updated" | "skipped";
+    reason?: string;
+  }>;
 }
 
 // ── Serviço ───────────────────────────────────────────────────────────────────
@@ -136,6 +186,14 @@ class CoursesService extends BaseService {
       include: { _count: { select: { subjects: true } }, academicPeriod: { select: { name: true } } },
     });
 
+    auditService.record({
+      action: "course.created",
+      tenantId: input.tenantId,
+      targetId: course.id,
+      targetLabel: course.name,
+      afterState: snapshot(course, COURSE_FIELDS),
+    });
+
     this.logger.info({ courseId: course.id, tenantId: input.tenantId }, "Course created");
     return this.toOutput(course);
   }
@@ -207,6 +265,16 @@ class CoursesService extends BaseService {
       include: { _count: { select: { subjects: true } }, academicPeriod: { select: { name: true } } },
     });
 
+    auditService.recordChange({
+      action: "course.updated",
+      tenantId,
+      targetId: id,
+      targetLabel: updated.name,
+      before: course,
+      after: updated,
+      fields: COURSE_FIELDS,
+    });
+
     this.logger.info({ courseId: id, tenantId }, "Course updated");
     return this.toOutput(updated);
   }
@@ -217,7 +285,7 @@ class CoursesService extends BaseService {
   async delete(id: string, tenantId: string): Promise<void> {
     const course = await this.prisma.course.findFirst({
       where: { id, tenantId },
-      select: { id: true, _count: { select: { classes: true } } },
+      include: { _count: { select: { classes: true } } },
     });
     if (!course) throw new NotFoundError("Course not found");
 
@@ -231,7 +299,270 @@ class CoursesService extends BaseService {
     }
 
     await this.prisma.course.delete({ where: { id } });
+
+    // As disciplinas do curso caem em cascata — o contador entra na trilha
+    // porque a exclusão apaga mais do que a linha nomeada no evento
+    auditService.record({
+      action: "course.deleted",
+      tenantId,
+      targetId: id,
+      targetLabel: course.name,
+      beforeState: snapshot(course, COURSE_FIELDS),
+      details: `Curso "${course.name}" excluído junto com suas disciplinas`,
+    });
+
     this.logger.info({ courseId: id, tenantId }, "Course deleted");
+  }
+
+  /**
+   * Aplica a grade do curso nas turmas de uma vez.
+   *
+   * O caso real é a faculdade com 50 turmas do mesmo curso: todas cursam as
+   * mesmas disciplinas, muda só quem leciona. Montar a grade turma a turma é
+   * o que torna isso inviável hoje.
+   *
+   * Regra de convivência com o que já existe: por padrão a disciplina que a
+   * turma já cursa é preservada (`existing: "skip"`) — a carga e o professor
+   * dela podem ter sido ajustados de propósito, e a frequência acumulada
+   * pendura no vínculo. "sync" atualiza a carga; "replace" também troca o time.
+   */
+  async applyCurriculum(
+    courseId: string,
+    tenantId: string,
+    input: ApplyCurriculumInput
+  ): Promise<ApplyCurriculumOutput> {
+    const course = await this.prisma.course.findFirst({
+      where: { id: courseId, tenantId },
+      select: { id: true, name: true },
+    });
+    if (!course) throw new NotFoundError("Course not found");
+
+    if (input.subjects.length === 0) {
+      throw new ValidationError(
+        "Escolha ao menos uma disciplina para aplicar",
+        "CURRICULUM_NO_SUBJECTS"
+      );
+    }
+
+    // Disciplinas precisam ser do currículo deste curso e estar ativas
+    const subjectIds = [...new Set(input.subjects.map((s) => s.subjectId))];
+    const subjects = await this.prisma.subject.findMany({
+      where: { id: { in: subjectIds }, tenantId },
+      select: {
+        id: true,
+        name: true,
+        courseId: true,
+        isActive: true,
+        defaultLessonsPerSession: true,
+        defaultTotalLessonsPlanned: true,
+      },
+    });
+    if (subjects.length !== subjectIds.length) {
+      throw new NotFoundError("Uma ou mais disciplinas não foram encontradas");
+    }
+    const foreign = subjects.filter((s) => s.courseId !== courseId);
+    if (foreign.length > 0) {
+      throw new ValidationError(
+        `Estas disciplinas não pertencem ao curso: ${foreign.map((s) => s.name).join(", ")}`,
+        "SUBJECT_WRONG_COURSE"
+      );
+    }
+    const inactive = subjects.filter((s) => !s.isActive);
+    if (inactive.length > 0) {
+      throw new ValidationError(
+        `Estas disciplinas estão inativas: ${inactive.map((s) => s.name).join(", ")}`,
+        "SUBJECT_INACTIVE"
+      );
+    }
+    const subjectById = new Map(subjects.map((s) => [s.id, s]));
+
+    // Professores: existem no tenant e podem lecionar
+    const teacherIds = [...new Set(input.subjects.flatMap((s) => s.teacherIds ?? []))];
+    if (teacherIds.length === 0) {
+      throw new ValidationError(
+        "Escolha o professor de cada disciplina",
+        "CURRICULUM_NO_TEACHERS"
+      );
+    }
+    const teachers = await this.prisma.user.findMany({
+      where: { id: { in: teacherIds }, tenantId },
+      select: { id: true, name: true, role: true },
+    });
+    if (teachers.length !== teacherIds.length) {
+      throw new NotFoundError("Um ou mais professores não foram encontrados");
+    }
+    const notTeachers = teachers.filter(
+      (t) => !["teacher", "admin", "manager"].includes(t.role)
+    );
+    if (notTeachers.length > 0) {
+      throw new ValidationError(
+        `Estes usuários não podem lecionar: ${notTeachers.map((t) => t.name).join(", ")}`,
+        "NOT_A_TEACHER"
+      );
+    }
+
+    const classes = await this.prisma.class.findMany({
+      where: {
+        courseId,
+        tenantId,
+        ...(input.classIds?.length && { id: { in: input.classIds } }),
+      },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    });
+    if (classes.length === 0) {
+      throw new ValidationError(
+        "Nenhuma turma deste curso para aplicar a grade",
+        "CURRICULUM_NO_CLASSES"
+      );
+    }
+
+    const mode = input.existing ?? "skip";
+    const result: ApplyCurriculumOutput = {
+      classesAffected: 0,
+      created: 0,
+      updated: 0,
+      skipped: 0,
+      details: [],
+    };
+
+    for (const classItem of classes) {
+      let touched = false;
+
+      for (const row of input.subjects) {
+        const subject = subjectById.get(row.subjectId)!;
+        const requested = [...new Set((row.teacherIds ?? []).filter(Boolean))];
+        if (requested.length === 0) {
+          throw new ValidationError(
+            `Escolha o professor de ${subject.name}`,
+            "CURRICULUM_NO_TEACHERS"
+          );
+        }
+
+        const lessonsPerSession = row.lessonsPerSession ?? subject.defaultLessonsPerSession;
+        const totalLessonsPlanned =
+          row.totalLessonsPlanned ?? subject.defaultTotalLessonsPlanned;
+
+        const existing = await this.prisma.classSubject.findUnique({
+          where: {
+            classId_subjectId: { classId: classItem.id, subjectId: row.subjectId },
+          },
+          select: { id: true },
+        });
+
+        if (existing && mode === "skip") {
+          result.skipped += 1;
+          result.details.push({
+            classId: classItem.id,
+            className: classItem.name,
+            subjectName: subject.name,
+            action: "skipped",
+            reason: "A turma já cursa esta disciplina",
+          });
+          continue;
+        }
+
+        await this.prisma.$transaction(async (tx) => {
+          const classSubject = await tx.classSubject.upsert({
+            where: {
+              classId_subjectId: { classId: classItem.id, subjectId: row.subjectId },
+            },
+            create: {
+              tenantId,
+              classId: classItem.id,
+              subjectId: row.subjectId,
+              teacherId: requested[0],
+              lessonsPerSession,
+              totalLessonsPlanned,
+            },
+            update: {
+              lessonsPerSession,
+              totalLessonsPlanned,
+              // "sync" mexe só na carga: trocar o professor de 50 turmas sem
+              // pedir é o tipo de coisa que ninguém desfaz depois
+              ...(mode === "replace" && { teacherId: requested[0] }),
+            },
+            select: { id: true },
+          });
+
+          if (!existing || mode === "replace") {
+            await tx.classSubjectTeacher.deleteMany({
+              where: { classSubjectId: classSubject.id, teacherId: { notIn: requested } },
+            });
+            for (const teacherId of requested) {
+              await tx.classSubjectTeacher.upsert({
+                where: {
+                  classSubjectId_teacherId: {
+                    classSubjectId: classSubject.id,
+                    teacherId,
+                  },
+                },
+                create: {
+                  classSubjectId: classSubject.id,
+                  teacherId,
+                  isPrimary: teacherId === requested[0],
+                },
+                update: { isPrimary: teacherId === requested[0] },
+              });
+            }
+          }
+        });
+
+        touched = true;
+        if (existing) {
+          result.updated += 1;
+          result.details.push({
+            classId: classItem.id,
+            className: classItem.name,
+            subjectName: subject.name,
+            action: "updated",
+          });
+        } else {
+          result.created += 1;
+          result.details.push({
+            classId: classItem.id,
+            className: classItem.name,
+            subjectName: subject.name,
+            action: "created",
+          });
+        }
+      }
+
+      if (touched) result.classesAffected += 1;
+    }
+
+    // Operação em lote: um evento resumido em vez de um por turma tocada —
+    // a lista detalhada de turmas fica no metadata para quem abrir o evento
+    auditService.record({
+      action: "course.curriculum_applied",
+      tenantId,
+      targetId: courseId,
+      targetLabel: course.name,
+      details: `Grade curricular aplicada em ${result.classesAffected} turma(s): ${result.created} criada(s), ${result.updated} atualizada(s), ${result.skipped} preservada(s)`,
+      metadata: {
+        mode,
+        classesAffected: result.classesAffected,
+        created: result.created,
+        updated: result.updated,
+        skipped: result.skipped,
+        changes: result.details,
+      },
+    });
+
+    this.logger.info(
+      {
+        courseId,
+        tenantId,
+        classes: classes.length,
+        created: result.created,
+        updated: result.updated,
+        skipped: result.skipped,
+        mode,
+      },
+      "Curriculum applied to classes"
+    );
+
+    return result;
   }
 
   private toOutput(course: any): CourseOutput {

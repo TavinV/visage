@@ -6,7 +6,10 @@
  * Se o refresh falhar, dispara logout global (o AuthProvider redireciona).
  */
 
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000";
+// Sempre relativo: o Next.js faz o proxy server-side para o backend real
+// (ver rewrites em next.config.mjs). O browser nunca chama o backend direto,
+// então o domínio dele não aparece no menu Network.
+export const API_URL = "/api";
 
 const REFRESH_KEY = "visage.refreshToken";
 const USER_KEY = "visage.user";

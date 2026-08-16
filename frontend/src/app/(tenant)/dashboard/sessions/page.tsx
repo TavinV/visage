@@ -97,9 +97,16 @@ export default function SessionsPage() {
   const selectedClassSubjectId = form.watch("classSubjectId");
   const startedAtValue = form.watch("startedAt");
   const selectedClass = classById.get(selectedClassId);
-  // Professor só abre as disciplinas que ele leciona naquela turma
+  // Professor só abre as disciplinas em que está alocado naquela turma —
+  // inclusive as que divide com outro professor
   const subjectOptions = (selectedClass?.subjects ?? [])
-    .filter((cs) => !isTeacher || cs.teacherId === user?.id)
+    .filter(
+      (cs) =>
+        !isTeacher ||
+        (cs.teachers?.length
+          ? cs.teachers.some((t) => t.id === user?.id)
+          : cs.teacherId === user?.id)
+    )
     .map((cs) => ({ value: cs.id, label: cs.subjectName }));
   const selectedSubject = selectedClass?.subjects.find((cs) => cs.id === selectedClassSubjectId);
 

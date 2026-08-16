@@ -42,7 +42,7 @@ export function DeviceKeyModal({ open, onClose, onKeyChange }: DeviceKeyModalPro
   const save = async () => {
     const key = value.trim();
     if (!key) {
-      setError("Cole a chave de API do dispositivo.");
+      setError("Cole a chave de acesso do dispositivo.");
       return;
     }
     setSaving(true);
@@ -80,7 +80,7 @@ export function DeviceKeyModal({ open, onClose, onKeyChange }: DeviceKeyModalPro
       open={open}
       onClose={onClose}
       title="Configurar totem"
-      description="A chave de API é exibida uma única vez ao registrar o dispositivo no painel."
+      description="A chave de acesso é exibida uma única vez ao registrar o dispositivo no painel."
       size="sm"
       footer={
         <>
@@ -115,7 +115,7 @@ export function DeviceKeyModal({ open, onClose, onKeyChange }: DeviceKeyModalPro
           </div>
         )}
         <Input
-          label={hasKey ? "Substituir chave" : "Chave de API do dispositivo"}
+          label={hasKey ? "Substituir chave" : "Chave de acesso do dispositivo"}
           placeholder="Cole aqui a chave de 64 caracteres"
           value={value}
           onChange={(e) => setValue(e.target.value)}

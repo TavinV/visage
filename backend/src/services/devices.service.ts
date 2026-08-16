@@ -10,6 +10,8 @@
 
 import { BaseService, ListParams, PaginatedResult } from "./base.service";
 import { NotFoundError, ValidationError } from "../utils/errors";
+import { auditService } from "./audit.service";
+import { snapshot } from "../utils/diff";
 import crypto from "crypto";
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
@@ -17,6 +19,26 @@ import crypto from "crypto";
 /** Faixas operáveis — espelham o clamp do hot path do reconhecimento. */
 const RECOGNITION_RANGE = { min: 0.3, max: 2.0 };
 const LIVENESS_RANGE = { min: 0.5, max: 0.95 };
+
+/**
+ * Campos do totem acompanhados pela trilha. apiKeyHash fica de fora de
+ * propósito: a regeneração da chave tem evento próprio, e o hash nunca deve
+ * aparecer nem redigido no diff de uma edição comum.
+ */
+const AUDITED_DEVICE_FIELDS = [
+  "label",
+  "locationId",
+  "isActive",
+  "allowEnrollment",
+  "deviceFingerprint",
+] as const;
+
+/** Thresholds — o que muda o rigor do reconhecimento é sempre auditado. */
+const AUDITED_CALIBRATION_FIELDS = [
+  "recognitionThreshold",
+  "livenessThreshold",
+  "livenessEnabled",
+] as const;
 
 export interface DeviceCalibrationInput {
   /** null limpa o override e volta a herdar do tenant. */
@@ -164,7 +186,14 @@ class DevicesService extends BaseService {
   ): Promise<DeviceOutput> {
     const device = await this.prisma.device.findFirst({
       where: { id, tenantId },
-      select: { id: true },
+      select: {
+        id: true,
+        label: true,
+        deviceFingerprint: true,
+        recognitionThreshold: true,
+        livenessThreshold: true,
+        livenessEnabled: true,
+      },
     });
     if (!device) throw new NotFoundError("Device not found");
 
@@ -179,7 +208,7 @@ class DevicesService extends BaseService {
       this.assertRange(input.livenessThreshold, LIVENESS_RANGE, "O limiar de vivacidade");
     }
 
-    await this.prisma.device.update({
+    const updated = await this.prisma.device.update({
       where: { id },
       data: {
         ...(input.recognitionThreshold !== undefined && {
@@ -195,6 +224,19 @@ class DevicesService extends BaseService {
       },
     });
 
+    // Afrouxar um threshold é a forma mais silenciosa de degradar o
+    // antifraude — a trilha guarda o valor exato de antes e o de depois.
+    auditService.recordChange({
+      action: "device.calibrated",
+      tenantId,
+      targetId: id,
+      targetLabel: device.label ?? device.deviceFingerprint,
+      before: device,
+      after: updated,
+      fields: AUDITED_CALIBRATION_FIELDS,
+      details: `Calibração do totem "${device.label ?? device.deviceFingerprint}" ajustada`,
+    });
+
     this.logger.info({ deviceId: id, tenantId, ...input }, "Device calibration applied");
     return this.findById(id, tenantId);
   }
@@ -205,7 +247,14 @@ class DevicesService extends BaseService {
   async resetCalibration(id: string, tenantId: string): Promise<DeviceOutput> {
     const device = await this.prisma.device.findFirst({
       where: { id, tenantId },
-      select: { id: true },
+      select: {
+        id: true,
+        label: true,
+        deviceFingerprint: true,
+        recognitionThreshold: true,
+        livenessThreshold: true,
+        livenessEnabled: true,
+      },
     });
     if (!device) throw new NotFoundError("Device not found");
 
@@ -218,6 +267,17 @@ class DevicesService extends BaseService {
         calibratedAt: null,
         calibrationSourceId: null,
       },
+    });
+
+    auditService.recordChange({
+      action: "device.calibration_reset",
+      tenantId,
+      targetId: id,
+      targetLabel: device.label ?? device.deviceFingerprint,
+      before: device,
+      after: { recognitionThreshold: null, livenessThreshold: null, livenessEnabled: null },
+      fields: AUDITED_CALIBRATION_FIELDS,
+      details: `Calibração própria do totem "${device.label ?? device.deviceFingerprint}" removida; voltou a herdar os valores da instituição`,
     });
 
     this.logger.info({ deviceId: id, tenantId }, "Device calibration reset to tenant defaults");
@@ -281,12 +341,32 @@ class DevicesService extends BaseService {
       },
     });
 
+    const updated = await Promise.all(targets.map((id) => this.findById(id, tenantId)));
+
+    // Um evento por totem afetado — filtrar "o que mudou neste totem" tem de
+    // achar a cópia também, não só a calibração feita à mão nele
+    for (const target of updated) {
+      auditService.record({
+        action: "device.calibration_copied",
+        tenantId,
+        targetId: target.id,
+        targetLabel: target.label ?? target.deviceFingerprint,
+        afterState: {
+          recognitionThreshold: source.recognitionThreshold,
+          livenessThreshold: source.livenessThreshold,
+          livenessEnabled: source.livenessEnabled,
+        },
+        changedFields: [...AUDITED_CALIBRATION_FIELDS],
+        details: `Calibração copiada de outro totem para "${target.label ?? target.deviceFingerprint}"`,
+        metadata: { sourceDeviceId: sourceId },
+      });
+    }
+
     this.logger.info(
       { tenantId, sourceId, targets: targets.length },
       "Device calibration copied to other totems"
     );
 
-    const updated = await Promise.all(targets.map((id) => this.findById(id, tenantId)));
     return { copied: result.count, targets: updated };
   }
 
@@ -336,6 +416,15 @@ class DevicesService extends BaseService {
       },
     });
 
+    auditService.record({
+      action: "device.created",
+      tenantId: input.tenantId,
+      targetId: device.id,
+      targetLabel: device.label ?? device.deviceFingerprint,
+      afterState: snapshot(device, AUDITED_DEVICE_FIELDS),
+      details: `Totem "${device.label ?? device.deviceFingerprint}" criado com nova chave de acesso`,
+    });
+
     this.logger.info({ deviceId: device.id, tenantId: input.tenantId }, "Device created");
     return { ...(await this.findById(device.id, input.tenantId)), apiKey };
   }
@@ -361,7 +450,7 @@ class DevicesService extends BaseService {
       if (!location) throw new NotFoundError("Location not found in this tenant");
     }
 
-    await this.prisma.device.update({
+    const updated = await this.prisma.device.update({
       where: { id },
       data: {
         ...(input.label !== undefined && { label: input.label }),
@@ -369,6 +458,16 @@ class DevicesService extends BaseService {
         ...(input.isActive !== undefined && { isActive: input.isActive }),
         ...(input.allowEnrollment !== undefined && { allowEnrollment: input.allowEnrollment }),
       },
+    });
+
+    auditService.recordChange({
+      action: "device.updated",
+      tenantId,
+      targetId: id,
+      targetLabel: updated.label ?? updated.deviceFingerprint,
+      before: device,
+      after: updated,
+      fields: AUDITED_DEVICE_FIELDS,
     });
 
     this.logger.info({ deviceId: id, tenantId }, "Device updated");
@@ -393,6 +492,16 @@ class DevicesService extends BaseService {
       data: { apiKeyHash },
     });
 
+    // Chave antiga morre na hora: o totem que a usava para de reconhecer até
+    // ser reconfigurado. Evento crítico — pode explicar uma parada de operação.
+    auditService.record({
+      action: "device.api_key_regenerated",
+      tenantId,
+      targetId: id,
+      targetLabel: device.label ?? device.deviceFingerprint,
+      details: `Chave de acesso do totem "${device.label ?? device.deviceFingerprint}" regenerada; a chave anterior deixou de funcionar`,
+    });
+
     this.logger.info({ deviceId: id, tenantId }, "Device API key regenerated");
     return { ...(await this.findById(id, tenantId)), apiKey };
   }
@@ -407,6 +516,16 @@ class DevicesService extends BaseService {
     if (!device) throw new NotFoundError("Device not found");
 
     await this.prisma.device.delete({ where: { id } });
+
+    auditService.record({
+      action: "device.deleted",
+      tenantId,
+      targetId: id,
+      targetLabel: device.label ?? device.deviceFingerprint,
+      beforeState: snapshot(device, [...AUDITED_DEVICE_FIELDS, ...AUDITED_CALIBRATION_FIELDS]),
+      details: `Totem "${device.label ?? device.deviceFingerprint}" excluído`,
+    });
+
     this.logger.info({ deviceId: id, tenantId }, "Device deleted");
   }
 

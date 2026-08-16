@@ -152,7 +152,7 @@ export default function ClassesPage() {
                         <Badge
                           key={s.id}
                           variant="neutral"
-                          title={`${s.teacherName} · ${s.lessonsPerSession} aula(s) · ${formatDuration(s.sessionDurationMin)}`}
+                          title={`${s.teachers?.map((t) => t.name).join(", ") ?? s.teacherName} · ${s.lessonsPerSession} aula(s) · ${formatDuration(s.sessionDurationMin)}`}
                         >
                           {s.subjectName}
                         </Badge>

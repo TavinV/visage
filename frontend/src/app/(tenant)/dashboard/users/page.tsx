@@ -1,17 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useForm, Controller } from "react-hook-form";
+import { useForm, Controller, type Resolver } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Plus, Search, Copy, KeyRound } from "lucide-react";
 import { api, qs } from "@/lib/api";
-import type { Paginated, User } from "@/lib/types";
+import type { Paginated, StudentIdentification, User } from "@/lib/types";
 import { friendlyError } from "@/lib/apiError";
 import { useDebounced } from "@/lib/useDebounced";
 import { maskCpf } from "@/lib/masks";
+import {
+  registersCpf,
+  registersEnrollmentCode,
+  useTenantSettings,
+} from "@/lib/identification";
 import {
   PageHeader,
   Card,
@@ -28,6 +33,7 @@ import {
   useToast,
 } from "@/components/ui";
 import { UserStatusBadge, FacialStatusBadge } from "@/components/app/badges";
+import { ShowInactiveToggle, inactiveRowClass } from "@/components/app/ShowInactive";
 import { UserAvatar } from "@/components/app/UserAvatar";
 import { roleOptions, roleLabel } from "@/components/app/labels";
 import { RolePicker } from "@/components/app/RolePicker";
@@ -47,6 +53,34 @@ const CreateUserSchema = z
 
 type CreateUserForm = z.infer<typeof CreateUserSchema>;
 
+/**
+ * Os identificadores obrigatórios mudam por instituição (Configurações →
+ * Identificação do aluno), então a exigência entra por fora do schema — que é
+ * estático — lendo a política vigente no momento do submit.
+ */
+function buildResolver(
+  identification: () => StudentIdentification | undefined
+): Resolver<CreateUserForm> {
+  const base = zodResolver(CreateUserSchema);
+  return async (values, context, options) => {
+    const result = await base(values, context, options);
+    const errors = { ...result.errors };
+    const mode = identification();
+
+    if (values.role === "student") {
+      if (registersCpf(mode) && !values.document?.trim()) {
+        errors.document = { type: "required", message: "Informe o CPF do aluno." };
+      }
+      if (registersEnrollmentCode(mode) && !values.enrollmentCode?.trim()) {
+        errors.enrollmentCode = { type: "required", message: "Informe a matrícula do aluno." };
+      }
+    }
+
+    if (Object.keys(errors).length > 0) return { values: {}, errors };
+    return result;
+  };
+}
+
 interface CreatedCredentials {
   name: string;
   email: string;
@@ -60,21 +94,43 @@ export default function UsersPage() {
   const [search, setSearch] = useState("");
   const [role, setRole] = useState("");
   const [status, setStatus] = useState("");
+  const [showInactive, setShowInactive] = useState(false);
   const debouncedSearch = useDebounced(search);
   const [creating, setCreating] = useState(false);
   const [credentials, setCredentials] = useState<CreatedCredentials | null>(null);
 
   const list = useQuery({
-    queryKey: ["users", { page, search: debouncedSearch, role, status }],
+    queryKey: ["users", { page, search: debouncedSearch, role, status, showInactive }],
     queryFn: () =>
       api.get<Paginated<User>>(
-        `/users${qs({ page, limit: 20, search: debouncedSearch, role, status })}`
+        `/users${qs({
+          page,
+          limit: 20,
+          search: debouncedSearch,
+          role,
+          status,
+          // Desativar é o "excluir" de usuário: fora da lista até pedirem
+          includeInactive: showInactive,
+        })}`
       ),
   });
 
-  const form = useForm<CreateUserForm>({ resolver: zodResolver(CreateUserSchema) });
+  const settings = useTenantSettings();
+  const identification = settings.data?.data.studentIdentification;
+  // O resolver é criado uma vez; o ref entrega sempre a política mais recente
+  const identificationRef = useRef(identification);
+  identificationRef.current = identification;
+
+  const form = useForm<CreateUserForm>({
+    resolver: buildResolver(() => identificationRef.current),
+  });
   const selectedRole = form.watch("role");
   const isStudent = selectedRole === "student";
+  const cpfRegistered = registersCpf(identification);
+  const codeRegistered = registersEnrollmentCode(identification);
+  // Aluno em instituição que não guarda CPF nem vê o campo; a equipe do
+  // painel continua com CPF opcional
+  const showDocument = !isStudent || cpfRegistered;
 
   const create = useMutation({
     mutationFn: (v: CreateUserForm) =>
@@ -82,7 +138,9 @@ export default function UsersPage() {
         name: v.name,
         email: v.email || undefined,
         role: v.role,
-        document: v.document || undefined,
+        // Instituição sem CPF de aluno não envia resquício de campo oculto
+        document:
+          v.role === "student" && !cpfRegistered ? undefined : v.document || undefined,
         enrollmentCode: v.role === "student" ? v.enrollmentCode || undefined : undefined,
       }),
     onSuccess: (res, variables) => {
@@ -147,12 +205,22 @@ export default function UsersPage() {
             setPage(1);
           }}
           placeholder="Todos os status"
+          // "Inativo" sai daqui: quem governa a visibilidade dos desativados é
+          // o interruptor ao lado — dois controles para a mesma coisa se
+          // contradiziam na tela
           options={[
             { value: "active", label: "Ativo" },
-            { value: "inactive", label: "Inativo" },
             { value: "pending", label: "Pendente" },
           ]}
           className="w-44"
+        />
+        <ShowInactiveToggle
+          checked={showInactive}
+          onChange={(next) => {
+            setShowInactive(next);
+            setPage(1);
+          }}
+          label="Mostrar inativos"
         />
       </div>
 
@@ -177,7 +245,7 @@ export default function UsersPage() {
               emptyDescription="Ajuste os filtros ou crie o primeiro usuário."
             />
             {list.data?.data.map((u) => (
-              <Tr key={u.id}>
+              <Tr key={u.id} className={u.status === "inactive" ? inactiveRowClass : undefined}>
                 <Td>
                   <Link href={`/dashboard/users/${u.id}`} className="flex items-center gap-3">
                     <UserAvatar
@@ -250,20 +318,24 @@ export default function UsersPage() {
               error={form.formState.errors.email?.message}
               {...form.register("email")}
             />
-            <Input
-              label="Documento (CPF)"
-              placeholder="000.000.000-00"
-              inputMode="numeric"
-              hint={isStudent ? "Usado no cadastro biométrico do totem." : undefined}
-              error={form.formState.errors.document?.message}
-              {...form.register("document", {
-                onChange: (e) => form.setValue("document", maskCpf(e.target.value)),
-              })}
-            />
+            {showDocument && (
+              <Input
+                label="Documento (CPF)"
+                placeholder="000.000.000-00"
+                inputMode="numeric"
+                required={isStudent && cpfRegistered}
+                hint={isStudent ? "Identifica o aluno no cadastro biométrico." : undefined}
+                error={form.formState.errors.document?.message}
+                {...form.register("document", {
+                  onChange: (e) => form.setValue("document", maskCpf(e.target.value)),
+                })}
+              />
+            )}
             {isStudent && (
               <Input
                 label="Código de matrícula"
-                className="sm:col-span-2"
+                className={showDocument ? "sm:col-span-2" : undefined}
+                required={codeRegistered}
                 hint="Usado para vincular o aluno às turmas e relatórios."
                 error={form.formState.errors.enrollmentCode?.message}
                 {...form.register("enrollmentCode")}

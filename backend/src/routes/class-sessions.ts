@@ -50,8 +50,9 @@ const READ_ROLES = ["admin", "manager", "teacher", "super_admin"];
 const ADMIN_ROLES = ["admin", "super_admin"];
 
 /**
- * Professores só operam as próprias sessões; admin/manager veem tudo.
- * Retorna false (e responde 403) quando o acesso é negado.
+ * Professores operam as sessões da disciplina em que estão alocados —
+ * quem divide a disciplina com o colega também assume a chamada dela;
+ * admin/manager veem tudo. Retorna false (e responde 403) quando negado.
  */
 async function assertSessionAccess(
   req: Request<{ id: string }>,
@@ -62,8 +63,12 @@ async function assertSessionAccess(
   if (ADMIN_ROLES.includes(role)) return true;
   if (!opts.write && role === "manager") return true;
   if (role === "teacher") {
-    const session = await classSessionsService.findById(req.params.id, tenantId);
-    if (session.teacherId === userId) return true;
+    const assigned = await classSessionsService.isAssignedTeacher(
+      req.params.id,
+      tenantId,
+      userId
+    );
+    if (assigned) return true;
   }
   res.status(403).json({ error: "Forbidden", code: "forbidden" });
   return false;

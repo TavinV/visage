@@ -5,6 +5,7 @@
 
 import { BaseService, ListParams, PaginatedResult } from "./base.service";
 import { NotFoundError, ConflictError } from "../utils/errors";
+import { auditService } from "./audit.service";
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -125,6 +126,18 @@ class ClassEnrollmentsService extends BaseService {
       },
     });
 
+    auditService.record({
+      action: "student.enrolled_in_class",
+      tenantId: input.tenantId,
+      // O alvo é a matrícula (par turma+aluno), não um dos dois isoladamente
+      targetId: `${input.classId}:${input.userId}`,
+      targetLabel: `${user.name} — ${classItem.name}`,
+      afterState: { classId: input.classId, userId: input.userId, enrolled: true },
+      changedFields: ["enrolled"],
+      details: `${user.name} matriculado(a) na turma "${classItem.name}"`,
+      metadata: { classId: input.classId, className: classItem.name, studentId: user.id },
+    });
+
     this.logger.info(
       { classId: input.classId, userId: input.userId, tenantId: input.tenantId },
       "Class enrollment created"
@@ -149,6 +162,23 @@ class ClassEnrollmentsService extends BaseService {
 
     await this.prisma.classEnrollment.delete({
       where: { classId_userId: { classId, userId } },
+    });
+
+    const student = await this.prisma.user.findFirst({
+      where: { id: userId, tenantId },
+      select: { name: true },
+    });
+
+    auditService.record({
+      action: "student.removed_from_class",
+      tenantId,
+      targetId: `${classId}:${userId}`,
+      targetLabel: `${student?.name ?? userId} — ${classItem.name}`,
+      beforeState: { classId, userId, enrolled: true },
+      afterState: { classId, userId, enrolled: false },
+      changedFields: ["enrolled"],
+      details: `${student?.name ?? userId} removido(a) da turma "${classItem.name}"`,
+      metadata: { classId, className: classItem.name, studentId: userId },
     });
 
     this.logger.info(

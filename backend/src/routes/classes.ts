@@ -14,12 +14,20 @@ const router = Router();
 
 // A turma é o grupo de alunos de um curso; a grade de disciplinas (cada uma
 // com professor e carga própria) vem junto na criação.
-const ClassSubjectSchema = z.object({
-  subjectId: z.string().uuid(),
-  teacherId: z.string().uuid(),
-  lessonsPerSession: z.number().int().min(1).max(12).optional(),
-  totalLessonsPlanned: z.number().int().min(0).max(1000).optional(),
-});
+const ClassSubjectSchema = z
+  .object({
+    subjectId: z.string().uuid(),
+    /** Responsável. Opcional quando `teacherIds` vem preenchido. */
+    teacherId: z.string().uuid().optional(),
+    /** Time da disciplina nesta turma — o primeiro vira o responsável. */
+    teacherIds: z.array(z.string().uuid()).min(1).max(20).optional(),
+    lessonsPerSession: z.number().int().min(1).max(12).optional(),
+    totalLessonsPlanned: z.number().int().min(0).max(1000).optional(),
+  })
+  .refine((v) => Boolean(v.teacherId ?? v.teacherIds?.length), {
+    message: "Informe ao menos um professor para a disciplina",
+    path: ["teacherIds"],
+  });
 
 const CreateClassSchema = z.object({
   courseId: z.string().uuid(),
@@ -122,8 +130,11 @@ router.get(
       }
 
       const result = await classesService.findById(req.params.id, tenantId);
-      // Professor enxerga a turma se leciona QUALQUER disciplina dela
-      if (role === "teacher" && !result.subjects.some((s) => s.teacherId === userId)) {
+      // Professor enxerga a turma se está alocado em QUALQUER disciplina dela
+      if (
+        role === "teacher" &&
+        !result.subjects.some((s) => s.teachers.some((t) => t.id === userId))
+      ) {
         res.status(403).json({ error: "Forbidden", code: "forbidden" });
         return;
       }

@@ -24,6 +24,7 @@ import { engineWarmCache } from "../lib/faceEngine";
 import { getTenantDekPayload, getCandidatesForClass } from "./facial-payload";
 import { lessonDurationToMinutes } from "./subjects.service";
 import { sseService } from "./sse.service";
+import { auditService } from "./audit.service";
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -176,7 +177,14 @@ class ClassSessionsService extends BaseService {
       ...(params.classSubjectId && { classSubjectId: params.classSubjectId }),
       ...(params.classId && { classSubject: { classId: params.classId } }),
       ...(params.status && { status: params.status }),
-      ...(params.teacherId && { teacherId: params.teacherId }),
+      // Quem divide a disciplina vê o histórico dela inteiro, não só as
+      // chamadas que abriu — é a mesma turma, a mesma frequência
+      ...(params.teacherId && {
+        OR: [
+          { teacherId: params.teacherId },
+          { classSubject: { teachers: { some: { teacherId: params.teacherId } } } },
+        ],
+      }),
     };
 
     const [sessions, total] = await this.prisma.$transaction([
@@ -196,6 +204,32 @@ class ClassSessionsService extends BaseService {
       page,
       limit
     );
+  }
+
+  /**
+   * O professor está alocado na disciplina desta sessão?
+   *
+   * Vale tanto para quem abriu a chamada quanto para quem divide a disciplina
+   * na turma — foi a secretaria que alocou os dois, então os dois respondem
+   * pela chamada (encerrar, ajustar presença, liberar saída).
+   */
+  async isAssignedTeacher(
+    sessionId: string,
+    tenantId: string,
+    userId: string
+  ): Promise<boolean> {
+    const found = await this.prisma.classSession.findFirst({
+      where: {
+        id: sessionId,
+        tenantId,
+        OR: [
+          { teacherId: userId },
+          { classSubject: { teachers: { some: { teacherId: userId } } } },
+        ],
+      },
+      select: { id: true },
+    });
+    return found !== null;
   }
 
   /**
@@ -228,6 +262,7 @@ class ClassSessionsService extends BaseService {
       where: { id: input.classSubjectId, tenantId: input.tenantId },
       include: {
         subject: { select: { name: true } },
+        teachers: { select: { teacherId: true } },
         class: {
           select: {
             id: true,
@@ -262,9 +297,13 @@ class ClassSessionsService extends BaseService {
       );
     }
 
-    // Professor abre só a própria disciplina; admin do tenant opera qualquer
-    // uma (cobre substituição sem precisar remexer na grade)
-    if (teacher.role === "teacher" && classSubject.teacherId !== teacher.id) {
+    // Professor abre a chamada de disciplina em que está alocado — o time
+    // inclui o responsável. Admin do tenant opera qualquer uma (cobre
+    // substituição sem precisar remexer na grade).
+    const allowedTeachers = classSubject.teachers.length
+      ? classSubject.teachers.map((t) => t.teacherId)
+      : [classSubject.teacherId];
+    if (teacher.role === "teacher" && !allowedTeachers.includes(teacher.id)) {
       throw new ValidationError(
         `${teacher.name} não leciona ${classSubject.subject.name} nesta turma`,
         "TEACHER_NOT_IN_SUBJECT"
@@ -345,6 +384,25 @@ class ClassSessionsService extends BaseService {
         scheduledEndsAt,
       },
       include: ClassSessionsService.INCLUDE,
+    });
+
+    auditService.record({
+      action: "session.opened",
+      tenantId: input.tenantId,
+      targetId: session.id,
+      targetLabel: this.sessionLabel(session),
+      afterState: {
+        status: "open",
+        startedAt: startedAt.toISOString(),
+        scheduledEndsAt: scheduledEndsAt.toISOString(),
+        classesWorth,
+      },
+      details: `Chamada aberta para ${this.sessionLabel(session)}`,
+      metadata: {
+        classSubjectId: input.classSubjectId,
+        teacherId: input.teacherId,
+        locationId: session.locationId ?? undefined,
+      },
     });
 
     this.logger.info(
@@ -570,12 +628,25 @@ class ClassSessionsService extends BaseService {
       );
     }
 
-    await this.prisma.classSession.update({
+    const updated = await this.prisma.classSession.update({
       where: { id },
       data: {
         ...(input.status && { status: input.status }),
         ...(startedAt && { startedAt, scheduledEndsAt }),
       },
+      include: ClassSessionsService.INCLUDE,
+    });
+
+    // Corrigir a hora de início desloca a janela inteira da aula e, com ela,
+    // quem entra como presente — mudança que precisa de rastro
+    auditService.recordChange({
+      action: "session.updated",
+      tenantId,
+      targetId: id,
+      targetLabel: this.sessionLabel(updated),
+      before: session,
+      after: updated,
+      fields: ["status", "startedAt", "scheduledEndsAt"],
     });
 
     this.logger.info({ sessionId: id, tenantId }, "Class session updated");
@@ -590,7 +661,16 @@ class ClassSessionsService extends BaseService {
   async cancel(id: string, tenantId: string): Promise<ClassSessionOutput> {
     const session = await this.prisma.classSession.findFirst({
       where: { id, tenantId },
-      include: { classSubject: { select: { classId: true, class: { select: { locationId: true } } } } },
+      include: {
+        classSubject: {
+          select: {
+            classId: true,
+            // subject/class name só para rotular o evento de auditoria
+            subject: { select: { name: true } },
+            class: { select: { name: true, locationId: true } },
+          },
+        },
+      },
     });
     if (!session) throw new NotFoundError("Class session not found");
     if (session.status !== "open") {
@@ -607,6 +687,19 @@ class ClassSessionsService extends BaseService {
       id,
       session.locationId ?? session.classSubject.class.locationId ?? undefined
     );
+
+    // Cancelar descarta a chamada sem consolidar faltas: o histórico de
+    // frequência daquela aula simplesmente não existe. Evento de atenção.
+    auditService.record({
+      action: "session.cancelled",
+      tenantId,
+      targetId: id,
+      targetLabel: this.sessionLabel(session),
+      beforeState: { status: "open" },
+      afterState: { status: "cancelled" },
+      changedFields: ["status"],
+      details: "Chamada cancelada — presenças registradas não contam para a frequência",
+    });
 
     this.logger.info({ sessionId: id, tenantId }, "Class session cancelled");
     return this.findById(id, tenantId);
@@ -628,7 +721,16 @@ class ClassSessionsService extends BaseService {
   ): Promise<ClassSessionOutput> {
     const session = await this.prisma.classSession.findFirst({
       where: { id, tenantId },
-      include: { classSubject: { select: { classId: true, class: { select: { locationId: true } } } } },
+      include: {
+        classSubject: {
+          select: {
+            classId: true,
+            // subject/class name só para rotular o evento de auditoria
+            subject: { select: { name: true } },
+            class: { select: { name: true, locationId: true } },
+          },
+        },
+      },
     });
     if (!session) throw new NotFoundError("Class session not found");
 
@@ -654,6 +756,22 @@ class ClassSessionsService extends BaseService {
       session.classesWorth,
       session.locationId ?? session.classSubject.class.locationId ?? undefined
     );
+
+    // O fechamento automático nasce do job, sem requisição HTTP: o ator sai
+    // como "sistema" e a chave distingue as duas origens no filtro
+    auditService.record({
+      action: opts.auto ? "session.auto_closed" : "session.closed",
+      tenantId,
+      targetId: id,
+      targetLabel: this.sessionLabel(session),
+      beforeState: { status: "open" },
+      afterState: { status: "closed", endedAt: endedAt.toISOString() },
+      changedFields: ["status", "endedAt"],
+      details: opts.auto
+        ? "Chamada encerrada automaticamente ao fim do horário previsto; ausentes consolidados"
+        : "Chamada encerrada; ausentes consolidados",
+      ...(opts.auto && { actor: { type: "system" as const, name: "Fechamento automático" } }),
+    });
 
     this.logger.info({ sessionId: id, tenantId, auto: opts.auto ?? false }, "Class session closed");
     return this.findById(id, tenantId);
@@ -943,6 +1061,28 @@ class ClassSessionsService extends BaseService {
       });
     }
 
+    // Sobrepor o reconhecimento facial à mão é exatamente o que uma auditoria
+    // de frequência vem procurar: quem marcou presença sem o aluno passar no
+    // totem, ou apagou uma presença que a engine registrou.
+    const student = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { name: true },
+    });
+
+    auditService.record({
+      action: "attendance.manual_override",
+      tenantId,
+      targetId: `${sessionId}:${userId}`,
+      targetLabel: student?.name,
+      beforeState: existing
+        ? { status: existing.status, recognizedByFace: existing.recognizedAt != null }
+        : { status: "sem registro", recognizedByFace: false },
+      afterState: { classesCounted: counted, of: session.classesWorth },
+      changedFields: ["classesCounted", "status"],
+      details: `Presença de ${student?.name ?? userId} ajustada manualmente para ${counted} de ${session.classesWorth} aula(s)`,
+      metadata: { sessionId, studentId: userId },
+    });
+
     this.logger.info(
       { sessionId, tenantId, userId, counted, adjustedById },
       "Attendance manually adjusted"
@@ -1010,6 +1150,17 @@ class ClassSessionsService extends BaseService {
       userId,
     });
 
+    auditService.record({
+      action: "attendance.checkout_released",
+      tenantId,
+      targetId: `${sessionId}:${userId}`,
+      targetLabel: await this.studentName(userId),
+      afterState: { checkoutReleased: true },
+      changedFields: ["checkoutReleased"],
+      details: `Saída antecipada liberada para ${await this.studentName(userId)}`,
+      metadata: { sessionId, studentId: userId },
+    });
+
     this.logger.info(
       { sessionId, tenantId, userId, releasedById },
       "Checkout released for student"
@@ -1052,8 +1203,42 @@ class ClassSessionsService extends BaseService {
       revoked: true,
     });
 
+    auditService.record({
+      action: "attendance.checkout_revoked",
+      tenantId,
+      targetId: `${sessionId}:${userId}`,
+      targetLabel: await this.studentName(userId),
+      beforeState: { checkoutReleased: true },
+      afterState: { checkoutReleased: false },
+      changedFields: ["checkoutReleased"],
+      details: `Liberação de saída revogada para ${await this.studentName(userId)}`,
+      metadata: { sessionId, studentId: userId },
+    });
+
     this.logger.info({ sessionId, tenantId, userId }, "Checkout release revoked");
     return this.rollcallStudent(sessionId, tenantId, userId);
+  }
+
+  /**
+   * Rótulo legível da chamada para a trilha ("Matemática — 3ºA"). Aceita tanto
+   * a sessão com INCLUDE quanto a versão crua, que não tem a turma junto.
+   */
+  private sessionLabel(session: {
+    classSubject?: { subject?: { name: string }; class?: { name: string } };
+  }): string | undefined {
+    const subject = session.classSubject?.subject?.name;
+    const className = session.classSubject?.class?.name;
+    if (subject && className) return `${subject} — ${className}`;
+    return subject ?? className;
+  }
+
+  /** Nome do aluno para rotular eventos de presença. */
+  private async studentName(userId: string): Promise<string | undefined> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { name: true },
+    });
+    return user?.name;
   }
 
   /** Um aluno específico da chamada, já com o estado mesclado. */
@@ -1075,7 +1260,16 @@ class ClassSessionsService extends BaseService {
   async listFrames(sessionId: string, tenantId: string): Promise<SessionFrameOutput[]> {
     const session = await this.prisma.classSession.findFirst({
       where: { id: sessionId, tenantId },
-      include: { classSubject: { select: { classId: true, class: { select: { locationId: true } } } } },
+      include: {
+        classSubject: {
+          select: {
+            classId: true,
+            // subject/class name só para rotular o evento de auditoria
+            subject: { select: { name: true } },
+            class: { select: { name: true, locationId: true } },
+          },
+        },
+      },
     });
     if (!session) throw new NotFoundError("Class session not found");
 

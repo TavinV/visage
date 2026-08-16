@@ -5,6 +5,39 @@
 
 import { BaseService } from "./base.service";
 import { NotFoundError } from "../utils/errors";
+import {
+  resolveIdentification,
+  type StudentIdentification,
+  type TotemIdentification,
+} from "../utils/identification";
+import { auditService } from "./audit.service";
+
+/**
+ * Todas as configurações operacionais entram na trilha — não há aqui nenhum
+ * campo cujo valor não importe para uma auditoria. `totemPanelPassword` é
+ * incluída de propósito: interessa saber QUE a senha do painel mudou, e o
+ * diff a redige antes de gravar.
+ */
+const AUDITED_SETTINGS_FIELDS = [
+  "recognitionThreshold",
+  "livenessThreshold",
+  "livenessEnabled",
+  "allowManualOverride",
+  "preAttendanceEnabled",
+  "preAttendanceWindowMin",
+  "individualCheckoutEnabled",
+  "saveFraudFrames",
+  "fraudRetentionHours",
+  "enrollmentTokenExpiryHours",
+  "requireConsentBeforeFacial",
+  "enrollmentMultiFrameCount",
+  "livenessThresholdEnrollment",
+  "totemPanelPassword",
+  "totemClockTimezone",
+  "studentIdentification",
+  "totemIdentification",
+  "validateCpf",
+] as const;
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -24,6 +57,9 @@ export interface UpdateTenantSettingsInput {
   livenessThresholdEnrollment?: number;
   totemPanelPassword?: string | null;
   totemClockTimezone?: string;
+  studentIdentification?: StudentIdentification;
+  totemIdentification?: TotemIdentification;
+  validateCpf?: boolean;
 }
 
 export interface TenantSettingsOutput {
@@ -43,6 +79,12 @@ export interface TenantSettingsOutput {
   livenessThresholdEnrollment: number;
   totemPanelPassword: string | null;
   totemClockTimezone: string;
+  /** Identificadores registrados no cadastro do aluno. */
+  studentIdentification: StudentIdentification;
+  /** O que o aluno digita no totem — já ajustado ao que é registrado. */
+  totemIdentification: TotemIdentification;
+  /** Confere os dígitos verificadores do CPF no cadastro. */
+  validateCpf: boolean;
   /** Logo da instituição já enviada — o painel decide se busca a imagem. */
   hasLogo: boolean;
   logoUpdatedAt?: Date;
@@ -78,7 +120,9 @@ class TenantSettingsService extends BaseService {
     const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId } });
     if (!tenant) throw new NotFoundError("Tenant not found");
 
-    await this.prisma.tenantSettings.update({
+    const before = await this.prisma.tenantSettings.findUnique({ where: { tenantId } });
+
+    const after = await this.prisma.tenantSettings.update({
       where: { tenantId },
       data: {
         ...(input.recognitionThreshold !== undefined && { recognitionThreshold: input.recognitionThreshold }),
@@ -96,7 +140,25 @@ class TenantSettingsService extends BaseService {
         ...(input.livenessThresholdEnrollment !== undefined && { livenessThresholdEnrollment: input.livenessThresholdEnrollment }),
         ...(input.totemPanelPassword !== undefined && { totemPanelPassword: input.totemPanelPassword }),
         ...(input.totemClockTimezone !== undefined && { totemClockTimezone: input.totemClockTimezone }),
+        ...(input.studentIdentification !== undefined && { studentIdentification: input.studentIdentification }),
+        ...(input.totemIdentification !== undefined && { totemIdentification: input.totemIdentification }),
+        ...(input.validateCpf !== undefined && { validateCpf: input.validateCpf }),
       },
+    });
+
+    // Aqui moram os parâmetros que definem o rigor do antifraude e a retenção
+    // de dados pessoais. Toda mudança guarda o valor exato de antes e depois —
+    // é o que permite explicar depois por que o reconhecimento passou a aceitar
+    // o que antes recusava. A senha do painel do totem é redigida pelo diff.
+    auditService.recordChange({
+      action: "settings.updated",
+      tenantId,
+      targetId: tenantId,
+      targetLabel: tenant.name,
+      before,
+      after,
+      fields: AUDITED_SETTINGS_FIELDS,
+      details: `Configurações de ${tenant.name} alteradas`,
     });
 
     this.logger.info({ tenantId }, "Tenant settings updated");
@@ -104,6 +166,9 @@ class TenantSettingsService extends BaseService {
   }
 
   private toOutput(settings: any, logoUpdatedAt: Date | null): TenantSettingsOutput {
+    // Sai já normalizada: o painel e o totem leem o modo efetivo, nunca uma
+    // combinação impossível (ex.: totem pedindo CPF numa escola sem CPF)
+    const identification = resolveIdentification(settings);
     return {
       tenantId: settings.tenantId,
       recognitionThreshold: settings.recognitionThreshold,
@@ -121,6 +186,9 @@ class TenantSettingsService extends BaseService {
       livenessThresholdEnrollment: settings.livenessThresholdEnrollment,
       totemPanelPassword: settings.totemPanelPassword ?? null,
       totemClockTimezone: settings.totemClockTimezone ?? "local",
+      studentIdentification: identification.studentIdentification,
+      totemIdentification: identification.totemIdentification,
+      validateCpf: identification.validateCpf,
       hasLogo: logoUpdatedAt != null,
       logoUpdatedAt: logoUpdatedAt ?? undefined,
       updatedAt: settings.updatedAt,

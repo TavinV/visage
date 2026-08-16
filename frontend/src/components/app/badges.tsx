@@ -48,13 +48,30 @@ export function ActiveBadge({ active }: { active: boolean }) {
   );
 }
 
-/** Status de recognition_logs: recognized | unknown | liveness_failed | screen_detected | error… */
+/**
+ * Status de recognition_logs. Os quatro primeiros são o que a engine grava
+ * hoje (ver recognition.service.ts); os demais são nomes antigos que ainda
+ * podem existir em linhas gravadas por versões anteriores.
+ */
+export const recognitionStatusOptions = [
+  { value: "identified", label: "Identificado" },
+  { value: "not_identified", label: "Não identificado" },
+  { value: "liveness_failed", label: "Vivacidade reprovada" },
+  { value: "no_face_detected", label: "Sem rosto na imagem" },
+  { value: "multiple_faces_detected", label: "Mais de um rosto" },
+];
+
 export function RecognitionStatusBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; variant: "success" | "warning" | "danger" | "neutral" }> = {
+    identified: { label: "Identificado", variant: "success" },
+    not_identified: { label: "Não identificado", variant: "warning" },
+    liveness_failed: { label: "Vivacidade reprovada", variant: "danger" },
+    no_face_detected: { label: "Sem rosto", variant: "neutral" },
+    multiple_faces_detected: { label: "Mais de um rosto", variant: "warning" },
+    // Legado
     recognized: { label: "Reconhecido", variant: "success" },
     unknown: { label: "Não identificado", variant: "neutral" },
     below_threshold: { label: "Abaixo do limiar", variant: "warning" },
-    liveness_failed: { label: "Falha de vivacidade", variant: "danger" },
     screen_detected: { label: "Tela detectada", variant: "danger" },
     no_face: { label: "Sem rosto", variant: "neutral" },
     error: { label: "Erro", variant: "danger" },

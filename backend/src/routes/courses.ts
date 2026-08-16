@@ -30,8 +30,26 @@ const UpdateCourseSchema = z.object({
   lessonDurationUnit: z.enum(["minutes", "hours"]).optional(),
 });
 
+// Grade do curso aplicada em lote nas turmas: mesmas disciplinas, professor
+// escolhido por disciplina (e ajustável depois, turma a turma)
+const ApplyCurriculumSchema = z.object({
+  classIds: z.array(z.string().uuid()).optional(),
+  subjects: z
+    .array(
+      z.object({
+        subjectId: z.string().uuid(),
+        teacherIds: z.array(z.string().uuid()).min(1).max(20),
+        lessonsPerSession: z.number().int().min(1).max(12).optional(),
+        totalLessonsPlanned: z.number().int().min(0).max(1000).optional(),
+      })
+    )
+    .min(1),
+  existing: z.enum(["skip", "sync", "replace"]).optional(),
+});
+
 type CreateCourseRequest = z.infer<typeof CreateCourseSchema>;
 type UpdateCourseRequest = z.infer<typeof UpdateCourseSchema>;
+type ApplyCurriculumRequest = z.infer<typeof ApplyCurriculumSchema>;
 
 /**
  * GET /courses
@@ -137,6 +155,42 @@ router.patch(
       }
 
       const result = await coursesService.update(req.params.id, tenantId, req.body);
+      res.json({ data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * POST /courses/:id/curriculum/apply
+ * Aplica a grade do curso nas turmas (secretaria).
+ *
+ * Body: { subjects: [{ subjectId, teacherIds, lessonsPerSession?,
+ * totalLessonsPlanned? }], classIds?, existing?: skip|sync|replace }
+ */
+router.post(
+  "/:id/curriculum/apply",
+  authenticate,
+  validate(ApplyCurriculumSchema),
+  async (
+    req: Request<{ id: string }, {}, ApplyCurriculumRequest>,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const { tenantId, role } = req.tenant!;
+
+      if (!["admin", "manager", "super_admin"].includes(role)) {
+        res.status(403).json({ error: "Forbidden", code: "forbidden" });
+        return;
+      }
+
+      const result = await coursesService.applyCurriculum(
+        req.params.id,
+        tenantId,
+        req.body
+      );
       res.json({ data: result });
     } catch (error) {
       next(error);

@@ -12,6 +12,7 @@ import crypto from "crypto";
 import { prisma } from "../lib/prisma";
 import { redis } from "../lib/redis";
 import { logger } from "../lib/logger";
+import { setActor } from "../lib/requestContext";
 import { DeviceContext } from "../types";
 
 declare global {
@@ -44,6 +45,7 @@ export function deviceAuth(req: Request, res: Response, next: NextFunction): voi
           tenantId: true,
           locationId: true,
           deviceFingerprint: true,
+          label: true,
           isActive: true,
         },
       });
@@ -88,6 +90,14 @@ export function deviceAuth(req: Request, res: Response, next: NextFunction): voi
         role: "device",
         email: "",
       };
+
+      // Ações originadas no totem entram na trilha como ator do tipo "device"
+      setActor({
+        actorType: "device",
+        tenantId: device.tenantId,
+        deviceId: device.id,
+        userName: device.label ?? device.deviceFingerprint,
+      });
 
       next();
     } catch (error) {

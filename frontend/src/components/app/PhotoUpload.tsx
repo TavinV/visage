@@ -4,62 +4,27 @@ import { useRef, useState } from "react";
 import { Camera, Trash2 } from "lucide-react";
 import { Button, Avatar, useToast } from "@/components/ui";
 import { cn } from "@/lib/cn";
-
-/** Lado máximo da imagem enviada — foto de perfil não precisa de mais. */
-const MAX_SIDE = 512;
-const JPEG_QUALITY = 0.85;
-
-/**
- * Redimensiona e recorta em quadrado no navegador antes de enviar.
- *
- * Sem isso, a foto de 8MP da câmera do celular subiria inteira: o backend
- * rejeita acima de 512KB e o usuário não teria como saber o motivo.
- */
-async function toSquareJpegBase64(file: File): Promise<string> {
-  const bitmap = await createImageBitmap(file);
-  const side = Math.min(bitmap.width, bitmap.height, MAX_SIDE);
-
-  const canvas = document.createElement("canvas");
-  canvas.width = side;
-  canvas.height = side;
-
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Não foi possível processar a imagem neste navegador.");
-
-  // Recorte central: retratos costumam ter o rosto no meio
-  const crop = Math.min(bitmap.width, bitmap.height);
-  ctx.drawImage(
-    bitmap,
-    (bitmap.width - crop) / 2,
-    (bitmap.height - crop) / 2,
-    crop,
-    crop,
-    0,
-    0,
-    side,
-    side
-  );
-  bitmap.close();
-
-  return canvas.toDataURL("image/jpeg", JPEG_QUALITY);
-}
+import { ImageCropper } from "./ImageCropper";
 
 interface PhotoUploadProps {
   /** Nome usado nas iniciais quando não há foto. */
   name: string;
   currentUrl: string | null;
   hasPhoto: boolean;
-  /** Recebe o data URL JPEG já redimensionado. */
+  /** Recebe o data URL JPEG já recortado e redimensionado. */
   onUpload: (imageB64: string) => Promise<unknown>;
   onRemove: () => Promise<unknown>;
   disabled?: boolean;
   shape?: "circle" | "square";
   hint?: string;
+  /** Título do recorte — a logo e a foto de perfil pedem textos diferentes. */
+  cropTitle?: string;
 }
 
 /**
- * Envio de foto de perfil / logo. O próprio usuário escolhe o arquivo; o
- * recorte e o resize acontecem aqui, antes de sair do navegador.
+ * Envio de foto de perfil / logo. O usuário escolhe o arquivo, enquadra no
+ * recorte e só então a imagem sai do navegador — já quadrada e reduzida, do
+ * tamanho que o backend aceita.
  */
 export function PhotoUpload({
   name,
@@ -70,33 +35,30 @@ export function PhotoUpload({
   disabled,
   shape = "circle",
   hint,
+  cropTitle,
 }: PhotoUploadProps) {
   const toast = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  // Arquivo aguardando enquadramento no modal de recorte
+  const [cropping, setCropping] = useState<File | null>(null);
   // Mostra a nova imagem antes do refetch da query terminar
   const [preview, setPreview] = useState<string | null>(null);
 
   const shown = preview ?? currentUrl;
 
-  const pick = async (file: File) => {
+  const pick = (file: File) => {
     if (!file.type.startsWith("image/")) {
       toast.error("Escolha um arquivo de imagem (JPEG ou PNG).");
       return;
     }
+    setCropping(file);
+  };
 
-    setBusy(true);
-    try {
-      const dataUrl = await toSquareJpegBase64(file);
-      await onUpload(dataUrl);
-      setPreview(dataUrl);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Falha ao enviar a imagem.");
-    } finally {
-      setBusy(false);
-      // Permite reescolher o mesmo arquivo depois de um erro
-      if (inputRef.current) inputRef.current.value = "";
-    }
+  const upload = async (dataUrl: string) => {
+    await onUpload(dataUrl);
+    setPreview(dataUrl);
+    setCropping(null);
   };
 
   const remove = async () => {
@@ -107,6 +69,11 @@ export function PhotoUpload({
     } finally {
       setBusy(false);
     }
+  };
+
+  /** Libera reescolher o mesmo arquivo depois de cancelar ou falhar. */
+  const resetInput = () => {
+    if (inputRef.current) inputRef.current.value = "";
   };
 
   return (
@@ -152,20 +119,36 @@ export function PhotoUpload({
           )}
         </div>
         <p className={cn("text-xs text-flauzino-slate-500")}>
-          {hint ?? "JPEG ou PNG. A imagem é recortada em quadrado e reduzida automaticamente."}
+          {hint ?? "JPEG ou PNG. Você escolhe o enquadramento antes de enviar."}
         </p>
       </div>
 
       <input
         ref={inputRef}
         type="file"
-        accept="image/jpeg,image/png"
+        accept="image/jpeg,image/png,image/webp"
         className="sr-only"
         onChange={(e) => {
           const file = e.target.files?.[0];
-          if (file) void pick(file);
+          if (file) pick(file);
         }}
       />
+
+      {cropping && (
+        <ImageCropper
+          file={cropping}
+          shape={shape}
+          title={cropTitle ?? "Ajustar imagem"}
+          onCancel={() => {
+            setCropping(null);
+            resetInput();
+          }}
+          onConfirm={async (dataUrl) => {
+            await upload(dataUrl);
+            resetInput();
+          }}
+        />
+      )}
     </div>
   );
 }

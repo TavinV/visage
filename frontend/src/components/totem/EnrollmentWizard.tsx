@@ -11,6 +11,7 @@ import {
   DeviceApiError,
   type EnrollmentLookup,
   type EnrollmentSessionInfo,
+  type TotemIdentification,
 } from "@/lib/deviceApi";
 import { EagleMark } from "@/components/ui/Logo";
 import { useTotemCamera } from "./useTotemCamera";
@@ -18,10 +19,10 @@ import { useFaceDetection } from "./useFaceDetection";
 import { useTotemSounds } from "./useTotemSounds";
 import { CaptureStage, type FramingHint } from "./CaptureStage";
 
-type Step = "cpf" | "confirm" | "terms" | "capture" | "done" | "refused";
+type Step = "identify" | "confirm" | "terms" | "capture" | "done" | "refused";
 
 const stepOrder: Array<{ key: Step; label: string; icon: LucideIcon }> = [
-  { key: "cpf", label: "Identificação", icon: IdCard },
+  { key: "identify", label: "Identificação", icon: IdCard },
   { key: "confirm", label: "Confirmação", icon: UserCheck },
   { key: "terms", label: "Consentimento", icon: ShieldCheck },
   { key: "capture", label: "Captura", icon: ScanFace },
@@ -37,7 +38,7 @@ const frameRejectionMessages: Record<string, string> = {
   no_face_detected: "Nenhum rosto encontrado. Centralize o rosto na guia.",
   multiple_faces_detected: "Mais de um rosto na imagem. Uma pessoa por vez.",
   low_detection_score: "Imagem pouco nítida. Ajuste a iluminação.",
-  liveness_failed: "A verificação de vivacidade reprovou a imagem. Evite fotos ou telas.",
+  liveness_failed: "Não conseguimos confirmar que é você ao vivo. Evite fotos ou telas.",
 };
 
 const facialStatusLabel: Record<string, string> = {
@@ -51,18 +52,47 @@ const facialStatusLabel: Record<string, string> = {
 /** Pausa após aceitar um frame — dá tempo do usuário ler a nova instrução. */
 const STEP_COOLDOWN_MS = 2300;
 
+/** Textos da primeira tela por tipo de identificador pedido pela instituição. */
+const identifyCopy: Record<
+  TotemIdentification,
+  { label: string; hint: string; placeholder: string }
+> = {
+  cpf: {
+    label: "CPF",
+    hint: "Digite o CPF informado na sua matrícula.",
+    placeholder: "000.000.000-00",
+  },
+  enrollment_code: {
+    label: "Matrícula",
+    hint: "Digite o número da sua matrícula na instituição.",
+    placeholder: "Ex.: 2026001234",
+  },
+  any: {
+    label: "CPF ou matrícula",
+    hint: "Digite o seu CPF ou o número da sua matrícula.",
+    placeholder: "CPF ou matrícula",
+  },
+};
+
 interface EnrollmentWizardProps {
+  /** O que este totem pede na identificação (vem de /device/context). */
+  identification: TotemIdentification;
   onExit: () => void;
 }
 
-export function EnrollmentWizard({ onExit }: EnrollmentWizardProps) {
+export function EnrollmentWizard({ identification, onExit }: EnrollmentWizardProps) {
   const reduceMotion = useReducedMotion();
   const { playSuccess, playError } = useTotemSounds();
   const camera = useTotemCamera();
   const faceDetection = useFaceDetection();
 
-  const [step, setStep] = useState<Step>("cpf");
-  const [cpf, setCpf] = useState("");
+  const copy = identifyCopy[identification] ?? identifyCopy.cpf;
+  // Máscara e teclado numérico só no modo CPF puro: matrícula pode ter letras,
+  // e no modo misto o aluno escolhe o que digitar
+  const cpfOnly = identification === "cpf";
+
+  const [step, setStep] = useState<Step>("identify");
+  const [identifier, setIdentifier] = useState("");
   const [lookup, setLookup] = useState<EnrollmentLookup | null>(null);
   const [session, setSession] = useState<EnrollmentSessionInfo | null>(null);
   const [busy, setBusy] = useState(false);
@@ -91,16 +121,19 @@ export function EnrollmentWizard({ onExit }: EnrollmentWizardProps) {
 
   // ── Passos 1–3 ───────────────────────────────────────────────────────────────
 
-  const submitCpf = async () => {
-    if (!isCompleteCpf(cpf) || busy) return;
+  // CPF só vale completo; matrícula não tem tamanho fixo entre instituições
+  const identifierReady = cpfOnly ? isCompleteCpf(identifier) : identifier.trim().length >= 3;
+
+  const submitIdentifier = async () => {
+    if (!identifierReady || busy) return;
     setBusy(true);
     setStepError(null);
     try {
-      const result = await deviceApi.enrollmentLookup(cpf);
+      const result = await deviceApi.enrollmentLookup(identifier.trim());
       setLookup(result);
       setStep("confirm");
     } catch (error) {
-      fail(error, "Não foi possível consultar o CPF. Tente novamente.");
+      fail(error, `Não foi possível consultar ${copy.label.toLowerCase()}. Tente novamente.`);
     } finally {
       setBusy(false);
     }
@@ -111,7 +144,7 @@ export function EnrollmentWizard({ onExit }: EnrollmentWizardProps) {
     setBusy(true);
     setStepError(null);
     try {
-      const result = await deviceApi.enrollmentStart(cpf);
+      const result = await deviceApi.enrollmentStart(identifier.trim());
       setSession(result);
       setStep(result.requiresConsent ? "terms" : "capture");
     } catch (error) {
@@ -236,7 +269,7 @@ export function EnrollmentWizard({ onExit }: EnrollmentWizardProps) {
         playError();
         setCaptureFeedback(
           frameRejectionMessages[result.reason ?? ""] ??
-            "Frame recusado. Ajuste a posição e tente de novo."
+            "Foto recusada. Ajuste a posição e tente de novo."
         );
       }
     } catch (error) {
@@ -245,7 +278,7 @@ export function EnrollmentWizard({ onExit }: EnrollmentWizardProps) {
       setCaptureFeedback(
         error instanceof DeviceApiError
           ? error.message
-          : "Falha ao enviar o frame. Verifique a conexão."
+          : "Falha ao enviar a foto. Verifique a conexão."
       );
     } finally {
       captureLoopBusy.current = false;
@@ -351,7 +384,7 @@ export function EnrollmentWizard({ onExit }: EnrollmentWizardProps) {
             transition={{ type: "spring", stiffness: 190, damping: 24 }}
             className="w-full"
           >
-            {step === "cpf" && (
+            {step === "identify" && (
               <div className="rounded-2xl border border-flauzino-slate-200 bg-white p-6 shadow-fl-lg md:p-10">
                 <p className="text-[11px] font-semibold uppercase tracking-eyebrow text-flauzino-accent-600">
                   Cadastro biométrico
@@ -359,26 +392,25 @@ export function EnrollmentWizard({ onExit }: EnrollmentWizardProps) {
                 <h2 className="mt-2 text-2xl font-semibold tracking-tight text-flauzino-navy-900 md:text-3xl">
                   Vamos te identificar
                 </h2>
-                <p className="mt-2 text-[15px] text-flauzino-slate-500">
-                  Digite o CPF informado na sua matrícula.
-                </p>
+                <p className="mt-2 text-[15px] text-flauzino-slate-500">{copy.hint}</p>
                 <form
                   className="mx-auto mt-7 flex max-w-sm flex-col"
                   onSubmit={(e) => {
                     e.preventDefault();
-                    void submitCpf();
+                    void submitIdentifier();
                   }}
                 >
                   <input
-                    value={cpf}
+                    value={identifier}
                     onChange={(e) => {
-                      setCpf(maskCpf(e.target.value));
+                      setIdentifier(cpfOnly ? maskCpf(e.target.value) : e.target.value);
                       setStepError(null);
                     }}
-                    placeholder="000.000.000-00"
-                    inputMode="numeric"
+                    placeholder={copy.placeholder}
+                    inputMode={cpfOnly ? "numeric" : "text"}
                     autoComplete="off"
-                    aria-label="CPF"
+                    autoCapitalize="characters"
+                    aria-label={copy.label}
                     className={cn(
                       "h-14 w-full rounded-xl border bg-white text-center font-mono-ds text-xl tracking-[0.05em] text-flauzino-navy-900 shadow-fl-inset transition-colors",
                       "placeholder:text-flauzino-slate-300 focus:border-flauzino-accent-500 focus:shadow-fl-focus focus:outline-none",
@@ -392,10 +424,10 @@ export function EnrollmentWizard({ onExit }: EnrollmentWizardProps) {
                   )}
                   <button
                     type="submit"
-                    disabled={!isCompleteCpf(cpf) || busy}
+                    disabled={!identifierReady || busy}
                     className={cn(
                       "mt-5 flex h-13 min-h-[52px] w-full items-center justify-center gap-2 rounded-xl text-base font-semibold text-white transition-colors",
-                      isCompleteCpf(cpf) && !busy
+                      identifierReady && !busy
                         ? "bg-flauzino-accent-600 shadow-fl-md hover:bg-flauzino-accent-700"
                         : "cursor-not-allowed bg-flauzino-slate-200 text-flauzino-slate-400"
                     )}
@@ -425,12 +457,14 @@ export function EnrollmentWizard({ onExit }: EnrollmentWizardProps) {
                       {lookup.name}
                     </dd>
                   </div>
-                  <div className="flex flex-col gap-0.5 px-5 py-3.5">
-                    <dt className="text-xs font-medium text-flauzino-slate-500">CPF</dt>
-                    <dd className="font-mono-ds text-[15px] text-flauzino-navy-900">
-                      {maskCpf(lookup.document)}
-                    </dd>
-                  </div>
+                  {lookup.document && (
+                    <div className="flex flex-col gap-0.5 px-5 py-3.5">
+                      <dt className="text-xs font-medium text-flauzino-slate-500">CPF</dt>
+                      <dd className="font-mono-ds text-[15px] text-flauzino-navy-900">
+                        {maskCpf(lookup.document)}
+                      </dd>
+                    </div>
+                  )}
                   {lookup.enrollmentCode && (
                     <div className="flex flex-col gap-0.5 px-5 py-3.5">
                       <dt className="text-xs font-medium text-flauzino-slate-500">Matrícula</dt>
@@ -465,8 +499,8 @@ export function EnrollmentWizard({ onExit }: EnrollmentWizardProps) {
                     type="button"
                     onClick={() => {
                       setLookup(null);
-                      setCpf("");
-                      setStep("cpf");
+                      setIdentifier("");
+                      setStep("identify");
                     }}
                     className="flex min-h-[52px] flex-1 items-center justify-center gap-2 rounded-xl border border-flauzino-slate-300 px-4 text-base font-semibold text-flauzino-slate-600 transition-colors hover:border-flauzino-slate-400 hover:bg-flauzino-slate-100"
                   >

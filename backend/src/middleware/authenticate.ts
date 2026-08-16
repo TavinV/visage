@@ -10,6 +10,7 @@ import { JWTPayload, TenantContext } from "../types";
 import { UnauthorizedError } from "../utils/errors";
 import { logger } from "../lib/logger";
 import { redis } from "../lib/redis";
+import { setActor } from "../lib/requestContext";
 
 // Estender Express Request
 declare global {
@@ -55,7 +56,18 @@ export function authenticate(
       userId: payload.sub,
       role: payload.role as any,
       email: payload.email,
+      sessionId: payload.sid,
     };
+
+    // A trilha de auditoria lê o ator daqui, sem precisar do req nos services
+    setActor({
+      actorType: "user",
+      tenantId: payload.tenantId,
+      userId: payload.sub,
+      userEmail: payload.email,
+      userRole: payload.role,
+      sessionId: payload.sid,
+    });
 
     next();
   } catch (error) {

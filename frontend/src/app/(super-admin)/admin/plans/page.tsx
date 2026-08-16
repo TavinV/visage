@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Plus, Pencil, Trash2 } from "lucide-react";
+import { Plus, Pencil, Trash2, RotateCcw } from "lucide-react";
 import { api, qs } from "@/lib/api";
 import type { Paginated, Plan } from "@/lib/types";
 import { formatCurrency, formatDate } from "@/lib/format";
@@ -27,6 +27,7 @@ import {
   useToast,
 } from "@/components/ui";
 import { ActiveBadge } from "@/components/app/badges";
+import { ShowInactiveToggle, inactiveRowClass } from "@/components/app/ShowInactive";
 
 const PlanSchema = z.object({
   name: z.string().min(2, "Informe o nome do plano."),
@@ -44,13 +45,16 @@ export default function PlansPage() {
   const queryClient = useQueryClient();
   const toast = useToast();
   const [page, setPage] = useState(1);
+  const [showInactive, setShowInactive] = useState(false);
   const [editing, setEditing] = useState<Plan | null>(null);
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState<Plan | null>(null);
 
   const list = useQuery({
-    queryKey: ["plans", { all: true, page }],
-    queryFn: () => api.get<Paginated<Plan>>(`/plans${qs({ all: true, page, limit: 20 })}`),
+    // ?all=true é o que traz os desativados — sem ele, só os planos à venda
+    queryKey: ["plans", { all: showInactive, page }],
+    queryFn: () =>
+      api.get<Paginated<Plan>>(`/plans${qs({ all: showInactive, page, limit: 20 })}`),
   });
 
   const form = useForm<PlanForm>({ resolver: zodResolver(PlanSchema) });
@@ -103,6 +107,15 @@ export default function PlansPage() {
     onError: (error) => toast.error(friendlyError(error)),
   });
 
+  const reactivate = useMutation({
+    mutationFn: (plan: Plan) => api.patch(`/plans/${plan.id}`, { isActive: true }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["plans"] });
+      toast.success("Plano reativado.");
+    },
+    onError: (error) => toast.error(friendlyError(error)),
+  });
+
   const modalOpen = creating || editing !== null;
 
   return (
@@ -116,6 +129,17 @@ export default function PlansPage() {
           </Button>
         }
       />
+
+      <div className="mb-4 flex flex-wrap items-end gap-3">
+        <ShowInactiveToggle
+          checked={showInactive}
+          onChange={(next) => {
+            setShowInactive(next);
+            setPage(1);
+          }}
+          label="Mostrar planos inativos"
+        />
+      </div>
 
       <Card>
         <Table>
@@ -135,11 +159,17 @@ export default function PlansPage() {
               loading={list.isPending}
               error={list.error ? friendlyError(list.error) : null}
               empty={list.data?.data.length === 0}
-              emptyTitle="Nenhum plano cadastrado."
-              emptyDescription="Crie o primeiro plano para liberar a criação de instituições."
+              emptyTitle={
+                showInactive ? "Nenhum plano cadastrado." : "Nenhum plano ativo."
+              }
+              emptyDescription={
+                showInactive
+                  ? "Crie o primeiro plano para liberar a criação de instituições."
+                  : "Crie um plano ou marque “Mostrar planos inativos” para ver os desativados."
+              }
             />
             {list.data?.data.map((plan) => (
-              <Tr key={plan.id}>
+              <Tr key={plan.id} className={plan.isActive ? undefined : inactiveRowClass}>
                 <Td className="font-medium text-flauzino-navy-900">{plan.name}</Td>
                 <Td className="font-mono-ds">{plan.maxClasses}</Td>
                 <Td className="font-mono-ds">{formatCurrency(plan.priceMonthly)}</Td>
@@ -150,15 +180,28 @@ export default function PlansPage() {
                     <Button variant="ghost" size="sm" onClick={() => openEdit(plan)} aria-label={`Editar ${plan.name}`}>
                       <Pencil size={15} />
                     </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setDeleting(plan)}
-                      disabled={!plan.isActive}
-                      aria-label={`Desativar ${plan.name}`}
-                    >
-                      <Trash2 size={15} />
-                    </Button>
+                    {plan.isActive ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setDeleting(plan)}
+                        title="Desativar"
+                        aria-label={`Desativar ${plan.name}`}
+                      >
+                        <Trash2 size={15} />
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => reactivate.mutate(plan)}
+                        loading={reactivate.isPending && reactivate.variables?.id === plan.id}
+                        title="Reativar"
+                        aria-label={`Reativar ${plan.name}`}
+                      >
+                        <RotateCcw size={15} />
+                      </Button>
+                    )}
                   </div>
                 </Td>
               </Tr>

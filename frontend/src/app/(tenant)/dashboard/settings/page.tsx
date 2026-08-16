@@ -6,6 +6,7 @@ import {
   ClipboardCheck,
   ShieldAlert,
   IdCard,
+  Fingerprint,
   MonitorSmartphone,
   Activity,
   Image as ImageIcon,
@@ -63,9 +64,29 @@ const SettingsSchema = z.object({
   livenessThresholdEnrollment: threshold("o limiar de vivacidade do cadastro"),
   totemPanelPassword: z.string().max(200, "Máximo de 200 caracteres.").optional().or(z.literal("")),
   totemClockTimezone: z.string(),
+  studentIdentification: z.enum(["cpf", "enrollment_code", "both"]),
+  totemIdentification: z.enum(["cpf", "enrollment_code", "any"]),
+  validateCpf: z.boolean(),
 });
 
 type SettingsForm = z.infer<typeof SettingsSchema>;
+
+const registeredLabel: Record<string, string> = {
+  cpf: "o CPF",
+  enrollment_code: "a matrícula interna",
+  both: "o CPF e a matrícula interna",
+};
+
+const totemLabel: Record<string, string> = {
+  cpf: "o CPF",
+  enrollment_code: "a matrícula",
+  any: "o CPF ou a matrícula",
+};
+
+/** Frase que traduz a combinação escolhida — evita interpretar dois selects. */
+function identificationSummary(student: string, totem: string): string {
+  return `Cada aluno é cadastrado com ${registeredLabel[student] ?? "o CPF"}. No totem, ele digita ${totemLabel[totem] ?? "o CPF"} para iniciar o cadastro biométrico.`;
+}
 
 const asNumber = {
   setValueAs: (v: unknown) => (v === "" || v === null || v === undefined ? undefined : Number(v)),
@@ -115,8 +136,26 @@ export default function SettingsPage() {
       livenessThresholdEnrollment: s.livenessThresholdEnrollment,
       totemPanelPassword: s.totemPanelPassword ?? "",
       totemClockTimezone: s.totemClockTimezone ?? "local",
+      studentIdentification: s.studentIdentification ?? "cpf",
+      totemIdentification: s.totemIdentification ?? "cpf",
+      validateCpf: s.validateCpf ?? true,
     });
   }, [settings.data, form]);
+
+  // O totem só pode pedir um identificador que a instituição registra —
+  // trocar o cadastro para "só matrícula" precisa arrastar o totem junto,
+  // senão o aluno chega numa tela pedindo um CPF que ninguém cadastrou
+  const studentIdentification = form.watch("studentIdentification");
+  useEffect(() => {
+    if (!studentIdentification) return;
+    const current = form.getValues("totemIdentification");
+    if (studentIdentification === "cpf" && current !== "cpf") {
+      form.setValue("totemIdentification", "cpf");
+    }
+    if (studentIdentification === "enrollment_code" && current !== "enrollment_code") {
+      form.setValue("totemIdentification", "enrollment_code");
+    }
+  }, [studentIdentification, form]);
 
   const save = useMutation({
     mutationFn: (v: SettingsForm) =>
@@ -178,7 +217,8 @@ export default function SettingsPage() {
               shape="square"
               currentUrl={logoUrl}
               hasPhoto={hasLogo}
-              hint="JPEG ou PNG, recortada em quadrado. Prefira fundo transparente ou branco."
+              cropTitle="Enquadrar a logo"
+              hint="JPEG ou PNG. Você enquadra a logo antes de enviar — dê zoom para fora se ela for larga."
               onUpload={async (imageB64) => {
                 await api.put("/tenant-settings/logo", { imageB64 });
                 await refreshLogo();
@@ -275,15 +315,15 @@ export default function SettingsPage() {
           />
           <CardBody className="flex flex-col gap-4">
             <Switch
-              label="Salvar frames de fraude"
+              label="Salvar fotos das tentativas de fraude"
               hint="Tentativas bloqueadas ficam disponíveis na auditoria."
               {...form.register("saveFraudFrames")}
             />
             <Input
-              label="Retenção dos frames (horas)"
+              label="Retenção das fotos (horas)"
               type="number"
               min={1}
-              hint="Após o prazo, os frames são apagados automaticamente."
+              hint="Após o prazo, as fotos são apagadas automaticamente."
               error={errors.fraudRetentionHours?.message}
               {...form.register("fraudRetentionHours", asNumber)}
             />
@@ -295,15 +335,67 @@ export default function SettingsPage() {
           </CardBody>
         </Card>
 
-        <Card>
+        <Card className="xl:col-span-2">
           <CardHeader
-            title="Cadastro biométrico"
-            description="Regras do fluxo de cadastro por CPF no totem."
+            title="Identificação do aluno"
+            description="O que a secretaria registra na ficha do aluno e o que ele digita no totem antes da biometria."
             icon={<IdCard size={18} strokeWidth={1.75} />}
           />
           <CardBody className="flex flex-col gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Select
+                label="Registrado no cadastro"
+                hint="Campos exigidos ao criar um aluno. Instituição que não quer guardar CPF trabalha só com a matrícula."
+                options={[
+                  { value: "cpf", label: "Somente CPF" },
+                  { value: "enrollment_code", label: "Somente matrícula" },
+                  { value: "both", label: "CPF e matrícula" },
+                ]}
+                error={errors.studentIdentification?.message}
+                {...form.register("studentIdentification")}
+              />
+              <Select
+                label="Digitado no totem"
+                hint="O que o aluno informa para se identificar antes da captura facial."
+                options={
+                  studentIdentification === "both"
+                    ? [
+                        { value: "cpf", label: "CPF" },
+                        { value: "enrollment_code", label: "Matrícula" },
+                        { value: "any", label: "CPF ou matrícula" },
+                      ]
+                    : studentIdentification === "enrollment_code"
+                      ? [{ value: "enrollment_code", label: "Matrícula" }]
+                      : [{ value: "cpf", label: "CPF" }]
+                }
+                error={errors.totemIdentification?.message}
+                {...form.register("totemIdentification")}
+              />
+            </div>
+            <p className="rounded-lg bg-flauzino-accent-50 px-4 py-3 text-[13px] leading-relaxed text-flauzino-slate-700">
+              {identificationSummary(
+                studentIdentification,
+                form.watch("totemIdentification")
+              )}
+            </p>
+            <Switch
+              label="Validar o CPF no cadastro"
+              hint="Confere os dígitos verificadores. Desligue para aceitar CPF fora do padrão da Receita — útil ao importar uma base antiga."
+              disabled={studentIdentification === "enrollment_code"}
+              {...form.register("validateCpf")}
+            />
+          </CardBody>
+        </Card>
+
+        <Card>
+          <CardHeader
+            title="Cadastro biométrico"
+            description="Regras da captura facial feita no totem."
+            icon={<Fingerprint size={18} strokeWidth={1.75} />}
+          />
+          <CardBody className="flex flex-col gap-4">
             <Input
-              label="Frames por cadastro"
+              label="Fotos por cadastro"
               type="number"
               min={1}
               hint="Quantidade de capturas usadas para gerar o cadastro facial final."

@@ -27,6 +27,7 @@ import {
   useToast,
 } from "@/components/ui";
 import { ActiveBadge } from "@/components/app/badges";
+import { ShowInactiveToggle, inactiveRowClass } from "@/components/app/ShowInactive";
 
 const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -48,14 +49,21 @@ export default function PeriodsPage() {
   const queryClient = useQueryClient();
   const toast = useToast();
   const [page, setPage] = useState(1);
+  const [showInactive, setShowInactive] = useState(false);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<AcademicPeriod | null>(null);
   const [deleting, setDeleting] = useState<AcademicPeriod | null>(null);
 
   const list = useQuery({
-    queryKey: ["academic-periods", { page }],
+    queryKey: ["academic-periods", { page, showInactive }],
     queryFn: () =>
-      api.get<Paginated<AcademicPeriod>>(`/academic-periods${qs({ page, limit: 20 })}`),
+      api.get<Paginated<AcademicPeriod>>(
+        `/academic-periods${qs({
+          page,
+          limit: 20,
+          isActive: showInactive ? undefined : true,
+        })}`
+      ),
   });
 
   const form = useForm<PeriodForm>({ resolver: zodResolver(PeriodSchema) });
@@ -120,6 +128,17 @@ export default function PeriodsPage() {
         }
       />
 
+      <div className="mb-4 flex flex-wrap items-end gap-3">
+        <ShowInactiveToggle
+          checked={showInactive}
+          onChange={(next) => {
+            setShowInactive(next);
+            setPage(1);
+          }}
+          label="Mostrar inativos"
+        />
+      </div>
+
       <Card>
         <Table>
           <thead>
@@ -137,11 +156,17 @@ export default function PeriodsPage() {
               loading={list.isPending}
               error={list.error ? friendlyError(list.error) : null}
               empty={list.data?.data.length === 0}
-              emptyTitle="Nenhum período cadastrado."
-              emptyDescription="Crie um período para poder cadastrar cursos e turmas."
+              emptyTitle={
+                showInactive ? "Nenhum período cadastrado." : "Nenhum período ativo."
+              }
+              emptyDescription={
+                showInactive
+                  ? "Crie um período para poder cadastrar cursos e turmas."
+                  : "Crie um período ou marque “Mostrar inativos” para ver os encerrados."
+              }
             />
             {list.data?.data.map((p) => (
-              <Tr key={p.id}>
+              <Tr key={p.id} className={p.isActive ? undefined : inactiveRowClass}>
                 <Td className="font-medium text-flauzino-navy-900">{p.name}</Td>
                 <Td className="font-mono-ds text-xs">{formatDateOnly(p.startsAt)}</Td>
                 <Td className="font-mono-ds text-xs">{formatDateOnly(p.endsAt)}</Td>

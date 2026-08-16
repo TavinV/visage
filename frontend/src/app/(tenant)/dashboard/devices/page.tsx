@@ -39,6 +39,7 @@ import {
   useToast,
 } from "@/components/ui";
 import { ActiveBadge } from "@/components/app/badges";
+import { ShowInactiveToggle, inactiveRowClass } from "@/components/app/ShowInactive";
 import { DeviceCalibrationModal } from "@/components/app/DeviceCalibrationModal";
 
 const DeviceSchema = z.object({
@@ -56,6 +57,7 @@ export default function DevicesPage() {
   const toast = useToast();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
+  const [showInactive, setShowInactive] = useState(false);
   const debouncedSearch = useDebounced(search);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Device | null>(null);
@@ -65,9 +67,17 @@ export default function DevicesPage() {
   const [createdKey, setCreatedKey] = useState<{ label: string; apiKey: string } | null>(null);
 
   const list = useQuery({
-    queryKey: ["devices", { page, search: debouncedSearch }],
+    queryKey: ["devices", { page, search: debouncedSearch, showInactive }],
     queryFn: () =>
-      api.get<Paginated<Device>>(`/devices${qs({ page, limit: 20, search: debouncedSearch })}`),
+      api.get<Paginated<Device>>(
+        `/devices${qs({
+          page,
+          limit: 20,
+          search: debouncedSearch,
+          // Sem o filtro, um totem desativado continua disputando a lista
+          isActive: showInactive ? undefined : true,
+        })}`
+      ),
   });
 
   const locations = useQuery({
@@ -75,8 +85,11 @@ export default function DevicesPage() {
     queryFn: () => api.get<Paginated<Location>>(`/locations${qs({ limit: 100 })}`),
   });
 
+  // Sala inativa não é oferecida em vínculo novo, mas continua no mapa: o
+  // totem já vinculado a ela precisa mostrar o nome, não um traço
   const locationOptions =
-    locations.data?.data.map((l) => ({ value: l.id, label: l.name })) ?? [];
+    locations.data?.data.filter((l) => l.isActive).map((l) => ({ value: l.id, label: l.name })) ??
+    [];
   const locationNameById = new Map(locations.data?.data.map((l) => [l.id, l.name]) ?? []);
 
   const form = useForm<DeviceForm>({ resolver: zodResolver(DeviceSchema) });
@@ -174,7 +187,7 @@ export default function DevicesPage() {
 
       <div className="mb-4">
         <Input
-          placeholder="Buscar por rótulo ou fingerprint"
+          placeholder="Buscar por rótulo ou identificador"
           icon={<Search size={15} />}
           value={search}
           onChange={(e) => {
@@ -182,6 +195,14 @@ export default function DevicesPage() {
             setPage(1);
           }}
           className="w-80"
+        />
+        <ShowInactiveToggle
+          checked={showInactive}
+          onChange={(next) => {
+            setShowInactive(next);
+            setPage(1);
+          }}
+          label="Mostrar inativos"
         />
       </div>
 
@@ -205,11 +226,17 @@ export default function DevicesPage() {
               loading={list.isPending}
               error={list.error ? friendlyError(list.error) : null}
               empty={list.data?.data.length === 0}
-              emptyTitle="Nenhum dispositivo registrado."
-              emptyDescription="Registre o primeiro totem para começar a reconhecer presenças."
+              emptyTitle={
+                showInactive ? "Nenhum dispositivo registrado." : "Nenhum dispositivo ativo."
+              }
+              emptyDescription={
+                showInactive
+                  ? "Registre o primeiro totem para começar a reconhecer presenças."
+                  : "Registre um totem ou marque “Mostrar inativos” para ver os desativados."
+              }
             />
             {list.data?.data.map((d) => (
-              <Tr key={d.id}>
+              <Tr key={d.id} className={d.isActive ? undefined : inactiveRowClass}>
                 <Td className="font-medium text-flauzino-navy-900">{d.label ?? "—"}</Td>
                 <Td className="font-mono-ds text-xs">{d.deviceFingerprint}</Td>
                 <Td>{d.locationId ? locationNameById.get(d.locationId) ?? "—" : "—"}</Td>
@@ -227,7 +254,7 @@ export default function DevicesPage() {
                         Própria
                       </Badge>
                       <span className="mt-0.5 font-mono-ds text-[11px] text-flauzino-slate-500">
-                        rec {d.calibration.effectiveRecognitionThreshold.toFixed(2)} · viv{" "}
+                        reconhec. {d.calibration.effectiveRecognitionThreshold.toFixed(2)} · vivacidade{" "}
                         {d.calibration.effectiveLivenessThreshold.toFixed(2)}
                       </span>
                     </span>
@@ -251,7 +278,7 @@ export default function DevicesPage() {
                     <Button variant="ghost" size="sm" onClick={() => openEdit(d)} aria-label={`Editar ${d.label ?? d.deviceFingerprint}`}>
                       <Pencil size={15} />
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => setRegenerating(d)} aria-label={`Regenerar chave de API de ${d.label ?? d.deviceFingerprint}`}>
+                    <Button variant="ghost" size="sm" onClick={() => setRegenerating(d)} aria-label={`Regenerar chave de acesso de ${d.label ?? d.deviceFingerprint}`}>
                       <KeyRound size={15} />
                     </Button>
                     <Button variant="ghost" size="sm" onClick={() => setDeleting(d)} aria-label={`Excluir ${d.label ?? d.deviceFingerprint}`}>
@@ -320,7 +347,7 @@ export default function DevicesPage() {
       <Modal
         open={createdKey !== null}
         onClose={() => setCreatedKey(null)}
-        title="Chave de API gerada"
+        title="Chave de acesso gerada"
         size="sm"
         footer={
           <Button variant="secondary" onClick={() => setCreatedKey(null)}>
@@ -333,9 +360,9 @@ export default function DevicesPage() {
             <div className="flex items-start gap-3 rounded-lg border border-flauzino-warning-600/30 bg-flauzino-warning-100 px-4 py-3">
               <AlertTriangle size={17} className="mt-0.5 shrink-0 text-flauzino-warning-600" />
               <p className="text-sm text-flauzino-slate-700">
-                Esta é a única vez que a chave de API de{" "}
+                Esta é a única vez que a chave de acesso de{" "}
                 <b className="font-semibold">{createdKey.label}</b> será exibida.
-                Copie e guarde em local seguro — ela autentica o totem no backend.
+                Copie e guarde em local seguro — é ela que autoriza o totem a se conectar.
               </p>
             </div>
             <div className="flex items-center gap-2 rounded-lg bg-flauzino-slate-100 px-3 py-2">
@@ -364,7 +391,7 @@ export default function DevicesPage() {
         onClose={() => setDeleting(null)}
         onConfirm={() => deleting && remove.mutate(deleting)}
         title="Excluir dispositivo"
-        description={`"${deleting?.label ?? deleting?.deviceFingerprint}" perderá o acesso imediatamente. A chave de API deixa de funcionar.`}
+        description={`"${deleting?.label ?? deleting?.deviceFingerprint}" perderá o acesso imediatamente. A chave dele deixa de funcionar.`}
         confirmLabel="Excluir dispositivo"
         danger
         loading={remove.isPending}
@@ -374,7 +401,7 @@ export default function DevicesPage() {
         open={regenerating !== null}
         onClose={() => setRegenerating(null)}
         onConfirm={() => regenerating && regenerateKey.mutate(regenerating)}
-        title="Regenerar chave de API"
+        title="Regenerar chave de acesso"
         description={`A chave atual de "${regenerating?.label ?? regenerating?.deviceFingerprint}" será invalidada imediatamente. Use isso se o totem perdeu a chave (ex.: após logout ou reset do aparelho) — será preciso configurar a nova chave no dispositivo antes que ele volte a funcionar.`}
         confirmLabel="Regenerar chave"
         danger

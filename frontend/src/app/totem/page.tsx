@@ -71,8 +71,8 @@ function resultFor(
     case "liveness_failed":
       return {
         kind: "error",
-        title: "Verificação de vivacidade reprovada",
-        message: "Use o próprio rosto — fotos e telas são bloqueadas pelo sistema.",
+        title: "Não conseguimos confirmar que é você",
+        message: "Use seu rosto ao vivo — fotos e telas não são aceitas.",
       };
     case "no_face_detected":
       return {
@@ -381,7 +381,12 @@ export default function TotemPage() {
 
       {/* Modo cadastro biométrico */}
       <AnimatePresence>
-        {mode === "enroll" && <EnrollmentWizard onExit={() => setMode("idle")} />}
+        {mode === "enroll" && (
+          <EnrollmentWizard
+            identification={context?.totemIdentification ?? "cpf"}
+            onExit={() => setMode("idle")}
+          />
+        )}
       </AnimatePresence>
 
       {/* Modo calibração (acionado pelo painel) */}

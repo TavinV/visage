@@ -9,6 +9,10 @@ import { profilePhotosService } from "../services/profile-photos.service";
 import { authenticate } from "../middleware/authenticate";
 import { validate } from "../middleware/validate";
 import { logger } from "../lib/logger";
+import {
+  STUDENT_IDENTIFICATION_VALUES,
+  TOTEM_IDENTIFICATION_VALUES,
+} from "../utils/identification";
 
 const router = Router();
 
@@ -31,6 +35,10 @@ const UpdateSettingsSchema = z.object({
   // Senha do painel do totem — template com {{data}}/{{hora}}; null desativa
   totemPanelPassword: z.string().max(200).nullable().optional(),
   totemClockTimezone: z.string().max(50).optional(),
+  // Identificação do aluno: o que a secretaria registra e o que o totem pede
+  studentIdentification: z.enum(STUDENT_IDENTIFICATION_VALUES).optional(),
+  totemIdentification: z.enum(TOTEM_IDENTIFICATION_VALUES).optional(),
+  validateCpf: z.boolean().optional(),
 });
 
 const LogoUploadSchema = z.object({

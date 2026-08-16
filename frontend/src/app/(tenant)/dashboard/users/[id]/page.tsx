@@ -24,6 +24,12 @@ import { friendlyError } from "@/lib/apiError";
 import { maskCpf } from "@/lib/masks";
 import { useAuthenticatedImage } from "@/lib/useAuthenticatedImage";
 import {
+  registersCpf,
+  registersEnrollmentCode,
+  totemIdentifierLabel,
+  useTenantSettings,
+} from "@/lib/identification";
+import {
   PageHeader,
   Card,
   CardHeader,
@@ -76,8 +82,15 @@ export default function UserDetailPage() {
     cacheKey: user.data?.data.photoUpdatedAt,
   });
 
+  const settings = useTenantSettings();
+  const identification = settings.data?.data.studentIdentification;
+  const cpfRegistered = registersCpf(identification);
+  const codeRegistered = registersEnrollmentCode(identification);
+
   const form = useForm<UpdateUserForm>({ resolver: zodResolver(UpdateUserSchema) });
   const selectedRole = form.watch("role");
+  const isStudentForm = selectedRole === "student";
+  const showDocument = !isStudentForm || cpfRegistered;
 
   useEffect(() => {
     const u = user.data?.data;
@@ -98,7 +111,9 @@ export default function UserDetailPage() {
         name: v.name,
         email: v.email || undefined,
         role: v.role,
-        document: v.document || null,
+        // Campo oculto (aluno em instituição sem CPF) não é enviado: omitir
+        // preserva o que já estava gravado em vez de apagá-lo
+        ...(showDocument && { document: v.document || null }),
         enrollmentCode: v.role === "student" ? v.enrollmentCode || null : null,
         status: v.status,
       }),
@@ -148,6 +163,18 @@ export default function UserDetailPage() {
 
   const u = user.data?.data;
   const isStudent = u?.role === "student";
+
+  // O que o aluno digita no totem — muda o texto e o valor exibidos no card
+  const totemMode = settings.data?.data.totemIdentification;
+  const totemIdentifier = totemIdentifierLabel(totemMode);
+  const totemValue =
+    totemMode === "enrollment_code"
+      ? u?.enrollmentCode
+      : u?.document
+        ? maskCpf(u.document)
+        : u?.enrollmentCode && totemMode === "any"
+          ? u.enrollmentCode
+          : undefined;
 
   if (user.isPending) {
     return (
@@ -252,18 +279,22 @@ export default function UserDetailPage() {
                   error={form.formState.errors.email?.message}
                   {...form.register("email")}
                 />
-                <Input
-                  label="Documento (CPF)"
-                  placeholder="000.000.000-00"
-                  inputMode="numeric"
-                  error={form.formState.errors.document?.message}
-                  {...form.register("document", {
-                    onChange: (e) => form.setValue("document", maskCpf(e.target.value)),
-                  })}
-                />
-                {selectedRole === "student" && (
+                {showDocument && (
+                  <Input
+                    label="Documento (CPF)"
+                    placeholder="000.000.000-00"
+                    inputMode="numeric"
+                    required={isStudentForm && cpfRegistered}
+                    error={form.formState.errors.document?.message}
+                    {...form.register("document", {
+                      onChange: (e) => form.setValue("document", maskCpf(e.target.value)),
+                    })}
+                  />
+                )}
+                {isStudentForm && (
                   <Input
                     label="Código de matrícula"
+                    required={codeRegistered}
                     error={form.formState.errors.enrollmentCode?.message}
                     {...form.register("enrollmentCode")}
                   />
@@ -294,21 +325,21 @@ export default function UserDetailPage() {
           <Card>
             <CardHeader
               title="Cadastro biométrico"
-              description="Feito diretamente no totem, com o CPF do aluno."
+              description={`Feito diretamente no totem, com ${totemIdentifier === "matrícula" ? "a" : "o"} ${totemIdentifier} do aluno.`}
               icon={<ScanFace size={18} strokeWidth={1.75} />}
             />
             <CardBody>
               <p className="text-sm leading-relaxed text-flauzino-slate-600">
                 Em qualquer totem com <b className="font-semibold">cadastro liberado</b>{" "}
                 (aba Dispositivos), o aluno toca em{" "}
-                <b className="font-semibold">Cadastrar biometria</b>, digita o CPF{" "}
-                {u.document ? (
+                <b className="font-semibold">Cadastrar biometria</b>, digita{" "}
+                {totemValue ? (
                   <code className="rounded bg-flauzino-slate-100 px-1.5 py-0.5 font-mono-ds text-xs">
-                    {maskCpf(u.document)}
+                    {totemValue}
                   </code>
                 ) : (
                   <span className="text-flauzino-warning-600">
-                    (ainda não cadastrado — preencha o CPF acima)
+                    {totemIdentifier} (ainda não cadastrada — preencha o campo acima)
                   </span>
                 )}{" "}
                 e segue as instruções na tela.
@@ -369,7 +400,7 @@ export default function UserDetailPage() {
                     Excluir dados biométricos
                   </p>
                   <p className="text-xs text-flauzino-slate-500">
-                    Apaga a biometria (cadastro facial e tokens de cadastro) em definitivo. O cadastro do
+                    Apaga a biometria (cadastro facial e QR Codes de cadastro) em definitivo. O cadastro do
                     usuário é mantido.
                   </p>
                 </div>
@@ -447,7 +478,7 @@ export default function UserDetailPage() {
         onClose={() => setConfirming(null)}
         onConfirm={() => eraseData.mutate()}
         title="Excluir dados biométricos"
-        description={`Exclusão definitiva da biometria de ${u.name} (cadastro facial e tokens de cadastro). O cadastro do usuário é mantido. Esta ação não pode ser desfeita.`}
+        description={`Exclusão definitiva da biometria de ${u.name} (cadastro facial e QR Codes de cadastro). O cadastro do usuário é mantido. Esta ação não pode ser desfeita.`}
         confirmLabel="Excluir definitivamente"
         danger
         loading={eraseData.isPending}

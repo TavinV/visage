@@ -22,9 +22,18 @@ const ValidateTokenSchema = z.object({
   token: z.string().min(16).max(128),
 });
 
-const DocumentSchema = z.object({
-  document: z.string().min(11).max(20),
-});
+// O totem envia `identifier` (CPF ou matrícula, conforme a instituição).
+// `document` é o nome antigo do campo — aceito para não quebrar totens que
+// ainda não recarregaram a página.
+const IdentifierSchema = z
+  .object({
+    identifier: z.string().min(3).max(50).optional(),
+    document: z.string().min(3).max(50).optional(),
+  })
+  .refine((v) => Boolean(v.identifier ?? v.document), {
+    message: "Informe o identificador do aluno",
+    path: ["identifier"],
+  });
 
 const SessionSchema = z.object({
   sessionId: z.string().length(32),
@@ -36,21 +45,23 @@ const FrameSchema = z.object({
 });
 
 type ValidateTokenRequest = z.infer<typeof ValidateTokenSchema>;
-type DocumentRequest = z.infer<typeof DocumentSchema>;
+type IdentifierRequest = z.infer<typeof IdentifierSchema>;
 type SessionRequest = z.infer<typeof SessionSchema>;
 type FrameRequest = z.infer<typeof FrameSchema>;
 
 /**
  * POST /enrollment/lookup
- * Confirmação de identidade pelo CPF digitado no totem (não abre sessão)
+ * Confirmação de identidade pelo CPF ou matrícula digitados no totem
+ * (não abre sessão)
  */
 router.post(
   "/lookup",
-  validate(DocumentSchema),
-  async (req: Request<{}, {}, DocumentRequest>, res: Response, next: NextFunction) => {
+  validate(IdentifierSchema),
+  async (req: Request<{}, {}, IdentifierRequest>, res: Response, next: NextFunction) => {
     try {
       const { tenantId, deviceId } = req.device!;
-      const result = await enrollmentService.lookupByDocument(tenantId, deviceId, req.body.document);
+      const identifier = (req.body.identifier ?? req.body.document) as string;
+      const result = await enrollmentService.lookupByIdentifier(tenantId, deviceId, identifier);
       res.json({ data: result });
     } catch (error) {
       next(error);
@@ -60,15 +71,16 @@ router.post(
 
 /**
  * POST /enrollment/start
- * Abre sessão de cadastro para o aluno confirmado pelo CPF
+ * Abre sessão de cadastro para o aluno confirmado
  */
 router.post(
   "/start",
-  validate(DocumentSchema),
-  async (req: Request<{}, {}, DocumentRequest>, res: Response, next: NextFunction) => {
+  validate(IdentifierSchema),
+  async (req: Request<{}, {}, IdentifierRequest>, res: Response, next: NextFunction) => {
     try {
       const { tenantId, deviceId } = req.device!;
-      const result = await enrollmentService.startByDocument(tenantId, deviceId, req.body.document);
+      const identifier = (req.body.identifier ?? req.body.document) as string;
+      const result = await enrollmentService.startByIdentifier(tenantId, deviceId, identifier);
       res.json({ data: result });
     } catch (error) {
       next(error);

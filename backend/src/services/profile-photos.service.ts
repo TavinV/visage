@@ -20,6 +20,7 @@ import { createReadStream, type ReadStream } from "fs";
 import { BaseService } from "./base.service";
 import { NotFoundError, ValidationError } from "../utils/errors";
 import { config } from "../lib/config";
+import { auditService } from "./audit.service";
 
 // ── Limites ──────────────────────────────────────────────────────────────────
 
@@ -47,7 +48,7 @@ class ProfilePhotosService extends BaseService {
   ): Promise<PhotoUploadResult> {
     const user = await this.prisma.user.findFirst({
       where: { id: userId, tenantId },
-      select: { id: true, role: true, photoPath: true },
+      select: { id: true, name: true, role: true, photoPath: true },
     });
     if (!user) throw new NotFoundError("Usuário não encontrado nesta instituição");
 
@@ -71,6 +72,15 @@ class ProfilePhotosService extends BaseService {
     await this.prisma.user.update({
       where: { id: userId },
       data: { photoPath: relativePath, photoUpdatedAt },
+    });
+
+    auditService.record({
+      action: "user.photo_updated",
+      tenantId,
+      targetId: userId,
+      targetLabel: user.name,
+      // A imagem em si nunca entra na trilha — só o fato e o tamanho
+      metadata: { bytes: buffer.length, format: extension },
     });
 
     this.logger.info({ tenantId, userId, bytes: buffer.length }, "User profile photo updated");
@@ -101,6 +111,13 @@ class ProfilePhotosService extends BaseService {
       data: { logoPath: relativePath, logoUpdatedAt },
     });
 
+    auditService.record({
+      action: "settings.logo_updated",
+      tenantId,
+      targetId: tenantId,
+      metadata: { bytes: buffer.length, format: extension },
+    });
+
     this.logger.info({ tenantId, bytes: buffer.length }, "Tenant logo updated");
     return { updatedAt: logoUpdatedAt };
   }
@@ -108,7 +125,7 @@ class ProfilePhotosService extends BaseService {
   async deleteUserPhoto(tenantId: string, userId: string): Promise<void> {
     const user = await this.prisma.user.findFirst({
       where: { id: userId, tenantId },
-      select: { id: true, photoPath: true },
+      select: { id: true, name: true, photoPath: true },
     });
     if (!user) throw new NotFoundError("Usuário não encontrado nesta instituição");
     if (!user.photoPath) return;
@@ -118,6 +135,14 @@ class ProfilePhotosService extends BaseService {
       where: { id: userId },
       data: { photoPath: null, photoUpdatedAt: null },
     });
+
+    auditService.record({
+      action: "user.photo_removed",
+      tenantId,
+      targetId: userId,
+      targetLabel: user.name,
+    });
+
     this.logger.info({ tenantId, userId }, "User profile photo removed");
   }
 

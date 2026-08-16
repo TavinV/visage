@@ -61,6 +61,13 @@ export const config = {
   // CORS
   corsOrigin: getEnv("CORS_ORIGIN", "http://localhost:3001").split(","),
 
+  // Proxies reversos à frente da API (Nginx, Cloudflare, load balancer). Define
+  // quantos hops do X-Forwarded-For o Express considera confiáveis para extrair
+  // o IP real do cliente — que é o que a auditoria registra em cada evento.
+  // 0 = sem proxy (padrão em dev). NÃO exagere: valor alto permite que o
+  // cliente forje o próprio IP injetando X-Forwarded-For.
+  trustProxy: parseInt(getEnv("TRUST_PROXY_HOPS", "0"), 10),
+
   // Fraud Frames
   fraudFramesStoragePath: getEnv("FRAUD_FRAMES_STORAGE_PATH", "./fraud_frames"),
   fraudRetentionHours: parseInt(getEnv("FRAUD_RETENTION_HOURS", "24"), 10),

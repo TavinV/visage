@@ -60,6 +60,7 @@ model Tenant {
   enrollmentTokens  EnrollmentToken[]
   biometricConsents BiometricConsent[]
   auditLogs         AuditLog[]
+  authSessions      AuthSession[]
 
   createdAt DateTime @default(now()) @db.Timestamptz()
   updatedAt DateTime @updatedAt @db.Timestamptz()
@@ -92,6 +93,20 @@ model TenantSettings {
   requireConsentBeforeFacial  Boolean @default(true) // bloqueia facial sem aceite LGPD
   enrollmentMultiFrameCount   Int     @default(3) // frames capturados no cadastro
   livenessThresholdEnrollment Float   @default(0.90) // threshold mais rigoroso no cadastro
+
+  // Identificação do aluno
+  // Quais identificadores a secretaria registra no cadastro do aluno:
+  // 'cpf' | 'enrollment_code' | 'both'. Instituição que não quer guardar CPF
+  // usa só a matrícula interna.
+  studentIdentification String  @default("cpf") @db.VarChar(20)
+  // O que o aluno digita no totem para se identificar antes da biometria:
+  // 'cpf' | 'enrollment_code' | 'any' (aceita os dois). Sempre um subconjunto
+  // do que é registrado — o service ajusta se a combinação for impossível.
+  totemIdentification   String  @default("cpf") @db.VarChar(20)
+  // Confere os dígitos verificadores do CPF ao cadastrar. Desligado, o CPF
+  // continua exigindo 11 dígitos, mas aceita números fora do padrão da Receita
+  // (útil em bases legadas com documentos digitados errado).
+  validateCpf           Boolean @default(true)
 
   // Totem
   // Template da senha do painel oculto do totem. Aceita {{data}} (DDMM) e
@@ -135,7 +150,10 @@ model User {
   passwordHash   String? @db.VarChar(255) // NULL para alunos sem acesso ao painel
   role           String  @db.VarChar(20) // 'super_admin' | 'admin' | 'manager' | 'teacher' | 'student'
   status         String  @default("active") @db.VarChar(20) // 'active' | 'inactive' | 'pending'
-  document       String? @db.VarChar(11) // CPF — apenas dígitos, sem pontuação
+  // CPF — sempre 11 dígitos, apenas números. Com tenant_settings.validate_cpf
+  // desligado o service não confere os dígitos verificadores (permite CPF de
+  // teste como 111.222.333-44), mas o formato continua sendo cobrado.
+  document       String? @db.VarChar(11)
   enrollmentCode String? @db.VarChar(50) // matrícula institucional (opcional)
 
   // Estado do cadastro biométrico (desnormalizado para queries rápidas)
@@ -153,26 +171,32 @@ model User {
 
   // Relations
   facialEmbeddings        FacialEmbedding[]
-  taughtClassSubjects     ClassSubject[]     @relation("TeacherClassSubjects")
-  createdClassSessions    ClassSession[]     @relation("CreatedBy")
-  taughtClassSessions     ClassSession[]     @relation("TeacherClass")
+  taughtClassSubjects     ClassSubject[]        @relation("TeacherClassSubjects")
+  classSubjectAssignments ClassSubjectTeacher[] @relation("ClassSubjectTeachers")
+  createdClassSessions    ClassSession[]        @relation("CreatedBy")
+  taughtClassSessions     ClassSession[]        @relation("TeacherClass")
   classEnrollments        ClassEnrollment[]
   attendanceRecords       AttendanceRecord[]
-  checkoutReleased        AttendanceRecord[] @relation("CheckoutReleasedBy")
-  adjustedRecords         AttendanceRecord[] @relation("AdjustedBy")
+  checkoutReleased        AttendanceRecord[]    @relation("CheckoutReleasedBy")
+  adjustedRecords         AttendanceRecord[]    @relation("AdjustedBy")
   preAttendances          PreAttendance[]
   recognitionLogs         RecognitionLog[]
-  enrollmentTokens        EnrollmentToken[]  @relation("UserEnrollmentTokens")
-  createdEnrollmentTokens EnrollmentToken[]  @relation("TokenCreatedBy")
-  biometricConsents       BiometricConsent[] @relation("UserBiometricConsents")
-  revokedConsents         BiometricConsent[] @relation("ConsentRevokedBy")
+  enrollmentTokens        EnrollmentToken[]     @relation("UserEnrollmentTokens")
+  createdEnrollmentTokens EnrollmentToken[]     @relation("TokenCreatedBy")
+  biometricConsents       BiometricConsent[]    @relation("UserBiometricConsents")
+  revokedConsents         BiometricConsent[]    @relation("ConsentRevokedBy")
 
-  createdAt DateTime   @default(now()) @db.Timestamptz()
-  updatedAt DateTime   @updatedAt @db.Timestamptz()
-  auditLogs AuditLog[]
+  createdAt    DateTime      @default(now()) @db.Timestamptz()
+  updatedAt    DateTime      @updatedAt @db.Timestamptz()
+  auditLogs    AuditLog[]
+  authSessions AuthSession[] @relation("UserAuthSessions")
 
   @@unique([tenantId, email])
   @@unique([tenantId, document])
+  // Busca do aluno pela matrícula no totem — sem unicidade no banco porque
+  // bases legadas costumam ter códigos repetidos; a duplicidade é barrada no
+  // cadastro (users.service) e tratada como ambígua na identificação.
+  @@index([tenantId, enrollmentCode])
   @@map("users")
 }
 
@@ -211,10 +235,10 @@ model Device {
   locationId        String?
   location          Location? @relation(fields: [locationId], references: [id])
 
-  isActive   Boolean   @default(true)
+  isActive        Boolean   @default(true)
   // Libera o fluxo de cadastro biométrico por CPF na tela deste totem
-  allowEnrollment Boolean @default(false)
-  lastSeenAt DateTime? @db.Timestamptz()
+  allowEnrollment Boolean   @default(false)
+  lastSeenAt      DateTime? @db.Timestamptz()
 
   // Calibração por totem — câmera, iluminação e ângulo variam de sala para
   // sala. NULL herda o valor do tenant; preenchido, sobrepõe o tenant.
@@ -226,6 +250,7 @@ model Device {
   calibrationSourceId  String?   @db.VarChar(36)
 
   recognitionLogs RecognitionLog[]
+  auditLogs       AuditLog[]
 
   createdAt DateTime @default(now()) @db.Timestamptz()
 
@@ -321,6 +346,11 @@ model Subject {
 
   isActive Boolean @default(true)
 
+  // Carga padrão do currículo: o que a secretaria usa ao aplicar a grade do
+  // curso nas turmas. Cada turma pode divergir depois, em ClassSubject.
+  defaultLessonsPerSession   Int @default(1)
+  defaultTotalLessonsPlanned Int @default(0)
+
   classSubjects ClassSubject[]
 
   createdAt DateTime @default(now()) @db.Timestamptz()
@@ -370,9 +400,15 @@ model ClassSubject {
   subjectId String
   subject   Subject @relation(fields: [subjectId], references: [id])
 
-  /// Professor desta disciplina NESTA turma.
+  /// Professor RESPONSÁVEL por esta disciplina nesta turma — o nome que
+  /// aparece em relatórios e o padrão ao abrir a chamada. O time completo
+  /// (inclusive ele) vive em `teachers`: uma disciplina pode ser dividida
+  /// entre vários professores.
   teacherId String
   teacher   User   @relation("TeacherClassSubjects", fields: [teacherId], references: [id])
+
+  /// Todos os professores habilitados a dar aula desta disciplina na turma.
+  teachers ClassSubjectTeacher[]
 
   /// Aulas seguidas que uma chamada desta disciplina ocupa (geminada = 2).
   /// Base do classesWorth da sessão e do fechamento automático.
@@ -390,6 +426,28 @@ model ClassSubject {
   @@unique([classId, subjectId])
   @@index([tenantId, teacherId])
   @@map("class_subjects")
+}
+
+/// Professor alocado a uma disciplina de uma turma.
+///
+/// Existe porque uma disciplina pode ser dividida entre vários professores
+/// (teoria e laboratório, docente e monitor, revezamento por bimestre) e todos
+/// precisam poder abrir a chamada dela.
+model ClassSubjectTeacher {
+  classSubjectId String
+  classSubject   ClassSubject @relation(fields: [classSubjectId], references: [id], onDelete: Cascade)
+
+  teacherId String
+  teacher   User   @relation("ClassSubjectTeachers", fields: [teacherId], references: [id], onDelete: Cascade)
+
+  /// Espelha ClassSubject.teacherId — exatamente um por disciplina da turma.
+  isPrimary Boolean @default(false)
+
+  createdAt DateTime @default(now()) @db.Timestamptz()
+
+  @@id([classSubjectId, teacherId])
+  @@index([teacherId])
+  @@map("class_subject_teachers")
 }
 
 model ClassEnrollment {
@@ -585,17 +643,113 @@ model AuditCleanupLog {
   @@map("audit_cleanup_logs")
 }
 
+/// Sessão de acesso ao console — nasce no login e morre no logout/expiração.
+/// Existe para responder "o que este professor fez enquanto esteve logado":
+/// todo AuditLog gravado durante a sessão aponta para cá via sessionId.
+model AuthSession {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// Null depois que o usuário é excluído — o registro do login permanece,
+  /// identificado só pelo snapshot abaixo. Apagar a sessão junto com a conta
+  /// levaria embora a linha do tempo do que aquela pessoa fez, que é
+  /// exatamente o que a auditoria existe para preservar.
+  userId   String?
+  user     User?  @relation("UserAuthSessions", fields: [userId], references: [id], onDelete: SetNull)
+
+  // Snapshot do ator no momento do login — sobrevive a renomeações e exclusões
+  userName  String  @db.VarChar(200)
+  userEmail String? @db.VarChar(200)
+  userRole  String  @db.VarChar(20)
+
+  ipAddress String? @db.VarChar(45) // IPv4 ou IPv6
+  userAgent String? @db.VarChar(500)
+
+  loginAt    DateTime  @default(now()) @db.Timestamptz()
+  lastSeenAt DateTime  @default(now()) @db.Timestamptz()
+  endedAt    DateTime? @db.Timestamptz()
+  /// 'logout' | 'expired' | 'revoked' — null enquanto a sessão está aberta
+  endReason  String?   @db.VarChar(20)
+
+  auditLogs AuditLog[]
+
+  @@index([tenantId, loginAt(sort: Desc)])
+  @@index([tenantId, userId, loginAt(sort: Desc)])
+  @@map("auth_sessions")
+}
+
+/// Trilha de auditoria da plataforma. Uma linha por ação relevante, com quem
+/// fez, de onde, quando, sobre o quê e — em mudanças — o estado antes e depois.
+///
+/// RULE: nunca gravar segredo em beforeState/afterState. O diff passa por
+/// redactSensitive() (utils/diff.ts), que troca senha/hash/apiKey/embedding por
+/// "[redigido]". Linhas de auditoria são imutáveis: só INSERT e SELECT.
 model AuditLog {
-  id        String   @id @default(uuid())
-  tenantId  String
-  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  userId    String?
-  user      User?    @relation(fields: [userId], references: [id])
-  action    String   @db.VarChar(100)
-  details   String?  @db.Text
+  id       String  @id @default(uuid())
+  /// Null em eventos que ainda não têm instituição (ex.: login falho de e-mail
+  /// desconhecido). Só o super_admin enxerga esses.
+  tenantId String?
+  tenant   Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // ── Ator ────────────────────────────────────────────────────────────────
+  /// Quem executou. Null quando o ator é um totem, o sistema ou um anônimo.
+  userId     String?
+  user       User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  /// 'user' | 'device' | 'system' | 'anonymous'
+  actorType  String       @default("user") @db.VarChar(20)
+  /// Snapshot — a trilha continua legível depois que o usuário some
+  actorName  String?      @db.VarChar(200)
+  actorEmail String?      @db.VarChar(200)
+  actorRole  String?      @db.VarChar(20)
+  sessionId  String?
+  session    AuthSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  /// Totem que originou a ação, quando actorType = 'device'
+  deviceId   String?
+  device     Device?      @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  // ── Evento ──────────────────────────────────────────────────────────────
+  /// Chave do catálogo em lib/auditEvents.ts (ex.: 'device.created')
+  action   String @db.VarChar(100)
+  /// 'auth' | 'user' | 'student' | 'device' | 'consent' | 'data' | 'academic' |
+  /// 'attendance' | 'settings' | 'tenant'
+  category String @default("system") @db.VarChar(30)
+  /// 'info' | 'warning' | 'critical'
+  severity String @default("info") @db.VarChar(10)
+  /// 'success' | 'failure'
+  status   String @default("success") @db.VarChar(10)
+
+  // ── Alvo ────────────────────────────────────────────────────────────────
+  targetType  String? @db.VarChar(40) // 'user' | 'device' | 'class' | ...
+  targetId    String?
+  /// Nome legível do alvo no momento da ação (o registro pode nem existir mais)
+  targetLabel String? @db.VarChar(200)
+
+  // ── Mudança ─────────────────────────────────────────────────────────────
+  beforeState   Json?
+  afterState    Json?
+  /// Campos que mudaram — permite filtrar "quem mexeu no limiar" sem varrer JSON
+  changedFields String[] @default([])
+
+  // ── Origem ──────────────────────────────────────────────────────────────
+  ipAddress     String? @db.VarChar(45)
+  userAgent     String? @db.VarChar(500)
+  requestMethod String? @db.VarChar(10)
+  requestPath   String? @db.VarChar(200)
+
+  /// Texto livre legível (mantido dos registros antigos)
+  details  String? @db.Text
+  /// Contexto extra específico do evento (motivo, contadores, etc.)
+  metadata Json?
+
   createdAt DateTime @default(now()) @db.Timestamptz()
 
   @@index([tenantId, createdAt(sort: Desc)])
+  @@index([tenantId, action, createdAt(sort: Desc)])
+  @@index([tenantId, category, createdAt(sort: Desc)])
+  @@index([tenantId, userId, createdAt(sort: Desc)])
+  @@index([sessionId, createdAt])
+  @@index([targetType, targetId, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
   @@map("audit_logs")
 }
 

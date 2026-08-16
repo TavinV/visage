@@ -15,6 +15,7 @@ import { sseService } from "../services/sse.service";
 import { deviceAuth } from "../middleware/deviceAuth";
 import { validate } from "../middleware/validate";
 import { prisma } from "../lib/prisma";
+import { resolveIdentification } from "../utils/identification";
 import {
   createDeviceRecognizeLimiter,
   createDeviceHeartbeatLimiter,
@@ -73,13 +74,22 @@ export default function createDeviceRouter(): Router {
           prisma.tenant.findUnique({ where: { id: tenantId }, select: { name: true } }),
           prisma.tenantSettings.findUnique({
             where: { tenantId },
-            select: { totemPanelPassword: true, totemClockTimezone: true },
+            select: {
+              totemPanelPassword: true,
+              totemClockTimezone: true,
+              studentIdentification: true,
+              totemIdentification: true,
+            },
           }),
           prisma.device.findUnique({
             where: { id: deviceId },
             select: { label: true, allowEnrollment: true },
           }),
         ]);
+        // O totem monta a tela de identificação a partir daqui: rótulo,
+        // máscara e teclado mudam entre CPF e matrícula
+        const identification = resolveIdentification(settings);
+
         res.json({
           data: {
             tenantName: tenant?.name ?? "",
@@ -87,6 +97,7 @@ export default function createDeviceRouter(): Router {
             clockTimezone: settings?.totemClockTimezone ?? "local",
             panelPassword: settings?.totemPanelPassword ?? null,
             allowEnrollment: device?.allowEnrollment ?? false,
+            totemIdentification: identification.totemIdentification,
           },
         });
       } catch (error) {

@@ -11,10 +11,10 @@ import { cn } from "@/lib/cn";
 import { Modal, Button, Input, Select, Field, useToast } from "@/components/ui";
 import { TeacherPicker } from "@/components/app/TeacherPicker";
 
-/** Linha da grade em construção. */
+/** Linha da grade em construção. O primeiro professor é o responsável. */
 interface GradeRow {
   subjectId: string;
-  teacherId: string;
+  teacherIds: string[];
   lessonsPerSession: number;
   totalLessonsPlanned: number;
 }
@@ -45,7 +45,8 @@ export function ClassWizard({ editing, onClose }: ClassWizardProps) {
   const [grade, setGrade] = useState<GradeRow[]>(
     editing?.subjects.map((s) => ({
       subjectId: s.subjectId,
-      teacherId: s.teacherId,
+      // Responsável primeiro — é ele que o backend grava em teacherId
+      teacherIds: s.teachers?.length ? s.teachers.map((t) => t.id) : [s.teacherId],
       lessonsPerSession: s.lessonsPerSession,
       totalLessonsPlanned: s.totalLessonsPlanned,
     })) ?? []
@@ -77,6 +78,8 @@ export function ClassWizard({ editing, onClose }: ClassWizardProps) {
 
   const course = courses.data?.data.find((c) => c.id === courseId);
   const catalog = subjects.data?.data ?? [];
+  const teacherName = (id: string) =>
+    teachers.data?.data.find((t) => t.id === id)?.name ?? "O primeiro escolhido";
 
   // Trocar de curso invalida a grade: as disciplinas são de outro currículo
   useEffect(() => {
@@ -92,7 +95,18 @@ export function ClassWizard({ editing, onClose }: ClassWizardProps) {
     setGrade((prev) =>
       prev.some((r) => r.subjectId === subjectId)
         ? prev.filter((r) => r.subjectId !== subjectId)
-        : [...prev, { subjectId, teacherId: "", lessonsPerSession: 1, totalLessonsPlanned: 0 }]
+        : [
+            ...prev,
+            {
+              subjectId,
+              teacherIds: [],
+              // A carga do currículo é o ponto de partida da turma
+              lessonsPerSession:
+                catalog.find((s) => s.id === subjectId)?.defaultLessonsPerSession ?? 1,
+              totalLessonsPlanned:
+                catalog.find((s) => s.id === subjectId)?.defaultTotalLessonsPlanned ?? 0,
+            },
+          ]
     );
   };
 
@@ -129,7 +143,7 @@ export function ClassWizard({ editing, onClose }: ClassWizardProps) {
 
   const submit = () => {
     if (grade.length === 0) return setStepError("Escolha ao menos uma disciplina.");
-    const semProfessor = grade.filter((r) => !r.teacherId);
+    const semProfessor = grade.filter((r) => r.teacherIds.length === 0);
     if (semProfessor.length > 0) {
       const nomes = semProfessor
         .map((r) => catalog.find((s) => s.id === r.subjectId)?.name ?? "disciplina")
@@ -332,13 +346,17 @@ export function ClassWizard({ editing, onClose }: ClassWizardProps) {
                     {chosen && (
                       <div className="flex flex-col gap-3 border-t border-flauzino-slate-200 px-3 py-3">
                         <TeacherPicker
-                          label="Professor"
+                          label="Professores"
                           required
-                          single
+                          hint={
+                            row.teacherIds.length > 1
+                              ? `${teacherName(row.teacherIds[0])} responde pela disciplina; os demais também abrem chamada.`
+                              : "Pode alocar mais de um — todos abrem a chamada desta disciplina."
+                          }
                           teachers={teachers.data?.data ?? []}
                           loading={teachers.isPending}
-                          value={row.teacherId ? [row.teacherId] : []}
-                          onChange={(ids) => patchRow(s.id, { teacherId: ids[0] ?? "" })}
+                          value={row.teacherIds}
+                          onChange={(ids) => patchRow(s.id, { teacherIds: ids })}
                         />
                         <div className="flex gap-3">
                           <Field label="Aulas por chamada" className="w-40">

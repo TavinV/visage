@@ -80,19 +80,25 @@ export interface CurrentSession {
   scheduledEndsAt?: string;
 }
 
+/** O que o aluno digita no totem — definido em Configurações. */
+export type TotemIdentification = "cpf" | "enrollment_code" | "any";
+
 export interface DeviceContext {
   tenantName: string;
   deviceLabel: string | null;
   clockTimezone: string;
   /** Template da senha do painel oculto ({{data}}/{{hora}}) ou null. */
   panelPassword: string | null;
-  /** Cadastro biométrico por CPF liberado para este totem no painel. */
+  /** Cadastro biométrico liberado para este totem no painel. */
   allowEnrollment: boolean;
+  /** Identificador pedido na primeira tela do cadastro. */
+  totemIdentification: TotemIdentification;
 }
 
 export interface EnrollmentLookup {
   name: string;
-  document: string;
+  /** Ausente quando a instituição não registra CPF. */
+  document?: string;
   enrollmentCode?: string;
   facialStatus: string;
 }
@@ -155,18 +161,18 @@ export const deviceApi = {
   /** Também serve como "testar conexão" ao salvar a chave. */
   heartbeat: () => deviceFetch<{ data: { ok: boolean } }>("/device/heartbeat").then((r) => r.data),
 
-  // ── Cadastro biométrico por CPF ────────────────────────────────────────────
+  // ── Cadastro biométrico por CPF ou matrícula ───────────────────────────────
 
-  enrollmentLookup: (document: string) =>
+  enrollmentLookup: (identifier: string) =>
     deviceFetch<{ data: EnrollmentLookup }>("/enrollment/lookup", {
       method: "POST",
-      body: JSON.stringify({ document }),
+      body: JSON.stringify({ identifier }),
     }).then((r) => r.data),
 
-  enrollmentStart: (document: string) =>
+  enrollmentStart: (identifier: string) =>
     deviceFetch<{ data: EnrollmentSessionInfo }>("/enrollment/start", {
       method: "POST",
-      body: JSON.stringify({ document }),
+      body: JSON.stringify({ identifier }),
     }).then((r) => r.data),
 
   enrollmentConsent: (sessionId: string) =>

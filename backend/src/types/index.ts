@@ -58,6 +58,8 @@ export interface TenantContext {
   userId: string;
   role: "super_admin" | "admin" | "manager" | "teacher" | "student" | "device";
   email: string;
+  /** auth_sessions.id da sessão de login que emitiu o token (claim `sid`). */
+  sessionId?: string;
 }
 
 // ── Contexto de dispositivo (totem) autenticado via X-Device-Key ───────────
@@ -74,6 +76,9 @@ export interface JWTPayload {
   tenantId: string;
   role: string;
   email: string;
+  /** Sessão de login (auth_sessions.id). Ausente em tokens emitidos antes da
+   *  trilha de auditoria — o contexto simplesmente fica sem sessão. */
+  sid?: string;
   iat: number;
   exp: number;
 }

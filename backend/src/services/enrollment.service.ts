@@ -22,10 +22,16 @@ import { redis } from "../lib/redis";
 import { NotFoundError, ValidationError } from "../utils/errors";
 import { getTenantDekPayload } from "./facial-payload";
 import {
+  resolveIdentification,
+  totemIdentifierLabel,
+  type IdentificationPolicy,
+} from "../utils/identification";
+import {
   engineEnrollFrame,
   engineEnrollFinalize,
   engineInvalidateEmbedding,
 } from "../lib/faceEngine";
+import { auditService } from "./audit.service";
 
 // Versão do texto de consentimento LGPD exibido no totem (rastreabilidade)
 export const CONSENT_TEXT_VERSION = "v1.0";
@@ -38,6 +44,8 @@ const SESSION_KEY_PREFIX = "enroll:session:";
 interface EnrollmentSession {
   tenantId: string;
   userId: string;
+  /** Nome do aluno, para rotular os eventos de auditoria sem ida ao banco. */
+  userName: string;
   deviceId: string;
   step: "consent" | "capture";
   requiredFrames: number;
@@ -72,7 +80,8 @@ export interface ValidateTokenOutput {
 
 export interface LookupStudentOutput {
   name: string;
-  document: string;
+  /** Ausente quando a instituição não registra CPF. */
+  document?: string;
   enrollmentCode?: string;
   facialStatus: string;
 }
@@ -98,7 +107,7 @@ class EnrollmentService extends BaseService {
   ): Promise<GenerateTokenOutput> {
     const student = await this.prisma.user.findFirst({
       where: { id: studentId, tenantId },
-      select: { id: true, role: true, facialStatus: true },
+      select: { id: true, name: true, role: true, facialStatus: true },
     });
     if (!student) throw new NotFoundError("Student not found in this tenant");
     if (student.role !== "student") {
@@ -120,6 +129,15 @@ class EnrollmentService extends BaseService {
 
     await this.prisma.enrollmentToken.create({
       data: { tenantId, userId: studentId, tokenHash, status: "pending", expiresAt, createdById },
+    });
+
+    auditService.record({
+      action: "enrollment.token_generated",
+      tenantId,
+      targetId: studentId,
+      targetLabel: student.name,
+      details: `QR Code de cadastro biométrico gerado para ${student.name}`,
+      metadata: { expiresAt: expiresAt.toISOString(), expiryHours },
     });
 
     this.logger.info({ tenantId, studentId, expiresAt }, "Enrollment token generated");
@@ -149,6 +167,24 @@ class EnrollmentService extends BaseService {
       where: { tenantId, userId: studentId, status: "pending" },
       data: { status: "revoked" },
     });
+
+    // Só registra se havia mesmo o que revogar — revogar um token inexistente
+    // não é um fato auditável, é um clique sem efeito
+    if (result.count > 0) {
+      const student = await this.prisma.user.findFirst({
+        where: { id: studentId, tenantId },
+        select: { name: true },
+      });
+      auditService.record({
+        action: "enrollment.token_revoked",
+        tenantId,
+        targetId: studentId,
+        targetLabel: student?.name,
+        details: `QR Code de cadastro de ${student?.name ?? studentId} revogado`,
+        metadata: { revoked: result.count },
+      });
+    }
+
     this.logger.info({ tenantId, studentId, revoked: result.count }, "Enrollment token revoked");
     return { revoked: result.count };
   }
@@ -215,6 +251,7 @@ class EnrollmentService extends BaseService {
     const session: EnrollmentSession = {
       tenantId,
       userId: student.id,
+      userName: student.name,
       deviceId,
       step: requiresConsent ? "consent" : "capture",
       requiredFrames,
@@ -238,9 +275,9 @@ class EnrollmentService extends BaseService {
     };
   }
 
-  // ── Cadastro por documento (CPF digitado no totem) ─────────────────────────
+  // ── Cadastro por identificador digitado no totem (CPF ou matrícula) ────────
 
-  /** O fluxo por CPF só funciona em totens com "permitir cadastro" ligado. */
+  /** O fluxo por identificador só roda em totens com "permitir cadastro". */
   private async assertEnrollmentAllowed(tenantId: string, deviceId: string): Promise<void> {
     const device = await this.prisma.device.findFirst({
       where: { id: deviceId, tenantId },
@@ -255,41 +292,87 @@ class EnrollmentService extends BaseService {
   }
 
   /**
-   * Localiza o aluno pelo documento aceitando o valor com ou sem máscara —
-   * o cadastro do painel pode ter salvo em qualquer um dos formatos.
+   * Localiza o aluno pelo que a instituição pede no totem: CPF, matrícula
+   * interna ou qualquer um dos dois.
+   *
+   * O CPF é casado com e sem máscara — o cadastro do painel pode ter salvo em
+   * qualquer um dos formatos. A matrícula é comparada sem diferenciar
+   * maiúsculas (o aluno digita "2026a12" no lugar de "2026A12").
    */
-  private async findStudentByDocument(tenantId: string, document: string) {
-    const digits = document.replace(/\D/g, "");
-    if (digits.length < 11) {
-      throw new ValidationError("Documento inválido", "INVALID_DOCUMENT");
-    }
-    const masked = digits.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "$1.$2.$3-$4");
+  private async findStudentByIdentifier(
+    tenantId: string,
+    identifier: string,
+    policy: IdentificationPolicy
+  ) {
+    const value = identifier.trim();
+    const digits = value.replace(/\D/g, "");
+    const acceptsCpf = policy.totemIdentification !== "enrollment_code";
+    const acceptsCode = policy.totemIdentification !== "cpf";
 
-    const student = await this.prisma.user.findFirst({
-      where: {
-        tenantId,
-        role: "student",
-        document: { in: [digits, masked, document] },
-      },
-      select: { id: true, name: true, document: true, enrollmentCode: true, facialStatus: true },
-    });
-    if (!student) {
-      throw new NotFoundError("Nenhum aluno encontrado com este CPF");
+    const or: Array<Record<string, unknown>> = [];
+
+    if (acceptsCpf && digits.length === 11) {
+      const masked = digits.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "$1.$2.$3-$4");
+      or.push({ document: { in: [digits, masked, value] } });
     }
-    return student;
+    if (acceptsCode && value.length > 0) {
+      or.push({ enrollmentCode: { equals: value, mode: "insensitive" as const } });
+    }
+
+    if (or.length === 0) {
+      throw new ValidationError(
+        `Informe um ${totemIdentifierLabel(policy.totemIdentification)} válido`,
+        "INVALID_IDENTIFIER"
+      );
+    }
+
+    // take: 2 detecta matrícula repetida em base importada — escolher um dos
+    // dois alunos em silêncio cadastraria a biometria na pessoa errada
+    const students = await this.prisma.user.findMany({
+      where: { tenantId, role: "student", OR: or },
+      select: { id: true, name: true, document: true, enrollmentCode: true, facialStatus: true },
+      take: 2,
+    });
+
+    if (students.length === 0) {
+      throw new NotFoundError(
+        `Nenhum aluno encontrado com este ${totemIdentifierLabel(policy.totemIdentification)}`
+      );
+    }
+    if (students.length > 1) {
+      throw new ValidationError(
+        "Mais de um aluno com este identificador. Procure a secretaria.",
+        "AMBIGUOUS_IDENTIFIER"
+      );
+    }
+    return students[0];
+  }
+
+  /** Política de identificação do tenant, já normalizada. */
+  private async loadIdentificationPolicy(tenantId: string): Promise<IdentificationPolicy> {
+    const settings = await this.prisma.tenantSettings.findUnique({
+      where: { tenantId },
+      select: {
+        studentIdentification: true,
+        totemIdentification: true,
+        validateCpf: true,
+      },
+    });
+    return resolveIdentification(settings);
   }
 
   /** Passo de confirmação de identidade no totem — não abre sessão ainda. */
-  async lookupByDocument(
+  async lookupByIdentifier(
     tenantId: string,
     deviceId: string,
-    document: string
+    identifier: string
   ): Promise<LookupStudentOutput> {
     await this.assertEnrollmentAllowed(tenantId, deviceId);
-    const student = await this.findStudentByDocument(tenantId, document);
+    const policy = await this.loadIdentificationPolicy(tenantId);
+    const student = await this.findStudentByIdentifier(tenantId, identifier, policy);
     return {
       name: student.name,
-      document: student.document ?? document,
+      document: student.document ?? undefined,
       enrollmentCode: student.enrollmentCode ?? undefined,
       facialStatus: student.facialStatus,
     };
@@ -299,13 +382,14 @@ class EnrollmentService extends BaseService {
    * Abre uma sessão de cadastro para o aluno confirmado — mesmo formato da
    * sessão criada por token QR; consent/frame/finalize seguem inalterados.
    */
-  async startByDocument(
+  async startByIdentifier(
     tenantId: string,
     deviceId: string,
-    document: string
+    identifier: string
   ): Promise<ValidateTokenOutput> {
     await this.assertEnrollmentAllowed(tenantId, deviceId);
-    const student = await this.findStudentByDocument(tenantId, document);
+    const policy = await this.loadIdentificationPolicy(tenantId);
+    const student = await this.findStudentByIdentifier(tenantId, identifier, policy);
 
     const settings = await this.prisma.tenantSettings.findUnique({ where: { tenantId } });
     const requiresConsent = settings?.requireConsentBeforeFacial ?? true;
@@ -320,6 +404,7 @@ class EnrollmentService extends BaseService {
     const session: EnrollmentSession = {
       tenantId,
       userId: student.id,
+      userName: student.name,
       deviceId,
       step: requiresConsent ? "consent" : "capture",
       requiredFrames,
@@ -333,7 +418,7 @@ class EnrollmentService extends BaseService {
 
     this.logger.info(
       { tenantId, userId: student.id, deviceId },
-      "Enrollment session opened (document flow)"
+      "Enrollment session opened (identifier flow)"
     );
 
     return {
@@ -378,6 +463,26 @@ class EnrollmentService extends BaseService {
     session.step = "capture";
     await this.saveSession(sessionId, session);
 
+    // Prova de que houve aceite formal antes de qualquer captura facial: quem
+    // consentiu, em qual totem, de qual IP e sob qual versão do texto (LGPD).
+    auditService.record({
+      action: "consent.granted",
+      tenantId,
+      targetId: session.userId,
+      targetLabel: session.userName,
+      beforeState: { facialStatus: "none", consent: false },
+      afterState: { facialStatus: "consent_given", consent: true },
+      changedFields: ["facialStatus", "consent"],
+      details: `${session.userName} aceitou o termo de consentimento biométrico (versão ${CONSENT_TEXT_VERSION})`,
+      metadata: {
+        consentTextVersion: CONSENT_TEXT_VERSION,
+        deviceFingerprint,
+        // IP capturado pelo próprio fluxo do totem, que pode diferir do IP da
+        // requisição quando o totem faz proxy do navegador do aluno
+        consentIpAddress: ipAddress,
+      },
+    });
+
     this.logger.info({ tenantId, userId: session.userId }, "Biometric consent registered");
     return { step: "capture" };
   }
@@ -392,6 +497,18 @@ class EnrollmentService extends BaseService {
     });
 
     await redis.del(SESSION_KEY_PREFIX + sessionId);
+
+    auditService.record({
+      action: "consent.refused",
+      tenantId,
+      targetId: session.userId,
+      targetLabel: session.userName,
+      afterState: { facialStatus: "consent_refused", consent: false },
+      changedFields: ["facialStatus"],
+      details: `${session.userName} recusou o termo de consentimento biométrico`,
+      metadata: { consentTextVersion: CONSENT_TEXT_VERSION },
+    });
+
     this.logger.info({ tenantId, userId: session.userId }, "Biometric consent refused");
   }
 
@@ -492,6 +609,24 @@ class EnrollmentService extends BaseService {
     // Cache da engine pode ter embedding antigo — invalidar (não-fatal)
     engineInvalidateEmbedding(tenantId, session.userId).catch((error) => {
       this.logger.warn({ tenantId, userId: session.userId, error }, "Failed to invalidate engine cache");
+    });
+
+    auditService.record({
+      action: "biometrics.registered",
+      tenantId,
+      targetId: session.userId,
+      targetLabel: session.userName,
+      beforeState: { facialStatus: "consent_given" },
+      afterState: { facialStatus: "registered" },
+      changedFields: ["facialStatus"],
+      details: `Biometria facial de ${session.userName} cadastrada e cifrada`,
+      metadata: {
+        modelVersion: consolidated.model_version,
+        framesUsed: consolidated.frames_used,
+        keyVersion: consolidated.key_version,
+        // O embedding em si jamais entra na trilha — só o registro de que foi
+        // gerado. O vetor facial vive cifrado em facial_embeddings.
+      },
     });
 
     this.logger.info(

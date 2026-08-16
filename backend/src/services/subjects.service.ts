@@ -10,6 +10,17 @@
 
 import { BaseService, ListParams, PaginatedResult } from "./base.service";
 import { NotFoundError, ValidationError, ConflictError } from "../utils/errors";
+import { auditService } from "./audit.service";
+import { snapshot } from "../utils/diff";
+
+/** Campos da disciplina acompanhados pela trilha de auditoria. */
+const SUBJECT_FIELDS = [
+  "name",
+  "code",
+  "isActive",
+  "defaultLessonsPerSession",
+  "defaultTotalLessonsPlanned",
+] as const;
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -18,12 +29,16 @@ export interface CreateSubjectInput {
   courseId: string;
   name: string;
   code?: string;
+  defaultLessonsPerSession?: number;
+  defaultTotalLessonsPlanned?: number;
 }
 
 export interface UpdateSubjectInput {
   name?: string;
   code?: string | null;
   isActive?: boolean;
+  defaultLessonsPerSession?: number;
+  defaultTotalLessonsPlanned?: number;
 }
 
 export interface SubjectOutput {
@@ -34,6 +49,9 @@ export interface SubjectOutput {
   name: string;
   code?: string;
   isActive: boolean;
+  /** Carga sugerida ao aplicar o currículo do curso nas turmas. */
+  defaultLessonsPerSession: number;
+  defaultTotalLessonsPlanned: number;
   /** Em quantas turmas esta disciplina é cursada. */
   classCount?: number;
   createdAt: Date;
@@ -81,7 +99,8 @@ class SubjectsService extends BaseService {
       ...(params.courseId && { courseId: params.courseId }),
       ...(params.isActive !== undefined && { isActive: params.isActive }),
       ...(params.teacherId && {
-        classSubjects: { some: { teacherId: params.teacherId } },
+        // Alocado no time da disciplina, não só responsável por ela
+        classSubjects: { some: { teachers: { some: { teacherId: params.teacherId } } } },
       }),
       ...(searchOr && { OR: searchOr }),
     };
@@ -135,8 +154,23 @@ class SubjectsService extends BaseService {
         courseId: input.courseId,
         name: input.name,
         code: input.code ?? null,
+        ...(input.defaultLessonsPerSession !== undefined && {
+          defaultLessonsPerSession: input.defaultLessonsPerSession,
+        }),
+        ...(input.defaultTotalLessonsPlanned !== undefined && {
+          defaultTotalLessonsPlanned: input.defaultTotalLessonsPlanned,
+        }),
       },
       include: SubjectsService.INCLUDE,
+    });
+
+    auditService.record({
+      action: "subject.created",
+      tenantId: input.tenantId,
+      targetId: subject.id,
+      targetLabel: subject.name,
+      afterState: snapshot(subject, SUBJECT_FIELDS),
+      metadata: { courseId: input.courseId },
     });
 
     this.logger.info(
@@ -149,7 +183,6 @@ class SubjectsService extends BaseService {
   async update(id: string, tenantId: string, input: UpdateSubjectInput): Promise<SubjectOutput> {
     const subject = await this.prisma.subject.findFirst({
       where: { id, tenantId },
-      select: { id: true, courseId: true },
     });
     if (!subject) throw new NotFoundError("Disciplina não encontrada");
 
@@ -169,8 +202,24 @@ class SubjectsService extends BaseService {
         ...(input.name && { name: input.name }),
         ...(input.code !== undefined && { code: input.code }),
         ...(input.isActive !== undefined && { isActive: input.isActive }),
+        ...(input.defaultLessonsPerSession !== undefined && {
+          defaultLessonsPerSession: input.defaultLessonsPerSession,
+        }),
+        ...(input.defaultTotalLessonsPlanned !== undefined && {
+          defaultTotalLessonsPlanned: input.defaultTotalLessonsPlanned,
+        }),
       },
       include: SubjectsService.INCLUDE,
+    });
+
+    auditService.recordChange({
+      action: "subject.updated",
+      tenantId,
+      targetId: id,
+      targetLabel: updated.name,
+      before: subject,
+      after: updated,
+      fields: SUBJECT_FIELDS,
     });
 
     this.logger.info({ subjectId: id, tenantId }, "Subject updated");
@@ -184,7 +233,7 @@ class SubjectsService extends BaseService {
   async delete(id: string, tenantId: string): Promise<void> {
     const subject = await this.prisma.subject.findFirst({
       where: { id, tenantId },
-      select: { id: true, _count: { select: { classSubjects: true } } },
+      include: { _count: { select: { classSubjects: true } } },
     });
     if (!subject) throw new NotFoundError("Disciplina não encontrada");
 
@@ -196,6 +245,15 @@ class SubjectsService extends BaseService {
     }
 
     await this.prisma.subject.delete({ where: { id } });
+
+    auditService.record({
+      action: "subject.deleted",
+      tenantId,
+      targetId: id,
+      targetLabel: subject.name,
+      beforeState: snapshot(subject, SUBJECT_FIELDS),
+    });
+
     this.logger.info({ subjectId: id, tenantId }, "Subject deleted");
   }
 
@@ -208,6 +266,8 @@ class SubjectsService extends BaseService {
       name: subject.name,
       code: subject.code ?? undefined,
       isActive: subject.isActive,
+      defaultLessonsPerSession: subject.defaultLessonsPerSession ?? 1,
+      defaultTotalLessonsPlanned: subject.defaultTotalLessonsPlanned ?? 0,
       classCount: subject._count?.classSubjects,
       createdAt: subject.createdAt,
     };

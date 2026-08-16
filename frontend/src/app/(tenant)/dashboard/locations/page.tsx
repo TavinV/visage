@@ -30,6 +30,7 @@ import {
   useToast,
 } from "@/components/ui";
 import { ActiveBadge } from "@/components/app/badges";
+import { ShowInactiveToggle, inactiveRowClass } from "@/components/app/ShowInactive";
 
 const LocationSchema = z.object({
   name: z.string().min(1, "Informe o nome."),
@@ -46,15 +47,23 @@ export default function LocationsPage() {
   const isTeacher = user?.role === "teacher";
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
+  const [showInactive, setShowInactive] = useState(false);
   const debouncedSearch = useDebounced(search);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Location | null>(null);
   const [deleting, setDeleting] = useState<Location | null>(null);
 
   const list = useQuery({
-    queryKey: ["locations", { page, search: debouncedSearch }],
+    queryKey: ["locations", { page, search: debouncedSearch, showInactive }],
     queryFn: () =>
-      api.get<Paginated<Location>>(`/locations${qs({ page, limit: 20, search: debouncedSearch })}`),
+      api.get<Paginated<Location>>(
+        `/locations${qs({
+          page,
+          limit: 20,
+          search: debouncedSearch,
+          isActive: showInactive ? undefined : true,
+        })}`
+      ),
   });
 
   const form = useForm<LocationForm>({ resolver: zodResolver(LocationSchema) });
@@ -116,7 +125,7 @@ export default function LocationsPage() {
         }
       />
 
-      <div className="mb-4">
+      <div className="mb-4 flex flex-wrap items-end gap-3">
         <Input
           placeholder="Buscar por nome"
           icon={<Search size={15} />}
@@ -126,6 +135,14 @@ export default function LocationsPage() {
             setPage(1);
           }}
           className="w-72"
+        />
+        <ShowInactiveToggle
+          checked={showInactive}
+          onChange={(next) => {
+            setShowInactive(next);
+            setPage(1);
+          }}
+          label="Mostrar inativas"
         />
       </div>
 
@@ -146,10 +163,19 @@ export default function LocationsPage() {
               loading={list.isPending}
               error={list.error ? friendlyError(list.error) : null}
               empty={list.data?.data.length === 0}
-              emptyTitle="Nenhuma sala de aula cadastrada."
+              emptyTitle={
+                showInactive
+                  ? "Nenhuma sala de aula cadastrada."
+                  : "Nenhuma sala de aula ativa."
+              }
+              emptyDescription={
+                showInactive
+                  ? undefined
+                  : "Crie uma sala ou marque “Mostrar inativas” para ver as desativadas."
+              }
             />
             {list.data?.data.map((loc) => (
-              <Tr key={loc.id}>
+              <Tr key={loc.id} className={loc.isActive ? undefined : inactiveRowClass}>
                 <Td className="font-medium text-flauzino-navy-900">{loc.name}</Td>
                 <Td>{loc.address ?? "—"}</Td>
                 <Td><ActiveBadge active={loc.isActive} /></Td>

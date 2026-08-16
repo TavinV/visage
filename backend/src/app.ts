@@ -8,6 +8,7 @@ import helmet from "helmet";
 import { config } from "./lib/config";
 import { logger } from "./lib/logger";
 import { errorHandler } from "./middleware/errorHandler";
+import { requestContext } from "./lib/requestContext";
 import { createGlobalLimiter, createLoginLimiter, createAuthLimiter, createDemoRequestLimiter } from "./middleware/rateLimit";
 
 // Routes
@@ -29,6 +30,7 @@ import studentsRoutes from "./routes/students";
 import enrollmentRoutes from "./routes/enrollment";
 import createDeviceRouter from "./routes/device";
 import reportsRoutes from "./routes/reports";
+import dashboardRoutes from "./routes/dashboard";
 import auditRoutes from "./routes/audit";
 import adminRoutes from "./routes/admin";
 import demoRequestsRoutes from "./routes/demo-requests";
@@ -42,6 +44,10 @@ export function createApp(): Express {
   const authLimiter = createAuthLimiter();
   const demoRequestLimiter = createDemoRequestLimiter();
 
+  // IP real do cliente atrás do proxy reverso — a trilha de auditoria registra
+  // a origem de cada ação, e sem isso todo evento sairia com o IP do proxy.
+  app.set("trust proxy", config.trustProxy);
+
   // Security
   app.use(helmet());
 
@@ -52,6 +58,10 @@ export function createApp(): Express {
       credentials: true,
     })
   );
+
+  // Contexto da requisição (IP, user agent, rota, ator) — precisa vir antes de
+  // qualquer rota para que os services enxerguem quem disparou a ação
+  app.use(requestContext);
 
   // Rate limiting global
   app.use(globalLimiter);
@@ -109,6 +119,7 @@ export function createApp(): Express {
   app.use("/enrollment", enrollmentRoutes);
   app.use("/device", createDeviceRouter());
   app.use("/attendance/reports", reportsRoutes);
+  app.use("/dashboard", dashboardRoutes);
   app.use("/audit", auditRoutes);
   app.use("/admin", adminRoutes);
   app.use("/demo-requests", demoRequestLimiter, demoRequestsRoutes);

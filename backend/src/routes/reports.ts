@@ -5,6 +5,7 @@
 
 import { Router, Request, Response, NextFunction } from "express";
 import { reportsService } from "../services/reports.service";
+import { auditService } from "../services/audit.service";
 import { authenticate, requireRole } from "../middleware/authenticate";
 
 const router = Router();
@@ -50,7 +51,11 @@ router.get(
 
 /**
  * GET /attendance/reports/student/:id
- * Histórico completo de presenças do aluno
+ * Histórico completo de presenças do aluno.
+ *
+ * Abrir o histórico de UM aluno nominalmente é acesso a dado pessoal, e entra
+ * na trilha. As visões agregadas por turma não entram: seriam ruído a cada
+ * abertura de tela, sem apontar nenhuma pessoa em particular.
  */
 router.get(
   "/student/:id",
@@ -60,6 +65,14 @@ router.get(
     try {
       const { tenantId } = req.tenant!;
       const result = await reportsService.studentHistory(tenantId, req.params.id);
+
+      auditService.record({
+        action: "data.student_history_viewed",
+        tenantId,
+        targetId: req.params.id,
+        targetLabel: (result as { student?: { name?: string } })?.student?.name,
+      });
+
       res.json({ data: result });
     } catch (error) {
       next(error);

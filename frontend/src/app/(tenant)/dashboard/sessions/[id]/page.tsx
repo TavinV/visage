@@ -232,7 +232,7 @@ function FrameModal({ sessionId, frame, onClose }: { sessionId: string; frame: S
           <p className="px-6 text-center text-sm text-flauzino-danger-600">{error}</p>
         ) : url ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={url} alt="Frame da tentativa de fraude" className="max-h-[420px] w-auto rounded-lg" />
+          <img src={url} alt="Foto da tentativa de fraude" className="max-h-[420px] w-auto rounded-lg" />
         ) : (
           <Spinner />
         )}
@@ -526,7 +526,7 @@ export default function RollcallPage() {
       <Card className="mt-5">
         <CardHeader
           title="Tentativas de fraude nesta aula"
-          description="Frames bloqueados pela verificação de vivacidade durante a janela desta chamada."
+          description="Passagens bloqueadas pela verificação de vivacidade durante o horário desta chamada."
           icon={<Eye size={18} strokeWidth={1.75} />}
         />
         <Table>
@@ -535,7 +535,7 @@ export default function RollcallPage() {
               <Th>Quando</Th>
               <Th>Motivo</Th>
               <Th>Vivacidade</Th>
-              <Th className="w-32 text-right">Frame</Th>
+              <Th className="w-32 text-right">Foto</Th>
             </tr>
           </thead>
           <tbody>
@@ -561,7 +561,7 @@ export default function RollcallPage() {
                       onClick={() => setViewingFrame(f)}
                       iconLeft={<Eye size={13} />}
                     >
-                      Ver frame
+                      Ver foto
                     </Button>
                   </div>
                 </Td>

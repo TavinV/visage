@@ -107,6 +107,7 @@ export default function AccountPage() {
               name={me.name}
               currentUrl={photoUrl}
               hasPhoto={me.hasPhoto}
+              cropTitle="Enquadrar sua foto"
               onUpload={async (imageB64) => {
                 await api.put("/users/me/photo", { imageB64 });
                 await refreshProfile();

@@ -11,6 +11,8 @@ import { config } from "../lib/config";
 import { redis } from "../lib/redis";
 import { UnauthorizedError } from "../utils/errors";
 import { BaseService } from "./base.service";
+import { auditService } from "./audit.service";
+import { setActor } from "../lib/requestContext";
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -39,6 +41,9 @@ interface RefreshPayload {
   tenantId: string;
   role: string;
   email: string;
+  /** auth_sessions.id — atravessa a rotação do refresh token para que toda a
+   *  atividade do usuário fique amarrada ao mesmo login. */
+  sessionId?: string;
 }
 
 // ── Constantes ───────────────────────────────────────────────────────────────
@@ -60,6 +65,9 @@ class AuthService extends BaseService {
         tenantId: payload.tenantId,
         role: payload.role,
         email: payload.email,
+        // Carimba a sessão no token — é assim que cada ação no console sabe a
+        // qual login ela pertence, sem consulta extra a cada requisição
+        ...(payload.sessionId && { sid: payload.sessionId }),
       },
       config.jwtSecret,
       { expiresIn: config.jwtExpiresIn } as jwt.SignOptions,
@@ -90,34 +98,72 @@ class AuthService extends BaseService {
     });
 
     if (!user || !user.passwordHash) {
+      // E-mail desconhecido: não há instituição para atribuir o evento, então
+      // ele nasce global e só o super_admin enxerga. A resposta ao cliente
+      // continua genérica — a trilha sabe mais do que o atacante.
+      this.recordFailedLogin(input.email, "unknown_account", user ?? undefined);
       throw new UnauthorizedError("Invalid email or password");
     }
 
     const passwordMatch = await bcryptjs.compare(input.password, user.passwordHash);
     if (!passwordMatch) {
+      this.recordFailedLogin(input.email, "wrong_password", user);
       throw new UnauthorizedError("Invalid email or password");
     }
 
     if (user.status !== "active") {
+      this.recordFailedLogin(input.email, `user_status:${user.status}`, user);
       throw new UnauthorizedError(`User status: ${user.status}`);
     }
 
     if (user.tenant.status !== "active") {
+      this.recordFailedLogin(input.email, `tenant_status:${user.tenant.status}`, user);
       throw new UnauthorizedError(`Tenant status: ${user.tenant.status}`);
     }
+
+    // Abre a sessão ANTES de emitir o token: o id da sessão entra no JWT, e
+    // toda ação subsequente do usuário já nasce amarrada a este login.
+    const sessionId = await auditService.openSession({
+      id: user.id,
+      tenantId: user.tenantId,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+    });
 
     const rtPayload: RefreshPayload = {
       userId: user.id,
       tenantId: user.tenantId,
       role: user.role,
       email: user.email ?? "",
+      sessionId,
     };
 
     const accessToken = this.generateAccessToken(rtPayload);
     const refreshToken = crypto.randomBytes(32).toString("hex");
     await this.storeRefreshToken(refreshToken, rtPayload);
 
-    this.logger.info({ userId: user.id, tenantId: user.tenantId }, "User logged in");
+    // A requisição de login não passou por `authenticate`, então o contexto
+    // ainda está anônimo — preenche o ator para que o evento saia completo
+    setActor({
+      actorType: "user",
+      tenantId: user.tenantId,
+      userId: user.id,
+      userName: user.name,
+      userEmail: user.email ?? undefined,
+      userRole: user.role,
+      sessionId,
+    });
+
+    auditService.record({
+      action: "auth.login",
+      tenantId: user.tenantId,
+      targetId: user.id,
+      targetLabel: user.name,
+      details: `Login no console como ${user.role}`,
+    });
+
+    this.logger.info({ userId: user.id, tenantId: user.tenantId, sessionId }, "User logged in");
 
     return {
       accessToken,
@@ -155,16 +201,84 @@ class AuthService extends BaseService {
 
     const accessToken = this.generateAccessToken(payload);
 
+    // O refresh é a única prova de que a sessão continua viva — sem isso, uma
+    // sessão de 6 horas apareceria na auditoria com "última atividade" no login
+    if (payload.sessionId) {
+      await auditService.touchSession(payload.sessionId);
+    }
+
     this.logger.info({ userId: payload.userId }, "Access token refreshed");
 
     return { accessToken, refreshToken: newRefreshToken, expiresIn: ACCESS_TOKEN_TTL_SECONDS };
   }
 
   /**
-   * Revoga o refresh token (logout).
+   * Revoga o refresh token (logout) e fecha a sessão de auditoria.
+   *
+   * O refresh token guarda o sessionId, então o logout consegue fechar a sessão
+   * mesmo quando o access token já expirou e o cliente só tem o refresh.
    */
   async logout(refreshToken: string): Promise<void> {
-    await redis.del(`${REFRESH_PREFIX}${refreshToken}`);
+    const key = `${REFRESH_PREFIX}${refreshToken}`;
+    const raw = await redis.get(key);
+    await redis.del(key);
+
+    if (!raw) return;
+
+    let payload: RefreshPayload;
+    try {
+      payload = JSON.parse(raw) as RefreshPayload;
+    } catch {
+      return; // token corrompido no Redis — nada a registrar
+    }
+
+    if (!payload.sessionId) return;
+
+    auditService.record({
+      action: "auth.logout",
+      tenantId: payload.tenantId,
+      targetId: payload.userId,
+      actor: {
+        type: "user",
+        userId: payload.userId,
+        email: payload.email,
+        role: payload.role,
+        sessionId: payload.sessionId,
+      },
+    });
+
+    await auditService.closeSession(payload.sessionId, "logout");
+  }
+
+  /**
+   * Registra tentativa de login malsucedida.
+   *
+   * Sem usuário conhecido o evento fica sem instituição (tenantId null) e só o
+   * super_admin o vê — é ele quem investiga varredura de credenciais contra a
+   * plataforma. Com usuário conhecido, o admin da instituição também precisa
+   * ver que houve tentativa contra aquela conta.
+   */
+  private recordFailedLogin(
+    email: string,
+    reason: string,
+    user?: { id: string; tenantId: string; name: string; role: string },
+  ): void {
+    auditService.record({
+      action: "auth.login_failed",
+      status: "failure",
+      tenantId: user?.tenantId ?? null,
+      targetId: user?.id,
+      targetLabel: user?.name ?? email,
+      details: `Tentativa de login para ${email}`,
+      metadata: { email, reason },
+      actor: {
+        // Sem senha correta não há identidade comprovada: o ator é anônimo,
+        // ainda que o e-mail digitado aponte para uma conta existente
+        type: "anonymous",
+        name: email,
+        email,
+      },
+    });
   }
 
   // ── Redefinição de senha ─────────────────────────────────────────────────────
@@ -176,10 +290,19 @@ class AuthService extends BaseService {
   async requestPasswordReset(email: string): Promise<void> {
     const user = await this.prisma.user.findFirst({
       where: { email },
-      select: { id: true, name: true, email: true, passwordHash: true },
+      select: { id: true, tenantId: true, name: true, email: true, role: true, passwordHash: true },
     });
     // Só contas com senha (alunos não têm acesso ao painel)
     if (!user || !user.passwordHash || !user.email) return;
+
+    auditService.record({
+      action: "auth.password_reset_requested",
+      tenantId: user.tenantId,
+      targetId: user.id,
+      targetLabel: user.name,
+      details: `Link de redefinição de senha enviado para ${user.email}`,
+      actor: { type: "anonymous", name: user.name, email: user.email, role: user.role },
+    });
 
     const token = crypto.randomBytes(32).toString("base64url");
     const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
@@ -216,9 +339,26 @@ class AuthService extends BaseService {
     }
 
     const passwordHash = await bcryptjs.hash(newPassword, 10);
-    await this.prisma.user.update({
+    const user = await this.prisma.user.update({
       where: { id: userId },
       data: { passwordHash },
+      select: { id: true, tenantId: true, name: true, email: true, role: true },
+    });
+
+    auditService.record({
+      action: "auth.password_reset_completed",
+      tenantId: user.tenantId,
+      targetId: user.id,
+      targetLabel: user.name,
+      details: "Senha redefinida pelo link enviado por e-mail",
+      // Quem redefine ainda não está logado — a posse do link é a prova
+      actor: {
+        type: "anonymous",
+        userId: user.id,
+        name: user.name,
+        email: user.email ?? undefined,
+        role: user.role,
+      },
     });
 
     this.logger.info({ userId }, "Password reset via email token");

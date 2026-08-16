@@ -178,7 +178,7 @@ export default function ClassDetailPage() {
           <thead>
             <tr>
               <Th>Disciplina</Th>
-              <Th>Professor</Th>
+              <Th>Professores</Th>
               <Th>Chamada vale</Th>
               <Th>Aulas no período</Th>
             </tr>
@@ -199,7 +199,20 @@ export default function ClassDetailPage() {
                     </span>
                   )}
                 </Td>
-                <Td>{s.teacherName}</Td>
+                <Td>
+                  {/* Responsável em destaque; quem divide a disciplina vem
+                      logo abaixo, para não sumir da vista da secretaria */}
+                  <span className="block text-flauzino-navy-900">{s.teacherName}</span>
+                  {s.teachers.length > 1 && (
+                    <span className="text-xs text-flauzino-slate-500">
+                      com{" "}
+                      {s.teachers
+                        .filter((t) => !t.isPrimary)
+                        .map((t) => t.name)
+                        .join(", ")}
+                    </span>
+                  )}
+                </Td>
                 <Td>
                   {formatLessons(s.lessonsPerSession)}
                   <span className="ml-1.5 text-xs text-flauzino-slate-500">

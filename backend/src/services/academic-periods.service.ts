@@ -5,6 +5,11 @@
 
 import { BaseService, ListParams, PaginatedResult } from "./base.service";
 import { NotFoundError } from "../utils/errors";
+import { auditService } from "./audit.service";
+import { snapshot } from "../utils/diff";
+
+/** Campos do período letivo acompanhados pela trilha de auditoria. */
+const PERIOD_FIELDS = ["name", "startsAt", "endsAt", "isActive"] as const;
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -100,6 +105,14 @@ class AcademicPeriodsService extends BaseService {
       },
     });
 
+    auditService.record({
+      action: "period.created",
+      tenantId: input.tenantId,
+      targetId: period.id,
+      targetLabel: period.name,
+      afterState: snapshot(period, PERIOD_FIELDS),
+    });
+
     this.logger.info({ periodId: period.id, tenantId: input.tenantId }, "Academic period created");
     return this.toOutput(period);
   }
@@ -127,6 +140,16 @@ class AcademicPeriodsService extends BaseService {
       },
     });
 
+    auditService.recordChange({
+      action: "period.updated",
+      tenantId,
+      targetId: id,
+      targetLabel: updated.name,
+      before: period,
+      after: updated,
+      fields: PERIOD_FIELDS,
+    });
+
     this.logger.info({ periodId: id, tenantId }, "Academic period updated");
     return this.toOutput(updated);
   }
@@ -141,6 +164,15 @@ class AcademicPeriodsService extends BaseService {
     if (!period) throw new NotFoundError("Academic period not found");
 
     await this.prisma.academicPeriod.delete({ where: { id } });
+
+    auditService.record({
+      action: "period.deleted",
+      tenantId,
+      targetId: id,
+      targetLabel: period.name,
+      beforeState: snapshot(period, PERIOD_FIELDS),
+    });
+
     this.logger.info({ periodId: id, tenantId }, "Academic period deleted");
   }
 

@@ -85,7 +85,7 @@ export const adminNav: NavSection[] = [
   {
     label: "Monitoramento",
     items: [
-      { href: "/admin/logs", label: "Logs de reconhecimento", icon: ScanFace },
+      { href: "/admin/logs", label: "Auditoria", icon: ShieldCheck },
       { href: "/admin/engine", label: "Saúde da engine", icon: Activity },
     ],
   },

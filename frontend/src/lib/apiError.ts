@@ -17,6 +17,11 @@ const messagesByCode: Record<string, string> = {
  */
 const messagesBySlug: Record<string, string> = {
   invalid_cpf: "CPF inválido — confira os dígitos informados.",
+  invalid_cpf_format: "O CPF precisa ter 11 dígitos.",
+  document_required: "Informe o CPF — a instituição registra CPF dos alunos.",
+  enrollment_code_required:
+    "Informe a matrícula — a instituição identifica os alunos por matrícula.",
+  enrollment_code_already_exists: "Já existe um aluno com esta matrícula na instituição.",
   document_already_exists: "Já existe um usuário com este CPF na instituição.",
   email_already_exists: "Já existe um usuário com este e-mail na instituição.",
   email_required_for_panel_roles: "Informe um e-mail — este cargo acessa o painel.",
@@ -46,7 +51,7 @@ export function friendlyError(error: unknown): string {
     return messagesByCode[error.code] ?? error.message;
   }
   if (error instanceof TypeError) {
-    return "Não foi possível conectar à API. Verifique se o backend está no ar.";
+    return "Não foi possível conectar ao servidor. Verifique sua conexão com a internet.";
   }
   if (error instanceof Error) return error.message;
   return "Erro inesperado. Tente novamente.";

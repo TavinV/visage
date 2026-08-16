@@ -11,6 +11,7 @@ import { disconnectPrisma, prisma } from "./lib/prisma";
 import { adminService } from "./services/admin.service";
 import { startFraudFrameCleanupJob } from "./jobs/cleanupFraudFrames";
 import { startAutoCloseSessionsJob } from "./jobs/autoCloseSessions";
+import { startExpireAuthSessionsJob } from "./jobs/expireAuthSessions";
 
 async function bootstrap() {
   try {
@@ -47,6 +48,10 @@ async function bootstrap() {
 
     // Fecha chamadas cujo período (aulas × duração) já venceu
     startAutoCloseSessionsJob();
+
+    // Encerra sessões de acesso abandonadas (logout que nunca veio), para que
+    // "sessões ativas" na auditoria signifique quem está no console agora
+    startExpireAuthSessionsJob();
 
     // Criar e iniciar app (Redis e banco já estão prontos)
     const app = createApp();

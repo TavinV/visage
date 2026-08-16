@@ -373,7 +373,7 @@ export function CalibrationModal({ open, onClose }: CalibrationModalProps) {
 
                 {compute.isPending && (
                   <p className="rounded-lg bg-flauzino-accent-50 px-4 py-3 text-[13px] text-flauzino-slate-700">
-                    Processando as imagens na engine — pode levar até um minuto.
+                    Processando as imagens — pode levar até um minuto.
                   </p>
                 )}
               </>

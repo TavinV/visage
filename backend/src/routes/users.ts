@@ -56,7 +56,8 @@ type ChangePasswordRequest = z.infer<typeof ChangePasswordSchema>;
 /**
  * GET /users
  * Lista usuários do tenant (admin only)
- * Query params: page, limit, sortBy, sortOrder, search, role, status
+ * Query params: page, limit, sortBy, sortOrder, search, role, status,
+ * includeInactive (por padrão desativados ficam fora da lista)
  */
 router.get(
   "/",
@@ -75,6 +76,7 @@ router.get(
         search: req.query.search as string | undefined,
         role: req.query.role as string | undefined,
         status: req.query.status as string | undefined,
+        includeInactive: req.query.includeInactive === "true",
       });
 
       res.json(result);

@@ -28,6 +28,7 @@ import {
   useToast,
 } from "@/components/ui";
 import { TenantStatusBadge } from "@/components/app/badges";
+import { ShowInactiveToggle, inactiveRowClass } from "@/components/app/ShowInactive";
 import { maskCnpj } from "@/lib/masks";
 
 const CreateTenantSchema = z.object({
@@ -98,6 +99,7 @@ export default function TenantsPage() {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
   const [type, setType] = useState("");
+  const [showInactive, setShowInactive] = useState(false);
   const debouncedSearch = useDebounced(search);
 
   const [creating, setCreating] = useState(false);
@@ -105,10 +107,18 @@ export default function TenantsPage() {
   const [action, setAction] = useState<RowAction | null>(null);
 
   const list = useQuery({
-    queryKey: ["tenants", { page, search: debouncedSearch, status, type }],
+    queryKey: ["tenants", { page, search: debouncedSearch, status, type, showInactive }],
     queryFn: () =>
       api.get<Paginated<Tenant>>(
-        `/tenants${qs({ page, limit: 20, search: debouncedSearch, status, institutionType: type })}`
+        `/tenants${qs({
+          page,
+          limit: 20,
+          search: debouncedSearch,
+          status,
+          institutionType: type,
+          // Canceladas são o "excluído" do contrato: só aparecem sob pedido
+          includeInactive: showInactive,
+        })}`
       ),
   });
 
@@ -253,6 +263,14 @@ export default function TenantsPage() {
           ]}
           className="w-44"
         />
+        <ShowInactiveToggle
+          checked={showInactive}
+          onChange={(next) => {
+            setShowInactive(next);
+            setPage(1);
+          }}
+          label="Mostrar canceladas"
+        />
       </div>
 
       <Card>
@@ -277,7 +295,10 @@ export default function TenantsPage() {
               emptyDescription="Ajuste os filtros ou crie a primeira instituição."
             />
             {list.data?.data.map((tenant) => (
-              <Tr key={tenant.id}>
+              <Tr
+                key={tenant.id}
+                className={tenant.status === "cancelled" ? inactiveRowClass : undefined}
+              >
                 <Td className="font-medium text-flauzino-navy-900">{tenant.name}</Td>
                 <Td className="font-mono-ds text-xs">{tenant.document ?? "—"}</Td>
                 <Td>{tenant.institutionType === "school" ? "Escola" : "Universidade"}</Td>

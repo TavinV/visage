@@ -12,19 +12,43 @@
  * nenhuma não serve para nada.
  */
 
+import { Prisma } from "@prisma/client";
 import { BaseService, ListParams, PaginatedResult } from "./base.service";
 import { NotFoundError, ValidationError, ConflictError } from "../utils/errors";
 import { lessonDurationToMinutes } from "./subjects.service";
+import { auditService } from "./audit.service";
+import { snapshot } from "../utils/diff";
+
+/** Campos da turma acompanhados pela trilha de auditoria. */
+const CLASS_FIELDS = ["name", "room", "locationId", "courseId"] as const;
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
 export interface ClassSubjectInput {
   subjectId: string;
-  teacherId: string;
+  /**
+   * Professor responsável. Opcional quando `teacherIds` vem preenchido — nesse
+   * caso o primeiro da lista assume a responsabilidade.
+   */
+  teacherId?: string;
+  /**
+   * Time completo da disciplina nesta turma. O responsável entra aqui também;
+   * omitir a lista mantém só o responsável (comportamento antigo).
+   */
+  teacherIds?: string[];
   /** Aulas seguidas que uma chamada desta disciplina ocupa. */
   lessonsPerSession?: number;
   /** Aulas previstas no período — denominador da frequência. */
   totalLessonsPlanned?: number;
+}
+
+/** Linha da grade já normalizada: responsável + time, sem duplicatas. */
+export interface ResolvedClassSubject {
+  subjectId: string;
+  teacherId: string;
+  teacherIds: string[];
+  lessonsPerSession: number;
+  totalLessonsPlanned: number;
 }
 
 export interface CreateClassInput {
@@ -45,13 +69,23 @@ export interface UpdateClassInput {
   subjects?: ClassSubjectInput[];
 }
 
+export interface ClassSubjectTeacherOutput {
+  id: string;
+  name: string;
+  /** Responsável pela disciplina na turma (espelha teacherId). */
+  isPrimary: boolean;
+}
+
 export interface ClassSubjectOutput {
   id: string;
   subjectId: string;
   subjectName: string;
   subjectCode?: string;
+  /** Responsável — mantido para relatórios e para o padrão da chamada. */
   teacherId: string;
   teacherName: string;
+  /** Time completo, responsável incluído e sempre em primeiro. */
+  teachers: ClassSubjectTeacherOutput[];
   lessonsPerSession: number;
   totalLessonsPlanned: number;
   /** Duração de uma chamada desta disciplina, em minutos. */
@@ -106,6 +140,9 @@ class ClassesService extends BaseService {
       include: {
         subject: { select: { name: true, code: true } },
         teacher: { select: { name: true } },
+        teachers: {
+          include: { teacher: { select: { id: true, name: true } } },
+        },
       },
       orderBy: { subject: { name: "asc" } },
     },
@@ -125,12 +162,16 @@ class ClassesService extends BaseService {
     const where = {
       tenantId: params.tenantId,
       ...(params.courseId && { courseId: params.courseId }),
-      // Filtros por disciplina/professor atravessam o vínculo
+      // Filtros por disciplina/professor atravessam o vínculo. O professor é
+      // procurado no time da disciplina, não só entre os responsáveis — quem
+      // divide a disciplina também precisa ver a turma.
       ...((params.subjectId || params.teacherId) && {
         classSubjects: {
           some: {
             ...(params.subjectId && { subjectId: params.subjectId }),
-            ...(params.teacherId && { teacherId: params.teacherId }),
+            ...(params.teacherId && {
+              teachers: { some: { teacherId: params.teacherId } },
+            }),
           },
         },
       }),
@@ -202,10 +243,26 @@ class ClassesService extends BaseService {
             teacherId: r.teacherId,
             lessonsPerSession: r.lessonsPerSession,
             totalLessonsPlanned: r.totalLessonsPlanned,
+            teachers: {
+              create: r.teacherIds.map((teacherId) => ({
+                teacherId,
+                isPrimary: teacherId === r.teacherId,
+              })),
+            },
           })),
         },
       },
       include: ClassesService.INCLUDE,
+    });
+
+    auditService.record({
+      action: "class.created",
+      tenantId: input.tenantId,
+      targetId: created.id,
+      targetLabel: created.name,
+      afterState: snapshot(created, CLASS_FIELDS),
+      details: `Turma "${created.name}" criada com ${rows.length} disciplina(s)`,
+      metadata: { subjectCount: rows.length },
     });
 
     this.logger.info(
@@ -224,7 +281,6 @@ class ClassesService extends BaseService {
   async update(id: string, tenantId: string, input: UpdateClassInput): Promise<ClassOutput> {
     const classItem = await this.prisma.class.findFirst({
       where: { id, tenantId },
-      select: { id: true, courseId: true },
     });
     if (!classItem) throw new NotFoundError("Class not found");
 
@@ -232,7 +288,7 @@ class ClassesService extends BaseService {
       await this.assertLocation(input.locationId, tenantId);
     }
 
-    let rows: Required<ClassSubjectInput>[] | undefined;
+    let rows: ResolvedClassSubject[] | undefined;
     if (input.subjects) {
       rows = await this.validateSubjects(input.subjects, classItem.courseId, tenantId);
 
@@ -269,7 +325,7 @@ class ClassesService extends BaseService {
           where: { classId: id, subjectId: { notIn: keptSubjectIds } },
         });
         for (const row of rows) {
-          await tx.classSubject.upsert({
+          const classSubject = await tx.classSubject.upsert({
             where: { classId_subjectId: { classId: id, subjectId: row.subjectId } },
             create: {
               tenantId,
@@ -284,7 +340,9 @@ class ClassesService extends BaseService {
               lessonsPerSession: row.lessonsPerSession,
               totalLessonsPlanned: row.totalLessonsPlanned,
             },
+            select: { id: true },
           });
+          await this.syncTeachers(tx, classSubject.id, row.teacherIds, row.teacherId);
         }
       }
 
@@ -299,6 +357,24 @@ class ClassesService extends BaseService {
       });
     });
 
+    // A grade não entra no diff campo a campo (é uma tabela à parte); o que a
+    // trilha guarda é o fato de ela ter sido substituída e por qual conjunto
+    auditService.recordChange({
+      action: "class.updated",
+      tenantId,
+      targetId: id,
+      targetLabel: updated.name,
+      before: classItem,
+      after: { ...updated, ...(rows && { subjectCount: rows.length }) },
+      fields: rows ? [...CLASS_FIELDS, "subjectCount"] : CLASS_FIELDS,
+      ...(rows && {
+        metadata: {
+          curriculumReplaced: true,
+          subjects: rows.map((r) => ({ subjectId: r.subjectId, teacherId: r.teacherId })),
+        },
+      }),
+    });
+
     this.logger.info({ classId: id, tenantId }, "Class updated");
     return this.toOutput(updated);
   }
@@ -309,7 +385,6 @@ class ClassesService extends BaseService {
   async delete(id: string, tenantId: string): Promise<void> {
     const classItem = await this.prisma.class.findFirst({
       where: { id, tenantId },
-      select: { id: true },
     });
     if (!classItem) throw new NotFoundError("Class not found");
 
@@ -324,13 +399,23 @@ class ClassesService extends BaseService {
     }
 
     await this.prisma.class.delete({ where: { id } });
+
+    auditService.record({
+      action: "class.deleted",
+      tenantId,
+      targetId: id,
+      targetLabel: classItem.name,
+      beforeState: snapshot(classItem, CLASS_FIELDS),
+      details: `Turma "${classItem.name}" excluída junto com sua grade e matrículas`,
+    });
+
     this.logger.info({ classId: id, tenantId }, "Class deleted");
   }
 
-  /** O professor leciona alguma disciplina desta turma? */
+  /** O professor está alocado em alguma disciplina desta turma? */
   async isTeacherOfClass(classId: string, userId: string): Promise<boolean> {
     const found = await this.prisma.classSubject.findFirst({
-      where: { classId, teacherId: userId },
+      where: { classId, teachers: { some: { teacherId: userId } } },
       select: { id: true },
     });
     return found !== null;
@@ -354,7 +439,7 @@ class ClassesService extends BaseService {
     subjects: ClassSubjectInput[],
     courseId: string,
     tenantId: string
-  ): Promise<Required<ClassSubjectInput>[]> {
+  ): Promise<ResolvedClassSubject[]> {
     if (subjects.length === 0) {
       throw new ValidationError(
         "A turma precisa de pelo menos uma disciplina",
@@ -391,7 +476,32 @@ class ClassesService extends BaseService {
       );
     }
 
-    const teacherIds = [...new Set(subjects.map((s) => s.teacherId))];
+    // Cada disciplina pode ter um time; o responsável é o primeiro da lista
+    // (ou o teacherId explícito, quando ele está no time)
+    const resolved: ResolvedClassSubject[] = subjects.map((s) => {
+      const requested = s.teacherIds?.length
+        ? s.teacherIds
+        : s.teacherId
+          ? [s.teacherId]
+          : [];
+      const unique = [...new Set(requested.filter(Boolean))];
+      if (unique.length === 0) {
+        throw new ValidationError(
+          "Escolha pelo menos um professor para cada disciplina",
+          "SUBJECT_NO_TEACHER"
+        );
+      }
+      const primary = s.teacherId && unique.includes(s.teacherId) ? s.teacherId : unique[0];
+      return {
+        subjectId: s.subjectId,
+        teacherId: primary,
+        teacherIds: [primary, ...unique.filter((id) => id !== primary)],
+        lessonsPerSession: s.lessonsPerSession ?? 1,
+        totalLessonsPlanned: s.totalLessonsPlanned ?? 0,
+      };
+    });
+
+    const teacherIds = [...new Set(resolved.flatMap((r) => r.teacherIds))];
     const teachers = await this.prisma.user.findMany({
       where: { id: { in: teacherIds }, tenantId },
       select: { id: true, name: true, role: true },
@@ -407,12 +517,30 @@ class ClassesService extends BaseService {
       );
     }
 
-    return subjects.map((s) => ({
-      subjectId: s.subjectId,
-      teacherId: s.teacherId,
-      lessonsPerSession: s.lessonsPerSession ?? 1,
-      totalLessonsPlanned: s.totalLessonsPlanned ?? 0,
-    }));
+    return resolved;
+  }
+
+  /**
+   * Reescreve o time da disciplina: remove quem saiu, adiciona quem entrou e
+   * garante um único responsável.
+   */
+  private async syncTeachers(
+    tx: Prisma.TransactionClient,
+    classSubjectId: string,
+    teacherIds: string[],
+    primaryId: string
+  ): Promise<void> {
+    await tx.classSubjectTeacher.deleteMany({
+      where: { classSubjectId, teacherId: { notIn: teacherIds } },
+    });
+
+    for (const teacherId of teacherIds) {
+      await tx.classSubjectTeacher.upsert({
+        where: { classSubjectId_teacherId: { classSubjectId, teacherId } },
+        create: { classSubjectId, teacherId, isPrimary: teacherId === primaryId },
+        update: { isPrimary: teacherId === primaryId },
+      });
+    }
   }
 
   private toOutput(classItem: any): ClassOutput {
@@ -420,17 +548,39 @@ class ClassesService extends BaseService {
       classItem.course?.lessonDuration ?? 50,
       classItem.course?.lessonDurationUnit ?? "minutes"
     );
-    const subjects: ClassSubjectOutput[] = (classItem.classSubjects ?? []).map((cs: any) => ({
-      id: cs.id,
-      subjectId: cs.subjectId,
-      subjectName: cs.subject.name,
-      subjectCode: cs.subject.code ?? undefined,
-      teacherId: cs.teacherId,
-      teacherName: cs.teacher.name,
-      lessonsPerSession: cs.lessonsPerSession,
-      totalLessonsPlanned: cs.totalLessonsPlanned,
-      sessionDurationMin: lessonDurationMin * cs.lessonsPerSession,
-    }));
+    const subjects: ClassSubjectOutput[] = (classItem.classSubjects ?? []).map((cs: any) => {
+      // Turma criada antes da alocação múltipla pode não ter linhas no time —
+      // o responsável cobre o buraco para a tela nunca ficar sem professor
+      const teachers: ClassSubjectTeacherOutput[] = (cs.teachers ?? []).length
+        ? cs.teachers
+            .map((t: any) => ({
+              id: t.teacherId,
+              name: t.teacher.name,
+              isPrimary: t.isPrimary,
+            }))
+            // Responsável primeiro; o resto em ordem alfabética
+            .sort((a: ClassSubjectTeacherOutput, b: ClassSubjectTeacherOutput) =>
+              a.isPrimary === b.isPrimary
+                ? a.name.localeCompare(b.name)
+                : a.isPrimary
+                  ? -1
+                  : 1
+            )
+        : [{ id: cs.teacherId, name: cs.teacher.name, isPrimary: true }];
+
+      return {
+        id: cs.id,
+        subjectId: cs.subjectId,
+        subjectName: cs.subject.name,
+        subjectCode: cs.subject.code ?? undefined,
+        teacherId: cs.teacherId,
+        teacherName: cs.teacher.name,
+        teachers,
+        lessonsPerSession: cs.lessonsPerSession,
+        totalLessonsPlanned: cs.totalLessonsPlanned,
+        sessionDurationMin: lessonDurationMin * cs.lessonsPerSession,
+      };
+    });
 
     return {
       id: classItem.id,

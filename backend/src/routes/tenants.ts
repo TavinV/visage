@@ -62,6 +62,7 @@ router.post(
 /**
  * GET /tenants
  * Lista tenants (super admin only)
+ * Query param ?includeInactive=true traz também as canceladas.
  */
 router.get(
   "/",
@@ -77,6 +78,7 @@ router.get(
         search: req.query.search as string | undefined,
         status: req.query.status as string | undefined,
         institutionType: req.query.institutionType as "school" | "university" | undefined,
+        includeInactive: req.query.includeInactive === "true",
       });
       res.json(result);
     } catch (error) {

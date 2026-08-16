@@ -5,6 +5,11 @@
 
 import { BaseService, ListParams, PaginatedResult } from "./base.service";
 import { NotFoundError } from "../utils/errors";
+import { auditService } from "./audit.service";
+import { snapshot } from "../utils/diff";
+
+/** Campos do local acompanhados pela trilha de auditoria. */
+const LOCATION_FIELDS = ["name", "address", "isActive"] as const;
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -96,6 +101,14 @@ class LocationsService extends BaseService {
       },
     });
 
+    auditService.record({
+      action: "location.created",
+      tenantId: input.tenantId,
+      targetId: location.id,
+      targetLabel: location.name,
+      afterState: snapshot(location, LOCATION_FIELDS),
+    });
+
     this.logger.info({ locationId: location.id, tenantId: input.tenantId }, "Location created");
     return this.toOutput(location);
   }
@@ -122,6 +135,16 @@ class LocationsService extends BaseService {
       },
     });
 
+    auditService.recordChange({
+      action: "location.updated",
+      tenantId,
+      targetId: id,
+      targetLabel: updated.name,
+      before: location,
+      after: updated,
+      fields: LOCATION_FIELDS,
+    });
+
     this.logger.info({ locationId: id, tenantId }, "Location updated");
     return this.toOutput(updated);
   }
@@ -136,6 +159,15 @@ class LocationsService extends BaseService {
     if (!location) throw new NotFoundError("Location not found");
 
     await this.prisma.location.delete({ where: { id } });
+
+    auditService.record({
+      action: "location.deleted",
+      tenantId,
+      targetId: id,
+      targetLabel: location.name,
+      beforeState: snapshot(location, LOCATION_FIELDS),
+    });
+
     this.logger.info({ locationId: id, tenantId }, "Location deleted");
   }
 

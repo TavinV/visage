@@ -30,7 +30,7 @@ const GUIDE_BLINK_BEFORE_OVERLAY_MS = 550;
 
 const loadingPhrases = [
   "Analisando a imagem capturada",
-  "Verificando vivacidade",
+  "Confirmando que é uma pessoa real",
   "Comparando com os alunos da chamada",
   "Confirmando identidade",
   "Registrando presença",

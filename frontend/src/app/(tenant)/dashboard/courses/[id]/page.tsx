@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Plus, Pencil, Trash2, Clock, Library } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, Trash2, Clock, Library, Layers } from "lucide-react";
 import { api, qs } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import type { Course, Paginated, Subject } from "@/lib/types";
@@ -27,6 +27,8 @@ import {
   Skeleton,
   useToast,
 } from "@/components/ui";
+import { ApplyCurriculumModal } from "@/components/app/ApplyCurriculumModal";
+import { ShowInactiveToggle, inactiveRowClass } from "@/components/app/ShowInactive";
 
 /**
  * Página do curso: a grade (aulas por dia × duração) e o catálogo de
@@ -45,7 +47,14 @@ export default function CourseDetailPage() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Subject | null>(null);
   const [deleting, setDeleting] = useState<Subject | null>(null);
-  const [form, setForm] = useState({ name: "", code: "" });
+  const [applying, setApplying] = useState(false);
+  const [showInactive, setShowInactive] = useState(false);
+  const [form, setForm] = useState({
+    name: "",
+    code: "",
+    defaultLessonsPerSession: 1,
+    defaultTotalLessonsPlanned: 0,
+  });
 
   const course = useQuery({
     queryKey: ["courses", id],
@@ -53,14 +62,25 @@ export default function CourseDetailPage() {
   });
 
   const subjects = useQuery({
-    queryKey: ["subjects", "by-course", id],
+    queryKey: ["subjects", "by-course", id, { showInactive }],
     queryFn: () =>
-      api.get<Paginated<Subject>>(`/subjects${qs({ courseId: id, limit: 100 })}`),
+      api.get<Paginated<Subject>>(
+        `/subjects${qs({
+          courseId: id,
+          limit: 100,
+          isActive: showInactive ? undefined : true,
+        })}`
+      ),
   });
 
   const save = useMutation({
     mutationFn: () => {
-      const body = { name: form.name.trim(), code: form.code.trim() || undefined };
+      const body = {
+        name: form.name.trim(),
+        code: form.code.trim() || undefined,
+        defaultLessonsPerSession: form.defaultLessonsPerSession,
+        defaultTotalLessonsPlanned: form.defaultTotalLessonsPlanned,
+      };
       return editing
         ? api.patch(`/subjects/${editing.id}`, body)
         : api.post("/subjects", { ...body, courseId: id });
@@ -86,13 +106,23 @@ export default function CourseDetailPage() {
   });
 
   const openCreate = () => {
-    setForm({ name: "", code: "" });
+    setForm({
+      name: "",
+      code: "",
+      defaultLessonsPerSession: 1,
+      defaultTotalLessonsPlanned: 0,
+    });
     setEditing(null);
     setCreating(true);
   };
 
   const openEdit = (s: Subject) => {
-    setForm({ name: s.name, code: s.code ?? "" });
+    setForm({
+      name: s.name,
+      code: s.code ?? "",
+      defaultLessonsPerSession: s.defaultLessonsPerSession,
+      defaultTotalLessonsPlanned: s.defaultTotalLessonsPlanned,
+    });
     setCreating(false);
     setEditing(s);
   };
@@ -180,14 +210,32 @@ export default function CourseDetailPage() {
       <Card>
         <CardHeader
           title="Disciplinas do currículo"
-          description="O catálogo do curso. O professor e a carga de cada uma são definidos por turma."
+          description="O catálogo do curso: a base que todas as turmas cursam. O professor de cada uma é definido por turma."
           icon={<Library size={18} strokeWidth={1.75} />}
           actions={
-            canManage && (
-              <Button size="sm" onClick={openCreate} iconLeft={<Plus size={15} />}>
-                Adicionar disciplina
-              </Button>
-            )
+            <div className="flex items-center gap-2">
+              <ShowInactiveToggle
+                checked={showInactive}
+                onChange={setShowInactive}
+                label="Mostrar inativas"
+                className="h-9 text-xs"
+              />
+              {canManage && (
+                <>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setApplying(true)}
+                    iconLeft={<Layers size={15} />}
+                  >
+                    Aplicar grade às turmas
+                  </Button>
+                  <Button size="sm" onClick={openCreate} iconLeft={<Plus size={15} />}>
+                    Adicionar disciplina
+                  </Button>
+                </>
+              )}
+            </div>
           }
         />
         <Table>
@@ -195,21 +243,30 @@ export default function CourseDetailPage() {
             <tr>
               <Th>Disciplina</Th>
               <Th>Sigla</Th>
+              <Th>Carga padrão</Th>
               <Th>Turmas que cursam</Th>
               <Th className="w-24 text-right">Ações</Th>
             </tr>
           </thead>
           <tbody>
             <TableState
-              colSpan={4}
+              colSpan={5}
               loading={subjects.isPending}
               error={subjects.error ? friendlyError(subjects.error) : null}
               empty={subjects.data?.data.length === 0}
-              emptyTitle="Nenhuma disciplina no currículo deste curso."
-              emptyDescription="Sem disciplinas, não é possível montar a grade de uma turma."
+              emptyTitle={
+                showInactive
+                  ? "Nenhuma disciplina no currículo deste curso."
+                  : "Nenhuma disciplina ativa no currículo deste curso."
+              }
+              emptyDescription={
+                showInactive
+                  ? "Sem disciplinas, não é possível montar a grade de uma turma."
+                  : "Adicione uma disciplina ou marque “Mostrar inativas” para ver as desativadas."
+              }
             />
             {subjects.data?.data.map((s) => (
-              <Tr key={s.id}>
+              <Tr key={s.id} className={s.isActive ? undefined : inactiveRowClass}>
                 <Td>
                   <span className="font-medium text-flauzino-navy-900">{s.name}</span>
                   {!s.isActive && (
@@ -219,6 +276,17 @@ export default function CourseDetailPage() {
                   )}
                 </Td>
                 <Td className="font-mono-ds text-xs">{s.code ?? "—"}</Td>
+                <Td className="text-xs text-flauzino-slate-600">
+                  <span className="font-mono-ds">{s.defaultLessonsPerSession}</span> aula(s) por
+                  chamada
+                  {s.defaultTotalLessonsPlanned > 0 && (
+                    <span className="text-flauzino-slate-500">
+                      {" "}
+                      · <span className="font-mono-ds">{s.defaultTotalLessonsPlanned}</span> no
+                      período
+                    </span>
+                  )}
+                </Td>
                 <Td className="font-mono-ds text-xs">{s.classCount ?? 0}</Td>
                 <Td>
                   {canManage && (
@@ -283,8 +351,41 @@ export default function CourseDetailPage() {
             value={form.code}
             onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
           />
+          <div className="grid grid-cols-2 gap-4">
+            <Input
+              label="Aulas por chamada"
+              type="number"
+              min={1}
+              max={12}
+              hint="Padrão ao aplicar nas turmas."
+              value={form.defaultLessonsPerSession}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  defaultLessonsPerSession: Math.max(1, Number(e.target.value) || 1),
+                }))
+              }
+            />
+            <Input
+              label="Aulas no período"
+              type="number"
+              min={0}
+              hint="Denominador da frequência."
+              value={form.defaultTotalLessonsPlanned}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  defaultTotalLessonsPlanned: Math.max(0, Number(e.target.value) || 0),
+                }))
+              }
+            />
+          </div>
         </div>
       </Modal>
+
+      {applying && (
+        <ApplyCurriculumModal course={c} onClose={() => setApplying(false)} />
+      )}
 
       <ConfirmDialog
         open={deleting !== null}
