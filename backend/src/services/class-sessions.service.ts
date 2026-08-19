@@ -22,7 +22,6 @@ import { BaseService, ListParams, PaginatedResult } from "./base.service";
 import { NotFoundError, ValidationError } from "../utils/errors";
 import { engineWarmCache } from "../lib/faceEngine";
 import { getTenantDekPayload, getCandidatesForClass } from "./facial-payload";
-import { lessonDurationToMinutes } from "./subjects.service";
 import { sseService } from "./sse.service";
 import { auditService } from "./audit.service";
 
@@ -270,8 +269,6 @@ class ClassSessionsService extends BaseService {
             locationId: true,
             course: {
               select: {
-                lessonDuration: true,
-                lessonDurationUnit: true,
                 academicPeriod: {
                   select: { name: true, startsAt: true, endsAt: true, isActive: true },
                 },
@@ -351,10 +348,9 @@ class ClassSessionsService extends BaseService {
     this.assertWithinAcademicPeriod(startedAt, classSubject.class.course.academicPeriod);
 
     const classesWorth = classSubject.lessonsPerSession;
-    const lessonDurationMin = lessonDurationToMinutes(
-      classSubject.class.course.lessonDuration,
-      classSubject.class.course.lessonDurationUnit
-    );
+    // Duração é da disciplina NESTA turma (ClassSubject), não mais herdada do
+    // curso inteiro — turmas diferentes podem ter aulas de duração diferente.
+    const lessonDurationMin = classSubject.lessonDurationMin;
     const scheduledEndsAt = this.computeScheduledEnd(
       startedAt,
       classesWorth,

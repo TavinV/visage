@@ -24,11 +24,20 @@ import {
   Button,
   Input,
   Textarea,
+  DatePicker,
+  Select,
   Modal,
   ConfirmDialog,
   Switch,
+  FilterButton,
+  FilterModal,
   useToast,
 } from "@/components/ui";
+
+const tristateOptions = (yes: string, no: string) => [
+  { value: "true", label: yes },
+  { value: "false", label: no },
+];
 import { ActiveBadge } from "@/components/app/badges";
 import { ShowInactiveToggle, inactiveRowClass } from "@/components/app/ShowInactive";
 
@@ -48,13 +57,27 @@ export default function LocationsPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [showInactive, setShowInactive] = useState(false);
+  const [hasAddress, setHasAddress] = useState("");
+  const [hasDevice, setHasDevice] = useState("");
+  const [createdFrom, setCreatedFrom] = useState("");
+  const [createdTo, setCreatedTo] = useState("");
   const debouncedSearch = useDebounced(search);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Location | null>(null);
   const [deleting, setDeleting] = useState<Location | null>(null);
 
+  const activeFilterCount =
+    (showInactive ? 1 : 0) +
+    (hasAddress ? 1 : 0) +
+    (hasDevice ? 1 : 0) +
+    (createdFrom || createdTo ? 1 : 0);
+
   const list = useQuery({
-    queryKey: ["locations", { page, search: debouncedSearch, showInactive }],
+    queryKey: [
+      "locations",
+      { page, search: debouncedSearch, showInactive, hasAddress, hasDevice, createdFrom, createdTo },
+    ],
     queryFn: () =>
       api.get<Paginated<Location>>(
         `/locations${qs({
@@ -62,6 +85,10 @@ export default function LocationsPage() {
           limit: 20,
           search: debouncedSearch,
           isActive: showInactive ? undefined : true,
+          hasAddress,
+          hasDevice,
+          created_from: createdFrom,
+          created_to: createdTo,
         })}`
       ),
   });
@@ -136,6 +163,64 @@ export default function LocationsPage() {
           }}
           className="w-72"
         />
+        <FilterButton count={activeFilterCount} onClick={() => setFiltersOpen(true)} />
+      </div>
+
+      <FilterModal
+        open={filtersOpen}
+        onClose={() => setFiltersOpen(false)}
+        onClear={() => {
+          setShowInactive(false);
+          setHasAddress("");
+          setHasDevice("");
+          setCreatedFrom("");
+          setCreatedTo("");
+          setPage(1);
+        }}
+        activeCount={activeFilterCount}
+      >
+        <div className="grid grid-cols-2 gap-4">
+          <DatePicker
+            label="Cadastrada de"
+            value={createdFrom}
+            onChange={(v) => {
+              setCreatedFrom(v);
+              setPage(1);
+            }}
+            max={createdTo || undefined}
+            clearable
+          />
+          <DatePicker
+            label="até"
+            value={createdTo}
+            onChange={(v) => {
+              setCreatedTo(v);
+              setPage(1);
+            }}
+            min={createdFrom || undefined}
+            clearable
+          />
+        </div>
+        <Select
+          label="Endereço"
+          value={hasAddress}
+          onChange={(e) => {
+            setHasAddress(e.target.value);
+            setPage(1);
+          }}
+          placeholder="Todas"
+          options={tristateOptions("Com endereço cadastrado", "Sem endereço cadastrado")}
+        />
+        <Select
+          label="Totem vinculado"
+          value={hasDevice}
+          onChange={(e) => {
+            setHasDevice(e.target.value);
+            setPage(1);
+          }}
+          placeholder="Todas"
+          options={tristateOptions("Com totem vinculado", "Sem totem vinculado")}
+        />
         <ShowInactiveToggle
           checked={showInactive}
           onChange={(next) => {
@@ -143,8 +228,9 @@ export default function LocationsPage() {
             setPage(1);
           }}
           label="Mostrar inativas"
+          className="w-full justify-start"
         />
-      </div>
+      </FilterModal>
 
       <Card>
         <Table>

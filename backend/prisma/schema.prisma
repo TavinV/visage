@@ -191,7 +191,9 @@ model User {
   auditLogs    AuditLog[]
   authSessions AuthSession[] @relation("UserAuthSessions")
 
-  @@unique([tenantId, email])
+  // Email é único no sistema inteiro, não só por tenant — evita que a mesma
+  // pessoa (ou credencial) apareça duplicada em instituições diferentes.
+  @@unique([email])
   @@unique([tenantId, document])
   // Busca do aluno pela matrícula no totem — sem unicidade no banco porque
   // bases legadas costumam ter códigos repetidos; a duplicidade é barrada no
@@ -330,9 +332,9 @@ model Course {
 }
 
 /// Catálogo de disciplinas de um curso (ex.: "Matemática" em Técnico em
-/// Mecânica). Só o nome — quem leciona e quanta carga tem é decidido por
-/// turma, em ClassSubject: a mesma Matemática pode ter professores e cargas
-/// diferentes no 3ºA e no 3ºB.
+/// Mecânica). Só nome e sigla — quem leciona, quanta carga e quanto dura a
+/// aula é decidido por turma, em ClassSubject: a mesma Matemática pode ter
+/// professores, cargas e durações diferentes no 3ºA e no 3ºB.
 model Subject {
   id       String @id @default(uuid())
   tenantId String
@@ -345,11 +347,6 @@ model Subject {
   code String? @db.VarChar(30) // sigla institucional (ex.: "MAT101")
 
   isActive Boolean @default(true)
-
-  // Carga padrão do currículo: o que a secretaria usa ao aplicar a grade do
-  // curso nas turmas. Cada turma pode divergir depois, em ClassSubject.
-  defaultLessonsPerSession   Int @default(1)
-  defaultTotalLessonsPlanned Int @default(0)
 
   classSubjects ClassSubject[]
 
@@ -416,6 +413,12 @@ model ClassSubject {
 
   /// Aulas previstas no período — denominador real da frequência.
   totalLessonsPlanned Int @default(0)
+
+  /// Duração de UMA aula desta disciplina nesta turma, em minutos. Era
+  /// herdada só do Course (uma duração única para o curso inteiro); agora
+  /// cada turma-disciplina tem a sua — a mesma Matemática pode durar 50min
+  /// no 3ºA e 40min no 3ºB.
+  lessonDurationMin Int @default(50)
 
   classSessions    ClassSession[]
   studentSummaries StudentClassSummary[]

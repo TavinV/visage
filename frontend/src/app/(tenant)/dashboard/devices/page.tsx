@@ -32,12 +32,20 @@ import {
   Button,
   Input,
   Select,
+  DatePicker,
   Modal,
   ConfirmDialog,
   Switch,
   Badge,
+  FilterButton,
+  FilterModal,
   useToast,
 } from "@/components/ui";
+
+const tristateOptions = (yes: string, no: string) => [
+  { value: "true", label: yes },
+  { value: "false", label: no },
+];
 import { ActiveBadge } from "@/components/app/badges";
 import { ShowInactiveToggle, inactiveRowClass } from "@/components/app/ShowInactive";
 import { DeviceCalibrationModal } from "@/components/app/DeviceCalibrationModal";
@@ -58,7 +66,12 @@ export default function DevicesPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [showInactive, setShowInactive] = useState(false);
+  const [locationFilter, setLocationFilter] = useState("");
+  const [allowEnrollment, setAllowEnrollment] = useState("");
+  const [lastSeenFrom, setLastSeenFrom] = useState("");
+  const [lastSeenTo, setLastSeenTo] = useState("");
   const debouncedSearch = useDebounced(search);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Device | null>(null);
   const [deleting, setDeleting] = useState<Device | null>(null);
@@ -66,8 +79,17 @@ export default function DevicesPage() {
   const [calibrating, setCalibrating] = useState<Device | null>(null);
   const [createdKey, setCreatedKey] = useState<{ label: string; apiKey: string } | null>(null);
 
+  const activeFilterCount =
+    (showInactive ? 1 : 0) +
+    (locationFilter ? 1 : 0) +
+    (allowEnrollment ? 1 : 0) +
+    (lastSeenFrom || lastSeenTo ? 1 : 0);
+
   const list = useQuery({
-    queryKey: ["devices", { page, search: debouncedSearch, showInactive }],
+    queryKey: [
+      "devices",
+      { page, search: debouncedSearch, showInactive, locationFilter, allowEnrollment, lastSeenFrom, lastSeenTo },
+    ],
     queryFn: () =>
       api.get<Paginated<Device>>(
         `/devices${qs({
@@ -76,6 +98,10 @@ export default function DevicesPage() {
           search: debouncedSearch,
           // Sem o filtro, um totem desativado continua disputando a lista
           isActive: showInactive ? undefined : true,
+          locationId: locationFilter,
+          allowEnrollment,
+          last_seen_from: lastSeenFrom,
+          last_seen_to: lastSeenTo,
         })}`
       ),
   });
@@ -185,7 +211,7 @@ export default function DevicesPage() {
         }
       />
 
-      <div className="mb-4">
+      <div className="mb-4 flex flex-wrap items-end gap-3">
         <Input
           placeholder="Buscar por rótulo ou identificador"
           icon={<Search size={15} />}
@@ -196,6 +222,64 @@ export default function DevicesPage() {
           }}
           className="w-80"
         />
+        <FilterButton count={activeFilterCount} onClick={() => setFiltersOpen(true)} />
+      </div>
+
+      <FilterModal
+        open={filtersOpen}
+        onClose={() => setFiltersOpen(false)}
+        onClear={() => {
+          setShowInactive(false);
+          setLocationFilter("");
+          setAllowEnrollment("");
+          setLastSeenFrom("");
+          setLastSeenTo("");
+          setPage(1);
+        }}
+        activeCount={activeFilterCount}
+      >
+        <Select
+          label="Sala vinculada"
+          value={locationFilter}
+          onChange={(e) => {
+            setLocationFilter(e.target.value);
+            setPage(1);
+          }}
+          placeholder="Todas as salas"
+          options={locationOptions}
+        />
+        <Select
+          label="Cadastro biométrico"
+          value={allowEnrollment}
+          onChange={(e) => {
+            setAllowEnrollment(e.target.value);
+            setPage(1);
+          }}
+          placeholder="Todos"
+          options={tristateOptions("Permite cadastro", "Não permite cadastro")}
+        />
+        <div className="grid grid-cols-2 gap-4">
+          <DatePicker
+            label="Visto de"
+            value={lastSeenFrom}
+            onChange={(v) => {
+              setLastSeenFrom(v);
+              setPage(1);
+            }}
+            max={lastSeenTo || undefined}
+            clearable
+          />
+          <DatePicker
+            label="até"
+            value={lastSeenTo}
+            onChange={(v) => {
+              setLastSeenTo(v);
+              setPage(1);
+            }}
+            min={lastSeenFrom || undefined}
+            clearable
+          />
+        </div>
         <ShowInactiveToggle
           checked={showInactive}
           onChange={(next) => {
@@ -203,8 +287,9 @@ export default function DevicesPage() {
             setPage(1);
           }}
           label="Mostrar inativos"
+          className="w-full justify-start"
         />
-      </div>
+      </FilterModal>
 
       <Card>
         <Table>

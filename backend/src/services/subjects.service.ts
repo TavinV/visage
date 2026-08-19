@@ -14,13 +14,7 @@ import { auditService } from "./audit.service";
 import { snapshot } from "../utils/diff";
 
 /** Campos da disciplina acompanhados pela trilha de auditoria. */
-const SUBJECT_FIELDS = [
-  "name",
-  "code",
-  "isActive",
-  "defaultLessonsPerSession",
-  "defaultTotalLessonsPlanned",
-] as const;
+const SUBJECT_FIELDS = ["name", "code", "isActive"] as const;
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -29,16 +23,12 @@ export interface CreateSubjectInput {
   courseId: string;
   name: string;
   code?: string;
-  defaultLessonsPerSession?: number;
-  defaultTotalLessonsPlanned?: number;
 }
 
 export interface UpdateSubjectInput {
   name?: string;
   code?: string | null;
   isActive?: boolean;
-  defaultLessonsPerSession?: number;
-  defaultTotalLessonsPlanned?: number;
 }
 
 export interface SubjectOutput {
@@ -49,9 +39,6 @@ export interface SubjectOutput {
   name: string;
   code?: string;
   isActive: boolean;
-  /** Carga sugerida ao aplicar o currículo do curso nas turmas. */
-  defaultLessonsPerSession: number;
-  defaultTotalLessonsPlanned: number;
   /** Em quantas turmas esta disciplina é cursada. */
   classCount?: number;
   createdAt: Date;
@@ -154,12 +141,6 @@ class SubjectsService extends BaseService {
         courseId: input.courseId,
         name: input.name,
         code: input.code ?? null,
-        ...(input.defaultLessonsPerSession !== undefined && {
-          defaultLessonsPerSession: input.defaultLessonsPerSession,
-        }),
-        ...(input.defaultTotalLessonsPlanned !== undefined && {
-          defaultTotalLessonsPlanned: input.defaultTotalLessonsPlanned,
-        }),
       },
       include: SubjectsService.INCLUDE,
     });
@@ -202,12 +183,6 @@ class SubjectsService extends BaseService {
         ...(input.name && { name: input.name }),
         ...(input.code !== undefined && { code: input.code }),
         ...(input.isActive !== undefined && { isActive: input.isActive }),
-        ...(input.defaultLessonsPerSession !== undefined && {
-          defaultLessonsPerSession: input.defaultLessonsPerSession,
-        }),
-        ...(input.defaultTotalLessonsPlanned !== undefined && {
-          defaultTotalLessonsPlanned: input.defaultTotalLessonsPlanned,
-        }),
       },
       include: SubjectsService.INCLUDE,
     });
@@ -266,8 +241,6 @@ class SubjectsService extends BaseService {
       name: subject.name,
       code: subject.code ?? undefined,
       isActive: subject.isActive,
-      defaultLessonsPerSession: subject.defaultLessonsPerSession ?? 1,
-      defaultTotalLessonsPlanned: subject.defaultTotalLessonsPlanned ?? 0,
       classCount: subject._count?.classSubjects,
       createdAt: subject.createdAt,
     };

@@ -7,6 +7,7 @@ import { z } from "zod";
 import { academicPeriodsService } from "../services/academic-periods.service";
 import { authenticate } from "../middleware/authenticate";
 import { validate } from "../middleware/validate";
+import { strList, parseDate } from "../utils/query";
 
 const router = Router();
 
@@ -52,6 +53,11 @@ router.get(
         sortOrder: req.query.sortOrder as "asc" | "desc" | undefined,
         search: req.query.search as string | undefined,
         isActive: req.query.isActive ? req.query.isActive === "true" : undefined,
+        temporal: strList(req.query.temporal),
+        startsFrom: parseDate(req.query.starts_from),
+        startsTo: parseDate(req.query.starts_to, true),
+        endsFrom: parseDate(req.query.ends_from),
+        endsTo: parseDate(req.query.ends_to, true),
       });
 
       res.json(result);

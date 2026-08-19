@@ -73,7 +73,7 @@ export function StatCard({
   href?: string;
 }) {
   const card = (
-    <Card className={cn("p-5", href && "hover:border-flauzino-accent-100 hover:shadow-fl-md")}>
+    <Card className={cn("h-full p-5", href && "hover:border-flauzino-accent-100 hover:shadow-fl-md")}>
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium text-flauzino-slate-500">{label}</span>
         <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-flauzino-accent-50 text-flauzino-accent-600">
@@ -95,7 +95,16 @@ export function StatCard({
     </Card>
   );
 
-  return href ? <Link href={href}>{card}</Link> : card;
+  // Link é inline por padrão: sem "block h-full" ele não herda a altura da
+  // linha do grid, e o Card lá dentro encolhe para o próprio conteúdo — é
+  // assim que cards de uma mesma fileira ficam com alturas diferentes.
+  return href ? (
+    <Link href={href} className="block h-full">
+      {card}
+    </Link>
+  ) : (
+    card
+  );
 }
 
 /** Contador compacto da faixa secundária. */
@@ -104,17 +113,20 @@ export function MiniStat({
   value,
   icon,
   href,
+  className,
 }: {
   label: string;
   value: string;
   icon: React.ReactNode;
   href?: string;
+  className?: string;
 }) {
   const card = (
     <Card
       className={cn(
         "flex h-full items-center gap-3 p-4",
-        href && "hover:border-flauzino-accent-100 hover:shadow-fl-md"
+        href && "hover:border-flauzino-accent-100 hover:shadow-fl-md",
+        !href && className
       )}
     >
       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-flauzino-slate-100 text-flauzino-slate-600">
@@ -127,5 +139,14 @@ export function MiniStat({
     </Card>
   );
 
-  return href ? <Link href={href}>{card}</Link> : card;
+  // O className de layout (grow/basis num flex-wrap, por exemplo) precisa ir
+  // no elemento que o container enxerga como item — o <Link>, quando existe,
+  // não o <Card> que fica um nível abaixo dele.
+  return href ? (
+    <Link href={href} className={cn("block", className)}>
+      {card}
+    </Link>
+  ) : (
+    card
+  );
 }

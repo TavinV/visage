@@ -7,6 +7,7 @@ import { z } from "zod";
 import { coursesService } from "../services/courses.service";
 import { authenticate } from "../middleware/authenticate";
 import { validate } from "../middleware/validate";
+import { parseDate, boolParam } from "../utils/query";
 
 const router = Router();
 
@@ -41,6 +42,7 @@ const ApplyCurriculumSchema = z.object({
         teacherIds: z.array(z.string().uuid()).min(1).max(20),
         lessonsPerSession: z.number().int().min(1).max(12).optional(),
         totalLessonsPlanned: z.number().int().min(0).max(1000).optional(),
+        lessonDurationMin: z.number().int().min(1).max(480).optional(),
       })
     )
     .min(1),
@@ -75,6 +77,10 @@ router.get(
         sortOrder: req.query.sortOrder as "asc" | "desc" | undefined,
         search: req.query.search as string | undefined,
         academicPeriodId: req.query.academicPeriodId as string | undefined,
+        createdFrom: parseDate(req.query.created_from),
+        createdTo: parseDate(req.query.created_to, true),
+        hasClasses: boolParam(req.query.hasClasses),
+        hasSubjects: boolParam(req.query.hasSubjects),
       });
 
       res.json(result);

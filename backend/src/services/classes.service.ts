@@ -40,6 +40,8 @@ export interface ClassSubjectInput {
   lessonsPerSession?: number;
   /** Aulas previstas no período — denominador da frequência. */
   totalLessonsPlanned?: number;
+  /** Duração de uma aula desta disciplina nesta turma, em minutos. */
+  lessonDurationMin?: number;
 }
 
 /** Linha da grade já normalizada: responsável + time, sem duplicatas. */
@@ -49,6 +51,7 @@ export interface ResolvedClassSubject {
   teacherIds: string[];
   lessonsPerSession: number;
   totalLessonsPlanned: number;
+  lessonDurationMin: number;
 }
 
 export interface CreateClassInput {
@@ -88,7 +91,9 @@ export interface ClassSubjectOutput {
   teachers: ClassSubjectTeacherOutput[];
   lessonsPerSession: number;
   totalLessonsPlanned: number;
-  /** Duração de uma chamada desta disciplina, em minutos. */
+  /** Duração de UMA aula desta disciplina nesta turma, em minutos. */
+  lessonDurationMin: number;
+  /** Duração de uma chamada inteira desta disciplina (lessonDurationMin × lessonsPerSession). */
   sessionDurationMin: number;
 }
 
@@ -117,6 +122,7 @@ export interface ListClassesParams extends ListParams {
   subjectId?: string;
   /** Professor vê apenas turmas em que leciona alguma disciplina. */
   teacherId?: string;
+  locationId?: string;
 }
 
 // ── Serviço ───────────────────────────────────────────────────────────────────
@@ -162,6 +168,7 @@ class ClassesService extends BaseService {
     const where = {
       tenantId: params.tenantId,
       ...(params.courseId && { courseId: params.courseId }),
+      ...(params.locationId && { locationId: params.locationId }),
       // Filtros por disciplina/professor atravessam o vínculo. O professor é
       // procurado no time da disciplina, não só entre os responsáveis — quem
       // divide a disciplina também precisa ver a turma.
@@ -215,7 +222,7 @@ class ClassesService extends BaseService {
   async create(input: CreateClassInput): Promise<ClassOutput> {
     const course = await this.prisma.course.findFirst({
       where: { id: input.courseId, tenantId: input.tenantId },
-      select: { id: true },
+      select: { id: true, lessonDuration: true, lessonDurationUnit: true },
     });
     if (!course) throw new NotFoundError("Course not found in this tenant");
 
@@ -223,10 +230,15 @@ class ClassesService extends BaseService {
       await this.assertLocation(input.locationId, input.tenantId);
     }
 
+    const defaultLessonDurationMin = lessonDurationToMinutes(
+      course.lessonDuration,
+      course.lessonDurationUnit
+    );
     const rows = await this.validateSubjects(
       input.subjects,
       input.courseId,
-      input.tenantId
+      input.tenantId,
+      defaultLessonDurationMin
     );
 
     const created = await this.prisma.class.create({
@@ -243,6 +255,7 @@ class ClassesService extends BaseService {
             teacherId: r.teacherId,
             lessonsPerSession: r.lessonsPerSession,
             totalLessonsPlanned: r.totalLessonsPlanned,
+            lessonDurationMin: r.lessonDurationMin,
             teachers: {
               create: r.teacherIds.map((teacherId) => ({
                 teacherId,
@@ -290,7 +303,20 @@ class ClassesService extends BaseService {
 
     let rows: ResolvedClassSubject[] | undefined;
     if (input.subjects) {
-      rows = await this.validateSubjects(input.subjects, classItem.courseId, tenantId);
+      const course = await this.prisma.course.findFirst({
+        where: { id: classItem.courseId },
+        select: { lessonDuration: true, lessonDurationUnit: true },
+      });
+      const defaultLessonDurationMin = lessonDurationToMinutes(
+        course?.lessonDuration ?? 50,
+        course?.lessonDurationUnit ?? "minutes"
+      );
+      rows = await this.validateSubjects(
+        input.subjects,
+        classItem.courseId,
+        tenantId,
+        defaultLessonDurationMin
+      );
 
       const keptSubjectIds = new Set(rows.map((r) => r.subjectId));
       const existing = await this.prisma.classSubject.findMany({
@@ -334,11 +360,13 @@ class ClassesService extends BaseService {
               teacherId: row.teacherId,
               lessonsPerSession: row.lessonsPerSession,
               totalLessonsPlanned: row.totalLessonsPlanned,
+              lessonDurationMin: row.lessonDurationMin,
             },
             update: {
               teacherId: row.teacherId,
               lessonsPerSession: row.lessonsPerSession,
               totalLessonsPlanned: row.totalLessonsPlanned,
+              lessonDurationMin: row.lessonDurationMin,
             },
             select: { id: true },
           });
@@ -438,7 +466,8 @@ class ClassesService extends BaseService {
   private async validateSubjects(
     subjects: ClassSubjectInput[],
     courseId: string,
-    tenantId: string
+    tenantId: string,
+    defaultLessonDurationMin: number
   ): Promise<ResolvedClassSubject[]> {
     if (subjects.length === 0) {
       throw new ValidationError(
@@ -498,6 +527,7 @@ class ClassesService extends BaseService {
         teacherIds: [primary, ...unique.filter((id) => id !== primary)],
         lessonsPerSession: s.lessonsPerSession ?? 1,
         totalLessonsPlanned: s.totalLessonsPlanned ?? 0,
+        lessonDurationMin: s.lessonDurationMin ?? defaultLessonDurationMin,
       };
     });
 
@@ -544,7 +574,9 @@ class ClassesService extends BaseService {
   }
 
   private toOutput(classItem: any): ClassOutput {
-    const lessonDurationMin = lessonDurationToMinutes(
+    // Grade do curso — só um valor de referência pra pré-preencher a tela;
+    // cada disciplina da turma tem sua própria duração em cs.lessonDurationMin.
+    const courseLessonDurationMin = lessonDurationToMinutes(
       classItem.course?.lessonDuration ?? 50,
       classItem.course?.lessonDurationUnit ?? "minutes"
     );
@@ -578,7 +610,8 @@ class ClassesService extends BaseService {
         teachers,
         lessonsPerSession: cs.lessonsPerSession,
         totalLessonsPlanned: cs.totalLessonsPlanned,
-        sessionDurationMin: lessonDurationMin * cs.lessonsPerSession,
+        lessonDurationMin: cs.lessonDurationMin,
+        sessionDurationMin: cs.lessonDurationMin * cs.lessonsPerSession,
       };
     });
 
@@ -591,7 +624,7 @@ class ClassesService extends BaseService {
       room: classItem.room ?? undefined,
       locationId: classItem.locationId ?? undefined,
       locationName: classItem.location?.name,
-      lessonDurationMin,
+      lessonDurationMin: courseLessonDurationMin,
       lessonsPerDay: classItem.course?.lessonsPerDay ?? 4,
       subjects,
       lessonsAssigned: subjects.reduce((sum, s) => sum + s.lessonsPerSession, 0),

@@ -49,12 +49,7 @@ export default function CourseDetailPage() {
   const [deleting, setDeleting] = useState<Subject | null>(null);
   const [applying, setApplying] = useState(false);
   const [showInactive, setShowInactive] = useState(false);
-  const [form, setForm] = useState({
-    name: "",
-    code: "",
-    defaultLessonsPerSession: 1,
-    defaultTotalLessonsPlanned: 0,
-  });
+  const [form, setForm] = useState({ name: "", code: "" });
 
   const course = useQuery({
     queryKey: ["courses", id],
@@ -78,8 +73,6 @@ export default function CourseDetailPage() {
       const body = {
         name: form.name.trim(),
         code: form.code.trim() || undefined,
-        defaultLessonsPerSession: form.defaultLessonsPerSession,
-        defaultTotalLessonsPlanned: form.defaultTotalLessonsPlanned,
       };
       return editing
         ? api.patch(`/subjects/${editing.id}`, body)
@@ -106,23 +99,13 @@ export default function CourseDetailPage() {
   });
 
   const openCreate = () => {
-    setForm({
-      name: "",
-      code: "",
-      defaultLessonsPerSession: 1,
-      defaultTotalLessonsPlanned: 0,
-    });
+    setForm({ name: "", code: "" });
     setEditing(null);
     setCreating(true);
   };
 
   const openEdit = (s: Subject) => {
-    setForm({
-      name: s.name,
-      code: s.code ?? "",
-      defaultLessonsPerSession: s.defaultLessonsPerSession,
-      defaultTotalLessonsPlanned: s.defaultTotalLessonsPlanned,
-    });
+    setForm({ name: s.name, code: s.code ?? "" });
     setCreating(false);
     setEditing(s);
   };
@@ -176,7 +159,7 @@ export default function CourseDetailPage() {
       <Card className="mb-5">
         <CardHeader
           title="Grade do curso"
-          description="Vale para todas as turmas e disciplinas deste curso."
+          description="Ponto de partida ao montar uma turma — cada disciplina pode ter sua própria duração depois."
           icon={<Clock size={18} strokeWidth={1.75} />}
         />
         <div className="grid grid-cols-1 divide-y divide-flauzino-slate-200 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
@@ -243,14 +226,13 @@ export default function CourseDetailPage() {
             <tr>
               <Th>Disciplina</Th>
               <Th>Sigla</Th>
-              <Th>Carga padrão</Th>
               <Th>Turmas que cursam</Th>
               <Th className="w-24 text-right">Ações</Th>
             </tr>
           </thead>
           <tbody>
             <TableState
-              colSpan={5}
+              colSpan={4}
               loading={subjects.isPending}
               error={subjects.error ? friendlyError(subjects.error) : null}
               empty={subjects.data?.data.length === 0}
@@ -276,17 +258,6 @@ export default function CourseDetailPage() {
                   )}
                 </Td>
                 <Td className="font-mono-ds text-xs">{s.code ?? "—"}</Td>
-                <Td className="text-xs text-flauzino-slate-600">
-                  <span className="font-mono-ds">{s.defaultLessonsPerSession}</span> aula(s) por
-                  chamada
-                  {s.defaultTotalLessonsPlanned > 0 && (
-                    <span className="text-flauzino-slate-500">
-                      {" "}
-                      · <span className="font-mono-ds">{s.defaultTotalLessonsPlanned}</span> no
-                      período
-                    </span>
-                  )}
-                </Td>
                 <Td className="font-mono-ds text-xs">{s.classCount ?? 0}</Td>
                 <Td>
                   {canManage && (
@@ -351,35 +322,6 @@ export default function CourseDetailPage() {
             value={form.code}
             onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
           />
-          <div className="grid grid-cols-2 gap-4">
-            <Input
-              label="Aulas por chamada"
-              type="number"
-              min={1}
-              max={12}
-              hint="Padrão ao aplicar nas turmas."
-              value={form.defaultLessonsPerSession}
-              onChange={(e) =>
-                setForm((f) => ({
-                  ...f,
-                  defaultLessonsPerSession: Math.max(1, Number(e.target.value) || 1),
-                }))
-              }
-            />
-            <Input
-              label="Aulas no período"
-              type="number"
-              min={0}
-              hint="Denominador da frequência."
-              value={form.defaultTotalLessonsPlanned}
-              onChange={(e) =>
-                setForm((f) => ({
-                  ...f,
-                  defaultTotalLessonsPlanned: Math.max(0, Number(e.target.value) || 0),
-                }))
-              }
-            />
-          </div>
         </div>
       </Modal>
 

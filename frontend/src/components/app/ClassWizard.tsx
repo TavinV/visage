@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, Check, Clock, Plus } from "lucide-react";
 import { api, qs } from "@/lib/api";
@@ -17,6 +18,8 @@ interface GradeRow {
   teacherIds: string[];
   lessonsPerSession: number;
   totalLessonsPlanned: number;
+  /** Duração de uma aula desta disciplina nesta turma, em minutos. */
+  lessonDurationMin: number;
 }
 
 interface ClassWizardProps {
@@ -34,6 +37,7 @@ interface ClassWizardProps {
  */
 export function ClassWizard({ editing, onClose }: ClassWizardProps) {
   const queryClient = useQueryClient();
+  const router = useRouter();
   const toast = useToast();
   const isEditing = !!editing;
 
@@ -49,6 +53,7 @@ export function ClassWizard({ editing, onClose }: ClassWizardProps) {
       teacherIds: s.teachers?.length ? s.teachers.map((t) => t.id) : [s.teacherId],
       lessonsPerSession: s.lessonsPerSession,
       totalLessonsPlanned: s.totalLessonsPlanned,
+      lessonDurationMin: s.lessonDurationMin,
     })) ?? []
   );
   const [stepError, setStepError] = useState<string | null>(null);
@@ -100,11 +105,11 @@ export function ClassWizard({ editing, onClose }: ClassWizardProps) {
             {
               subjectId,
               teacherIds: [],
-              // A carga do currículo é o ponto de partida da turma
-              lessonsPerSession:
-                catalog.find((s) => s.id === subjectId)?.defaultLessonsPerSession ?? 1,
-              totalLessonsPlanned:
-                catalog.find((s) => s.id === subjectId)?.defaultTotalLessonsPlanned ?? 0,
+              lessonsPerSession: 1,
+              totalLessonsPlanned: 0,
+              // A duração do curso é só o ponto de partida — cada disciplina
+              // da turma pode divergir a partir daqui
+              lessonDurationMin: course?.lessonDurationMin ?? 50,
             },
           ]
     );
@@ -123,13 +128,20 @@ export function ClassWizard({ editing, onClose }: ClassWizardProps) {
         subjects: grade,
       };
       return isEditing
-        ? api.patch(`/classes/${editing!.id}`, body)
-        : api.post("/classes", { ...body, courseId });
+        ? api.patch<{ data: ClassItem }>(`/classes/${editing!.id}`, body)
+        : api.post<{ data: ClassItem }>("/classes", { ...body, courseId });
     },
-    onSuccess: () => {
+    onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ["classes"] });
-      toast.success(isEditing ? "Turma atualizada." : "Turma criada.");
       onClose();
+      if (isEditing) {
+        toast.success("Turma atualizada.");
+        return;
+      }
+      // Turma criada: já manda pra tela dela — é lá que se matricula aluno,
+      // e sem esse pulo a secretaria fecha o assistente sem achar o caminho.
+      toast.success("Turma criada. Agora matricule os alunos.");
+      router.push(`/dashboard/classes/${res.data.id}`);
     },
     onError: (error) => toast.error(friendlyError(error)),
   });
@@ -335,9 +347,9 @@ export function ClassWizard({ editing, onClose }: ClassWizardProps) {
                           </span>
                         )}
                       </span>
-                      {chosen && course && (
+                      {chosen && (
                         <span className="font-mono-ds text-xs text-flauzino-slate-500">
-                          {formatDuration(course.lessonDurationMin * row.lessonsPerSession)} por
+                          {formatDuration(row.lessonDurationMin * row.lessonsPerSession)} por
                           chamada
                         </span>
                       )}
@@ -384,6 +396,23 @@ export function ClassWizard({ editing, onClose }: ClassWizardProps) {
                               onChange={(e) =>
                                 patchRow(s.id, {
                                   totalLessonsPlanned: Math.max(0, Number(e.target.value) || 0),
+                                })
+                              }
+                            />
+                          </Field>
+                          <Field
+                            label="Duração da aula (min)"
+                            hint="Só desta disciplina, nesta turma."
+                            className="w-44"
+                          >
+                            <Input
+                              type="number"
+                              min={1}
+                              max={480}
+                              value={row.lessonDurationMin}
+                              onChange={(e) =>
+                                patchRow(s.id, {
+                                  lessonDurationMin: Math.max(1, Number(e.target.value) || 1),
                                 })
                               }
                             />

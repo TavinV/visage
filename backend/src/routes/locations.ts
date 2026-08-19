@@ -7,6 +7,7 @@ import { z } from "zod";
 import { locationsService } from "../services/locations.service";
 import { authenticate } from "../middleware/authenticate";
 import { validate } from "../middleware/validate";
+import { parseDate, boolParam } from "../utils/query";
 
 const router = Router();
 
@@ -50,6 +51,10 @@ router.get(
         sortOrder: req.query.sortOrder as "asc" | "desc" | undefined,
         search: req.query.search as string | undefined,
         isActive: req.query.isActive ? req.query.isActive === "true" : undefined,
+        hasAddress: boolParam(req.query.hasAddress),
+        hasDevice: boolParam(req.query.hasDevice),
+        createdFrom: parseDate(req.query.created_from),
+        createdTo: parseDate(req.query.created_to, true),
       });
 
       res.json(result);

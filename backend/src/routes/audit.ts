@@ -26,6 +26,7 @@ import { auditService } from "../services/audit.service";
 import { authenticate, requireRole } from "../middleware/authenticate";
 import { listEventCatalog, AUDIT_CATEGORIES } from "../lib/auditEvents";
 import { logger } from "../lib/logger";
+import { strList, parseDate } from "../utils/query";
 
 const router = Router();
 
@@ -38,17 +39,7 @@ const canReadAudit = requireRole("admin", "manager", "super_admin");
 
 // ── Helpers de query ─────────────────────────────────────────────────────────
 
-/** Converte YYYY-MM-DD ou ISO completo em Date; ignora entrada inválida. */
-export function parseDate(value: unknown, endOfDay = false): Date | undefined {
-  if (typeof value !== "string" || !value) return undefined;
-
-  // Data pura (do <input type="date">) vira o dia inteiro no fuso local do
-  // servidor: "de 10/03" tem de incluir o que aconteceu às 23h de 10/03.
-  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value);
-  const parsed = new Date(dateOnly ? `${value}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}` : value);
-
-  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
-}
+export { parseDate };
 
 const str = (value: unknown): string | undefined =>
   typeof value === "string" && value.length > 0 ? value : undefined;
@@ -58,8 +49,8 @@ export function auditFiltersFromQuery(query: Request["query"]) {
   return {
     page: query.page ? Number(query.page) : undefined,
     limit: query.limit ? Number(query.limit) : undefined,
-    action: str(query.action),
-    category: str(query.category),
+    action: strList(query.action),
+    category: strList(query.category),
     severity: str(query.severity),
     status: str(query.status),
     actorId: str(query.actor_id),

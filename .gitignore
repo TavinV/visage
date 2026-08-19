@@ -17,8 +17,12 @@ build/
 !db/.gitkeep
 
 # ── Logs ─────────────────────────────────────────────────────────────────────
+# RULE: "logs/" sem barra na frente casava qualquer pasta chamada "logs" em
+# qualquer profundidade — inclusive a rota do console
+# frontend/src/app/(super-admin)/admin/logs/, que por isso nunca foi versionada.
+# Escopado para a raiz do projeto, onde logs de execução de fato apareceriam.
 *.log
-logs/
+/logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

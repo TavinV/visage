@@ -2,14 +2,15 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useForm } from "react-hook-form";
+import { useForm, Controller } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Plus, Pencil, Trash2 } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, CircleDot, Archive, CalendarClock } from "lucide-react";
 import { api, qs } from "@/lib/api";
 import type { AcademicPeriod, Paginated } from "@/lib/types";
 import { formatDateOnly } from "@/lib/format";
 import { friendlyError } from "@/lib/apiError";
+import { useDebounced } from "@/lib/useDebounced";
 import {
   PageHeader,
   Card,
@@ -21,15 +22,26 @@ import {
   Pagination,
   Button,
   Input,
+  DatePicker,
   Modal,
   ConfirmDialog,
   Switch,
+  FilterButton,
+  FilterModal,
+  MultiSelect,
+  type MultiSelectOption,
   useToast,
 } from "@/components/ui";
 import { ActiveBadge } from "@/components/app/badges";
 import { ShowInactiveToggle, inactiveRowClass } from "@/components/app/ShowInactive";
 
 const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+
+const temporalOptions: MultiSelectOption[] = [
+  { value: "current", label: "Vigente agora", icon: CircleDot },
+  { value: "future", label: "Ainda não começou", icon: CalendarClock },
+  { value: "past", label: "Encerrado", icon: Archive },
+];
 
 const PeriodSchema = z
   .object({
@@ -49,19 +61,42 @@ export default function PeriodsPage() {
   const queryClient = useQueryClient();
   const toast = useToast();
   const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
   const [showInactive, setShowInactive] = useState(false);
+  const [temporal, setTemporal] = useState<string[]>([]);
+  const [startsFrom, setStartsFrom] = useState("");
+  const [startsTo, setStartsTo] = useState("");
+  const [endsFrom, setEndsFrom] = useState("");
+  const [endsTo, setEndsTo] = useState("");
+  const debouncedSearch = useDebounced(search);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<AcademicPeriod | null>(null);
   const [deleting, setDeleting] = useState<AcademicPeriod | null>(null);
 
+  const activeFilterCount =
+    (showInactive ? 1 : 0) +
+    (temporal.length > 0 ? 1 : 0) +
+    (startsFrom || startsTo ? 1 : 0) +
+    (endsFrom || endsTo ? 1 : 0);
+
   const list = useQuery({
-    queryKey: ["academic-periods", { page, showInactive }],
+    queryKey: [
+      "academic-periods",
+      { page, search: debouncedSearch, showInactive, temporal, startsFrom, startsTo, endsFrom, endsTo },
+    ],
     queryFn: () =>
       api.get<Paginated<AcademicPeriod>>(
         `/academic-periods${qs({
           page,
           limit: 20,
+          search: debouncedSearch,
           isActive: showInactive ? undefined : true,
+          temporal: temporal.join(","),
+          starts_from: startsFrom,
+          starts_to: startsTo,
+          ends_from: endsFrom,
+          ends_to: endsTo,
         })}`
       ),
   });
@@ -129,6 +164,87 @@ export default function PeriodsPage() {
       />
 
       <div className="mb-4 flex flex-wrap items-end gap-3">
+        <Input
+          placeholder="Buscar por nome"
+          icon={<Search size={15} />}
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPage(1);
+          }}
+          className="w-72"
+        />
+        <FilterButton count={activeFilterCount} onClick={() => setFiltersOpen(true)} />
+      </div>
+
+      <FilterModal
+        open={filtersOpen}
+        onClose={() => setFiltersOpen(false)}
+        onClear={() => {
+          setShowInactive(false);
+          setTemporal([]);
+          setStartsFrom("");
+          setStartsTo("");
+          setEndsFrom("");
+          setEndsTo("");
+          setPage(1);
+        }}
+        activeCount={activeFilterCount}
+      >
+        <MultiSelect
+          label="Situação"
+          value={temporal}
+          onChange={(vals) => {
+            setTemporal(vals);
+            setPage(1);
+          }}
+          placeholder="Todas"
+          options={temporalOptions}
+        />
+        <div className="grid grid-cols-2 gap-4">
+          <DatePicker
+            label="Início de"
+            value={startsFrom}
+            onChange={(v) => {
+              setStartsFrom(v);
+              setPage(1);
+            }}
+            max={startsTo || undefined}
+            clearable
+          />
+          <DatePicker
+            label="até"
+            value={startsTo}
+            onChange={(v) => {
+              setStartsTo(v);
+              setPage(1);
+            }}
+            min={startsFrom || undefined}
+            clearable
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <DatePicker
+            label="Término de"
+            value={endsFrom}
+            onChange={(v) => {
+              setEndsFrom(v);
+              setPage(1);
+            }}
+            max={endsTo || undefined}
+            clearable
+          />
+          <DatePicker
+            label="até"
+            value={endsTo}
+            onChange={(v) => {
+              setEndsTo(v);
+              setPage(1);
+            }}
+            min={endsFrom || undefined}
+            clearable
+          />
+        </div>
         <ShowInactiveToggle
           checked={showInactive}
           onChange={(next) => {
@@ -136,8 +252,9 @@ export default function PeriodsPage() {
             setPage(1);
           }}
           label="Mostrar inativos"
+          className="w-full justify-start"
         />
-      </div>
+      </FilterModal>
 
       <Card>
         <Table>
@@ -211,19 +328,31 @@ export default function PeriodsPage() {
             {...form.register("name")}
           />
           <div className="grid grid-cols-2 gap-4">
-            <Input
-              label="Início"
-              type="date"
-              required
-              error={form.formState.errors.startsAt?.message}
-              {...form.register("startsAt")}
+            <Controller
+              control={form.control}
+              name="startsAt"
+              render={({ field }) => (
+                <DatePicker
+                  label="Início"
+                  required
+                  value={field.value}
+                  onChange={field.onChange}
+                  error={form.formState.errors.startsAt?.message}
+                />
+              )}
             />
-            <Input
-              label="Término"
-              type="date"
-              required
-              error={form.formState.errors.endsAt?.message}
-              {...form.register("endsAt")}
+            <Controller
+              control={form.control}
+              name="endsAt"
+              render={({ field }) => (
+                <DatePicker
+                  label="Término"
+                  required
+                  value={field.value}
+                  onChange={field.onChange}
+                  error={form.formState.errors.endsAt?.message}
+                />
+              )}
             />
           </div>
           {editing && <Switch label="Período ativo" {...form.register("isActive")} />}

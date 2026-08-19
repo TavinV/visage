@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Pencil, Trash2, Search, UsersRound } from "lucide-react";
 import { api, qs } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import type { ClassItem, Course, Paginated } from "@/lib/types";
+import type { ClassItem, Course, Location, Paginated, Subject, User } from "@/lib/types";
 import { formatDuration } from "@/lib/format";
 import { friendlyError } from "@/lib/apiError";
 import { useDebounced } from "@/lib/useDebounced";
@@ -24,6 +24,8 @@ import {
   Select,
   ConfirmDialog,
   Badge,
+  FilterButton,
+  FilterModal,
   useToast,
 } from "@/components/ui";
 import { ClassWizard } from "@/components/app/ClassWizard";
@@ -36,22 +38,63 @@ export default function ClassesPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [courseFilter, setCourseFilter] = useState("");
+  const [subjectFilter, setSubjectFilter] = useState("");
+  const [teacherFilter, setTeacherFilter] = useState("");
+  const [locationFilter, setLocationFilter] = useState("");
   const debouncedSearch = useDebounced(search);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<ClassItem | null>(null);
   const [deleting, setDeleting] = useState<ClassItem | null>(null);
 
+  const activeFilterCount =
+    (courseFilter ? 1 : 0) +
+    (subjectFilter ? 1 : 0) +
+    (teacherFilter ? 1 : 0) +
+    (locationFilter ? 1 : 0);
+
   const list = useQuery({
-    queryKey: ["classes", { page, search: debouncedSearch, courseFilter }],
+    queryKey: [
+      "classes",
+      { page, search: debouncedSearch, courseFilter, subjectFilter, teacherFilter, locationFilter },
+    ],
     queryFn: () =>
       api.get<Paginated<ClassItem>>(
-        `/classes${qs({ page, limit: 20, search: debouncedSearch, courseId: courseFilter })}`
+        `/classes${qs({
+          page,
+          limit: 20,
+          search: debouncedSearch,
+          courseId: courseFilter,
+          subjectId: subjectFilter,
+          teacherId: teacherFilter,
+          locationId: locationFilter,
+        })}`
       ),
   });
 
   const courses = useQuery({
     queryKey: ["courses", "options"],
     queryFn: () => api.get<Paginated<Course>>(`/courses${qs({ limit: 100 })}`),
+  });
+
+  // Sem curso escolhido, mostra o catálogo inteiro do tenant — melhor um
+  // filtro amplo do que um campo travado esperando outra escolha primeiro
+  const subjects = useQuery({
+    queryKey: ["subjects", "by-course", courseFilter, "filter-options"],
+    queryFn: () =>
+      api.get<Paginated<Subject>>(
+        `/subjects${qs({ courseId: courseFilter, isActive: true, limit: 100 })}`
+      ),
+  });
+
+  const teachers = useQuery({
+    queryKey: ["users", "teacher-options"],
+    queryFn: () => api.get<Paginated<User>>(`/users${qs({ role: "teacher", limit: 100 })}`),
+  });
+
+  const locations = useQuery({
+    queryKey: ["locations", "options"],
+    queryFn: () => api.get<Paginated<Location>>(`/locations${qs({ limit: 100 })}`),
   });
 
   const remove = useMutation({
@@ -93,17 +136,63 @@ export default function ClassesPage() {
           }}
           className="w-72"
         />
+        <FilterButton count={activeFilterCount} onClick={() => setFiltersOpen(true)} />
+      </div>
+
+      <FilterModal
+        open={filtersOpen}
+        onClose={() => setFiltersOpen(false)}
+        onClear={() => {
+          setCourseFilter("");
+          setSubjectFilter("");
+          setTeacherFilter("");
+          setLocationFilter("");
+          setPage(1);
+        }}
+        activeCount={activeFilterCount}
+      >
         <Select
+          label="Curso"
           value={courseFilter}
           onChange={(e) => {
             setCourseFilter(e.target.value);
+            setSubjectFilter(""); // disciplina escolhida pode não existir no novo curso
             setPage(1);
           }}
           placeholder="Todos os cursos"
           options={courses.data?.data.map((c) => ({ value: c.id, label: c.name })) ?? []}
-          className="w-56"
         />
-      </div>
+        <Select
+          label="Disciplina"
+          value={subjectFilter}
+          onChange={(e) => {
+            setSubjectFilter(e.target.value);
+            setPage(1);
+          }}
+          placeholder="Todas as disciplinas"
+          options={subjects.data?.data.map((s) => ({ value: s.id, label: s.name })) ?? []}
+        />
+        <Select
+          label="Professor"
+          value={teacherFilter}
+          onChange={(e) => {
+            setTeacherFilter(e.target.value);
+            setPage(1);
+          }}
+          placeholder="Todos os professores"
+          options={teachers.data?.data.map((t) => ({ value: t.id, label: t.name })) ?? []}
+        />
+        <Select
+          label="Sala vinculada"
+          value={locationFilter}
+          onChange={(e) => {
+            setLocationFilter(e.target.value);
+            setPage(1);
+          }}
+          placeholder="Todas as salas"
+          options={locations.data?.data.map((l) => ({ value: l.id, label: l.name })) ?? []}
+        />
+      </FilterModal>
 
       <Card>
         <Table>

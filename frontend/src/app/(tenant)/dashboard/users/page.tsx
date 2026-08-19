@@ -6,7 +6,19 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm, Controller, type Resolver } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Plus, Search, Copy, KeyRound } from "lucide-react";
+import {
+  Plus,
+  Search,
+  Copy,
+  KeyRound,
+  CheckCircle2,
+  Clock,
+  CircleSlash,
+  Fingerprint,
+  ShieldCheck,
+  ShieldX,
+  ShieldOff,
+} from "lucide-react";
 import { api, qs } from "@/lib/api";
 import type { Paginated, StudentIdentification, User } from "@/lib/types";
 import { friendlyError } from "@/lib/apiError";
@@ -28,8 +40,12 @@ import {
   Pagination,
   Button,
   Input,
-  Select,
+  DatePicker,
   Modal,
+  FilterButton,
+  FilterModal,
+  MultiSelect,
+  type MultiSelectOption,
   useToast,
 } from "@/components/ui";
 import { UserStatusBadge, FacialStatusBadge } from "@/components/app/badges";
@@ -81,6 +97,25 @@ function buildResolver(
   };
 }
 
+const roleFilterOptions: MultiSelectOption[] = roleOptions.map((r) => ({
+  value: r.value,
+  label: r.label,
+  icon: r.icon,
+}));
+
+const statusFilterOptions: MultiSelectOption[] = [
+  { value: "active", label: "Ativo", icon: CheckCircle2 },
+  { value: "pending", label: "Pendente", icon: Clock },
+];
+
+const facialStatusFilterOptions: MultiSelectOption[] = [
+  { value: "none", label: "Sem biometria", icon: CircleSlash },
+  { value: "consent_given", label: "Consentiu", icon: ShieldCheck },
+  { value: "registered", label: "Biometria ativa", icon: Fingerprint },
+  { value: "consent_refused", label: "Recusou", icon: ShieldX },
+  { value: "revoked", label: "Revogada", icon: ShieldOff },
+];
+
 interface CreatedCredentials {
   name: string;
   email: string;
@@ -92,23 +127,38 @@ export default function UsersPage() {
   const toast = useToast();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
-  const [role, setRole] = useState("");
-  const [status, setStatus] = useState("");
+  const [role, setRole] = useState<string[]>([]);
+  const [status, setStatus] = useState<string[]>([]);
+  const [facialStatus, setFacialStatus] = useState<string[]>([]);
+  const [createdFrom, setCreatedFrom] = useState("");
+  const [createdTo, setCreatedTo] = useState("");
   const [showInactive, setShowInactive] = useState(false);
   const debouncedSearch = useDebounced(search);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [credentials, setCredentials] = useState<CreatedCredentials | null>(null);
 
+  const activeFilterCount =
+    [role, status, facialStatus].filter((v) => v.length > 0).length +
+    (createdFrom || createdTo ? 1 : 0) +
+    (showInactive ? 1 : 0);
+
   const list = useQuery({
-    queryKey: ["users", { page, search: debouncedSearch, role, status, showInactive }],
+    queryKey: [
+      "users",
+      { page, search: debouncedSearch, role, status, facialStatus, createdFrom, createdTo, showInactive },
+    ],
     queryFn: () =>
       api.get<Paginated<User>>(
         `/users${qs({
           page,
           limit: 20,
           search: debouncedSearch,
-          role,
-          status,
+          role: role.join(","),
+          status: status.join(","),
+          facialStatus: facialStatus.join(","),
+          created_from: createdFrom,
+          created_to: createdTo,
           // Desativar é o "excluir" de usuário: fora da lista até pedirem
           includeInactive: showInactive,
         })}`
@@ -179,7 +229,7 @@ export default function UsersPage() {
 
       <div className="mb-4 flex flex-wrap items-end gap-3">
         <Input
-          placeholder="Buscar por nome, e-mail ou documento"
+          placeholder="Buscar por nome, e-mail, CPF ou matrícula"
           icon={<Search size={15} />}
           value={search}
           onChange={(e) => {
@@ -188,31 +238,77 @@ export default function UsersPage() {
           }}
           className="w-80"
         />
-        <Select
+        <FilterButton count={activeFilterCount} onClick={() => setFiltersOpen(true)} />
+      </div>
+
+      <FilterModal
+        open={filtersOpen}
+        onClose={() => setFiltersOpen(false)}
+        onClear={() => {
+          setRole([]);
+          setStatus([]);
+          setFacialStatus([]);
+          setCreatedFrom("");
+          setCreatedTo("");
+          setShowInactive(false);
+          setPage(1);
+        }}
+        activeCount={activeFilterCount}
+      >
+        <div className="grid grid-cols-2 gap-4">
+          <DatePicker
+            label="Cadastrado de"
+            value={createdFrom}
+            onChange={(v) => {
+              setCreatedFrom(v);
+              setPage(1);
+            }}
+            max={createdTo || undefined}
+            clearable
+          />
+          <DatePicker
+            label="até"
+            value={createdTo}
+            onChange={(v) => {
+              setCreatedTo(v);
+              setPage(1);
+            }}
+            min={createdFrom || undefined}
+            clearable
+          />
+        </div>
+        <MultiSelect
+          label="Cargo"
           value={role}
-          onChange={(e) => {
-            setRole(e.target.value);
+          onChange={(vals) => {
+            setRole(vals);
             setPage(1);
           }}
           placeholder="Todos os cargos"
-          options={roleOptions}
-          className="w-48"
+          options={roleFilterOptions}
         />
-        <Select
+        <MultiSelect
+          label="Status"
           value={status}
-          onChange={(e) => {
-            setStatus(e.target.value);
+          onChange={(vals) => {
+            setStatus(vals);
             setPage(1);
           }}
           placeholder="Todos os status"
           // "Inativo" sai daqui: quem governa a visibilidade dos desativados é
           // o interruptor ao lado — dois controles para a mesma coisa se
           // contradiziam na tela
-          options={[
-            { value: "active", label: "Ativo" },
-            { value: "pending", label: "Pendente" },
-          ]}
-          className="w-44"
+          options={statusFilterOptions}
+        />
+        <MultiSelect
+          label="Biometria"
+          value={facialStatus}
+          onChange={(vals) => {
+            setFacialStatus(vals);
+            setPage(1);
+          }}
+          placeholder="Todas"
+          options={facialStatusFilterOptions}
         />
         <ShowInactiveToggle
           checked={showInactive}
@@ -221,8 +317,9 @@ export default function UsersPage() {
             setPage(1);
           }}
           label="Mostrar inativos"
+          className="w-full justify-start"
         />
-      </div>
+      </FilterModal>
 
       <Card>
         <Table>

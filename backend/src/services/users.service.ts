@@ -68,8 +68,11 @@ export interface UserOutput {
 
 export interface ListUsersParams extends ListParams {
   tenantId: string; // obrigatório — isolamento tenant
-  role?: string; // filtro opcional por role
-  status?: string; // filtro opcional por status
+  role?: string[]; // filtro opcional por cargo(s)
+  status?: string[]; // filtro opcional por status(es)
+  facialStatus?: string[]; // filtro opcional por situação da biometria
+  createdFrom?: Date;
+  createdTo?: Date;
   /**
    * Inclui desativados na listagem. Desligar um usuário é o "excluir" do
    * produto (o registro fica para não órfãos de presença), então por padrão
@@ -120,17 +123,28 @@ class UsersService extends BaseService {
     const searchOr = this.buildSearchFilter(params.search, [
       "name",
       "email",
+      "enrollmentCode",
     ]);
+    // document é gravado só com dígitos (sem máscara) — um CPF digitado com
+    // pontuação na busca nunca bateria com "contains" sem essa normalização.
+    const documentDigits = params.search?.replace(/\D/g, "") ?? "";
+    const combinedOr = [
+      ...(searchOr ?? []),
+      ...(documentDigits ? [{ document: { contains: documentDigits } }] : []),
+    ];
 
     const where = {
       tenantId: params.tenantId,
-      ...(params.role && { role: params.role }),
+      ...(params.role && params.role.length > 0 && { role: { in: params.role } }),
       // Status explícito manda: pedir "inativos" não pode esbarrar no filtro
       // padrão que justamente os esconde
-      ...(params.status
-        ? { status: params.status }
+      ...(params.status && params.status.length > 0
+        ? { status: { in: params.status } }
         : !params.includeInactive && { status: { not: "inactive" } }),
-      ...(searchOr && { OR: searchOr }),
+      ...(params.facialStatus &&
+        params.facialStatus.length > 0 && { facialStatus: { in: params.facialStatus } }),
+      ...this.buildDateRange("createdAt", params.createdFrom, params.createdTo),
+      ...(combinedOr.length > 0 && { OR: combinedOr }),
     };
 
     const [rows, total] = await this.prisma.$transaction([
@@ -172,13 +186,10 @@ class UsersService extends BaseService {
    * Criar novo usuário
    */
   async create(input: CreateUserInput): Promise<UserOutput & { temporaryPassword?: string }> {
-    // Validar email único por tenant
+    // Validar email único no sistema inteiro (não só no tenant)
     if (input.email) {
       const existing = await this.prisma.user.findFirst({
-        where: {
-          tenantId: input.tenantId,
-          email: input.email,
-        },
+        where: { email: input.email },
       });
 
       if (existing) {
@@ -268,13 +279,10 @@ class UsersService extends BaseService {
       throw new NotFoundError("user_not_found");
     }
 
-    // Se email está sendo atualizado, validar unicidade no tenant
+    // Se email está sendo atualizado, validar unicidade no sistema inteiro
     if (input.email && input.email !== existing.email) {
       const duplicate = await this.prisma.user.findFirst({
-        where: {
-          tenantId,
-          email: input.email,
-        },
+        where: { email: input.email, id: { not: id } },
       });
 
       if (duplicate) {

@@ -25,10 +25,18 @@ import {
   Button,
   Input,
   Select,
+  DatePicker,
   Modal,
   ConfirmDialog,
+  FilterButton,
+  FilterModal,
   useToast,
 } from "@/components/ui";
+
+const tristateOptions = (yes: string, no: string) => [
+  { value: "true", label: yes },
+  { value: "false", label: no },
+];
 
 const CourseSchema = z.object({
   name: z.string().min(1, "Informe o nome."),
@@ -60,16 +68,39 @@ export default function CoursesPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [periodFilter, setPeriodFilter] = useState("");
+  const [hasClasses, setHasClasses] = useState("");
+  const [hasSubjects, setHasSubjects] = useState("");
+  const [createdFrom, setCreatedFrom] = useState("");
+  const [createdTo, setCreatedTo] = useState("");
   const debouncedSearch = useDebounced(search);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Course | null>(null);
   const [deleting, setDeleting] = useState<Course | null>(null);
 
+  const activeFilterCount =
+    (periodFilter ? 1 : 0) +
+    (hasClasses ? 1 : 0) +
+    (hasSubjects ? 1 : 0) +
+    (createdFrom || createdTo ? 1 : 0);
+
   const list = useQuery({
-    queryKey: ["courses", { page, search: debouncedSearch, periodFilter }],
+    queryKey: [
+      "courses",
+      { page, search: debouncedSearch, periodFilter, hasClasses, hasSubjects, createdFrom, createdTo },
+    ],
     queryFn: () =>
       api.get<Paginated<Course>>(
-        `/courses${qs({ page, limit: 20, search: debouncedSearch, academicPeriodId: periodFilter })}`
+        `/courses${qs({
+          page,
+          limit: 20,
+          search: debouncedSearch,
+          academicPeriodId: periodFilter,
+          hasClasses,
+          hasSubjects,
+          created_from: createdFrom,
+          created_to: createdTo,
+        })}`
       ),
   });
 
@@ -160,7 +191,24 @@ export default function CoursesPage() {
           }}
           className="w-72"
         />
+        <FilterButton count={activeFilterCount} onClick={() => setFiltersOpen(true)} />
+      </div>
+
+      <FilterModal
+        open={filtersOpen}
+        onClose={() => setFiltersOpen(false)}
+        onClear={() => {
+          setPeriodFilter("");
+          setHasClasses("");
+          setHasSubjects("");
+          setCreatedFrom("");
+          setCreatedTo("");
+          setPage(1);
+        }}
+        activeCount={activeFilterCount}
+      >
         <Select
+          label="Período"
           value={periodFilter}
           onChange={(e) => {
             setPeriodFilter(e.target.value);
@@ -168,9 +216,50 @@ export default function CoursesPage() {
           }}
           placeholder="Todos os períodos"
           options={periodOptions}
-          className="w-52"
         />
-      </div>
+        <div className="grid grid-cols-2 gap-4">
+          <DatePicker
+            label="Cadastrado de"
+            value={createdFrom}
+            onChange={(v) => {
+              setCreatedFrom(v);
+              setPage(1);
+            }}
+            max={createdTo || undefined}
+            clearable
+          />
+          <DatePicker
+            label="até"
+            value={createdTo}
+            onChange={(v) => {
+              setCreatedTo(v);
+              setPage(1);
+            }}
+            min={createdFrom || undefined}
+            clearable
+          />
+        </div>
+        <Select
+          label="Turmas"
+          value={hasClasses}
+          onChange={(e) => {
+            setHasClasses(e.target.value);
+            setPage(1);
+          }}
+          placeholder="Todos"
+          options={tristateOptions("Com turmas", "Sem turmas")}
+        />
+        <Select
+          label="Disciplinas"
+          value={hasSubjects}
+          onChange={(e) => {
+            setHasSubjects(e.target.value);
+            setPage(1);
+          }}
+          placeholder="Todos"
+          options={tristateOptions("Com disciplinas", "Sem disciplinas")}
+        />
+      </FilterModal>
 
       <Card>
         <Table>

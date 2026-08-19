@@ -23,6 +23,8 @@ interface CurriculumRow {
   teacherIds: string[];
   lessonsPerSession: number;
   totalLessonsPlanned: number;
+  /** Duração de uma aula desta disciplina, em minutos. */
+  lessonDurationMin: number;
 }
 
 interface ApplyCurriculumModalProps {
@@ -91,9 +93,11 @@ export function ApplyCurriculumModal({ course, onClose }: ApplyCurriculumModalPr
             {
               subjectId: subject.id,
               teacherIds: [],
-              // A carga do currículo é o padrão; a turma pode divergir depois
-              lessonsPerSession: subject.defaultLessonsPerSession,
-              totalLessonsPlanned: subject.defaultTotalLessonsPlanned,
+              lessonsPerSession: 1,
+              totalLessonsPlanned: 0,
+              // Ponto de partida é a duração do curso; cada turma pode
+              // divergir depois, disciplina a disciplina
+              lessonDurationMin: course.lessonDurationMin,
             },
           ]
     );
@@ -324,6 +328,23 @@ export function ApplyCurriculumModal({ course, onClose }: ApplyCurriculumModalPr
                               onChange={(e) =>
                                 patchRow(s.id, {
                                   totalLessonsPlanned: Math.max(0, Number(e.target.value) || 0),
+                                })
+                              }
+                            />
+                          </Field>
+                          <Field
+                            label="Duração da aula (min)"
+                            hint="Aplicada a todas as turmas escolhidas."
+                            className="w-44"
+                          >
+                            <Input
+                              type="number"
+                              min={1}
+                              max={480}
+                              value={row.lessonDurationMin}
+                              onChange={(e) =>
+                                patchRow(s.id, {
+                                  lessonDurationMin: Math.max(1, Number(e.target.value) || 1),
                                 })
                               }
                             />

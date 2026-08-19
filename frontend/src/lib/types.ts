@@ -182,7 +182,8 @@ export interface Course {
   createdAt: string;
 }
 
-/** Catálogo: o nome da disciplina no currículo do curso e a carga padrão. */
+/** Catálogo: só o nome da disciplina e a sigla no currículo do curso. Carga,
+ *  duração e professor são decididos por turma, em ClassSubject. */
 export interface Subject {
   id: string;
   tenantId: string;
@@ -191,9 +192,6 @@ export interface Subject {
   name: string;
   code?: string;
   isActive: boolean;
-  /** Carga sugerida ao aplicar a grade do curso nas turmas. */
-  defaultLessonsPerSession: number;
-  defaultTotalLessonsPlanned: number;
   /** Em quantas turmas é cursada. */
   classCount?: number;
   createdAt: string;
@@ -218,6 +216,9 @@ export interface ClassSubject {
   teachers: ClassSubjectTeacher[];
   lessonsPerSession: number;
   totalLessonsPlanned: number;
+  /** Duração de UMA aula desta disciplina nesta turma, em minutos. */
+  lessonDurationMin: number;
+  /** Duração de uma chamada inteira (lessonDurationMin × lessonsPerSession). */
   sessionDurationMin: number;
 }
 

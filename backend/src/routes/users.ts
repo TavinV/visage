@@ -15,6 +15,7 @@ import { requireRole } from "../middleware/authenticate";
 import { validate } from "../middleware/validate";
 import { logger } from "../lib/logger";
 import { EmailSchema } from "../types";
+import { strList, parseDate } from "../utils/query";
 
 const router = Router();
 
@@ -74,8 +75,11 @@ router.get(
         sortBy: req.query.sortBy as string | undefined,
         sortOrder: req.query.sortOrder as "asc" | "desc" | undefined,
         search: req.query.search as string | undefined,
-        role: req.query.role as string | undefined,
-        status: req.query.status as string | undefined,
+        role: strList(req.query.role),
+        status: strList(req.query.status),
+        facialStatus: strList(req.query.facialStatus),
+        createdFrom: parseDate(req.query.created_from),
+        createdTo: parseDate(req.query.created_to, true),
         includeInactive: req.query.includeInactive === "true",
       });
 

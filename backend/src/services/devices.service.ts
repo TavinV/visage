@@ -97,6 +97,9 @@ export interface ListDevicesParams extends ListParams {
   tenantId: string;
   isActive?: boolean;
   locationId?: string;
+  allowEnrollment?: boolean;
+  lastSeenFrom?: Date;
+  lastSeenTo?: Date;
 }
 
 // ── Serviço ───────────────────────────────────────────────────────────────────
@@ -123,6 +126,10 @@ class DevicesService extends BaseService {
       tenantId: params.tenantId,
       ...(params.isActive !== undefined && { isActive: params.isActive }),
       ...(params.locationId && { locationId: params.locationId }),
+      ...(params.allowEnrollment !== undefined && {
+        allowEnrollment: params.allowEnrollment,
+      }),
+      ...this.buildDateRange("lastSeenAt", params.lastSeenFrom, params.lastSeenTo),
       ...(searchOr && { OR: searchOr }),
     };
 

@@ -65,6 +65,12 @@ export interface CourseOutput {
 export interface ListCoursesParams extends ListParams {
   tenantId: string;
   academicPeriodId?: string;
+  createdFrom?: Date;
+  createdTo?: Date;
+  /** Já tem alguma turma criada? */
+  hasClasses?: boolean;
+  /** Já tem alguma disciplina no catálogo? */
+  hasSubjects?: boolean;
 }
 
 // ── Aplicação da grade do curso nas turmas ───────────────────────────────────
@@ -73,9 +79,11 @@ export interface CurriculumSubjectInput {
   subjectId: string;
   /** Professores alocados; o primeiro vira o responsável. */
   teacherIds: string[];
-  /** Sem valor, usa a carga padrão da disciplina no currículo. */
+  /** Sem valor, cai no padrão de 1 aula por chamada. */
   lessonsPerSession?: number;
   totalLessonsPlanned?: number;
+  /** Sem valor, usa a duração de aula configurada no curso. */
+  lessonDurationMin?: number;
 }
 
 export interface ApplyCurriculumInput {
@@ -124,6 +132,13 @@ class CoursesService extends BaseService {
     const where = {
       tenantId: params.tenantId,
       ...(params.academicPeriodId && { academicPeriodId: params.academicPeriodId }),
+      ...(params.hasClasses !== undefined && {
+        classes: params.hasClasses ? { some: {} } : { none: {} },
+      }),
+      ...(params.hasSubjects !== undefined && {
+        subjects: params.hasSubjects ? { some: {} } : { none: {} },
+      }),
+      ...this.buildDateRange("createdAt", params.createdFrom, params.createdTo),
       ...(searchOr && { OR: searchOr }),
     };
 
@@ -333,9 +348,14 @@ class CoursesService extends BaseService {
   ): Promise<ApplyCurriculumOutput> {
     const course = await this.prisma.course.findFirst({
       where: { id: courseId, tenantId },
-      select: { id: true, name: true },
+      select: { id: true, name: true, lessonDuration: true, lessonDurationUnit: true },
     });
     if (!course) throw new NotFoundError("Course not found");
+
+    const defaultLessonDurationMin = lessonDurationToMinutes(
+      course.lessonDuration,
+      course.lessonDurationUnit
+    );
 
     if (input.subjects.length === 0) {
       throw new ValidationError(
@@ -353,8 +373,6 @@ class CoursesService extends BaseService {
         name: true,
         courseId: true,
         isActive: true,
-        defaultLessonsPerSession: true,
-        defaultTotalLessonsPlanned: true,
       },
     });
     if (subjects.length !== subjectIds.length) {
@@ -439,9 +457,9 @@ class CoursesService extends BaseService {
           );
         }
 
-        const lessonsPerSession = row.lessonsPerSession ?? subject.defaultLessonsPerSession;
-        const totalLessonsPlanned =
-          row.totalLessonsPlanned ?? subject.defaultTotalLessonsPlanned;
+        const lessonsPerSession = row.lessonsPerSession ?? 1;
+        const totalLessonsPlanned = row.totalLessonsPlanned ?? 0;
+        const lessonDurationMin = row.lessonDurationMin ?? defaultLessonDurationMin;
 
         const existing = await this.prisma.classSubject.findUnique({
           where: {
@@ -474,10 +492,12 @@ class CoursesService extends BaseService {
               teacherId: requested[0],
               lessonsPerSession,
               totalLessonsPlanned,
+              lessonDurationMin,
             },
             update: {
               lessonsPerSession,
               totalLessonsPlanned,
+              lessonDurationMin,
               // "sync" mexe só na carga: trocar o professor de 50 turmas sem
               // pedir é o tipo de coisa que ninguém desfaz depois
               ...(mode === "replace" && { teacherId: requested[0] }),

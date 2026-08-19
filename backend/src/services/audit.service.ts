@@ -121,8 +121,9 @@ export interface AuditLogOutput {
 export interface ListAuditLogsParams extends ListParams {
   /** undefined = visão global (só super_admin chega aqui). */
   tenantId?: string;
-  action?: string;
-  category?: string;
+  /** Vários valores = OR entre eles — o filtro do painel permite marcar mais de um. */
+  action?: string[];
+  category?: string[];
   severity?: string;
   status?: string;
   /** Filtra por quem executou. */
@@ -809,8 +810,8 @@ class AuditService extends BaseService {
 
     return {
       ...(params.tenantId && { tenantId: params.tenantId }),
-      ...(params.action && { action: params.action }),
-      ...(params.category && { category: params.category }),
+      ...(params.action && params.action.length > 0 && { action: { in: params.action } }),
+      ...(params.category && params.category.length > 0 && { category: { in: params.category } }),
       ...(params.severity && { severity: params.severity }),
       ...(params.status && { status: params.status }),
       ...(params.actorId && { userId: params.actorId }),

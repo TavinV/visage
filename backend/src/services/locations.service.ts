@@ -37,6 +37,12 @@ export interface LocationOutput {
 export interface ListLocationsParams extends ListParams {
   tenantId: string;
   isActive?: boolean;
+  /** Tem endereço cadastrado (não nulo e não vazio)? */
+  hasAddress?: boolean;
+  /** Tem ao menos um totem vinculado? */
+  hasDevice?: boolean;
+  createdFrom?: Date;
+  createdTo?: Date;
 }
 
 // ── Serviço ───────────────────────────────────────────────────────────────────
@@ -54,9 +60,21 @@ class LocationsService extends BaseService {
       { createdAt: "desc" };
     const searchOr = this.buildSearchFilter(params.search, ["name", "address"]);
 
+    // hasAddress vai em AND (não OR) de propósito: a busca por texto também
+    // usa a chave OR no mesmo objeto — dois OR no nível raiz se
+    // sobrescreveriam, e "sem endereço" desapareceria silenciosamente ao
+    // combinar com uma busca.
+    const noAddress = { OR: [{ address: null }, { address: "" }] };
     const where = {
       tenantId: params.tenantId,
       ...(params.isActive !== undefined && { isActive: params.isActive }),
+      ...(params.hasAddress !== undefined && {
+        AND: [params.hasAddress ? { NOT: noAddress } : noAddress],
+      }),
+      ...(params.hasDevice !== undefined && {
+        devices: params.hasDevice ? { some: {} } : { none: {} },
+      }),
+      ...this.buildDateRange("createdAt", params.createdFrom, params.createdTo),
       ...(searchOr && { OR: searchOr }),
     };
 

@@ -291,37 +291,45 @@ export default function TenantOverviewPage() {
         />
       </div>
 
-      {/* Contadores da instituição */}
-      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-5">
+      {/* Contadores da instituição — flex-wrap em vez de grid: com 5 cartões,
+          um grid de 2 colunas sempre deixa o último sozinho numa fileira
+          "quebrada"; com grow, ele estica pra preencher a linha em vez de
+          ficar torto. */}
+      <div className="mb-6 flex flex-wrap gap-4">
         <MiniStat
           label="Alunos ativos"
           value={String(data?.totals.students ?? 0)}
           icon={<Users size={17} strokeWidth={1.75} />}
           href="/dashboard/users"
+          className="min-w-0 grow basis-[calc(50%-0.75rem)] lg:basis-[calc(20%-1rem)]"
         />
         <MiniStat
           label="Turmas"
           value={String(data?.totals.classes ?? 0)}
           icon={<GraduationCap size={17} strokeWidth={1.75} />}
           href="/dashboard/classes"
+          className="min-w-0 grow basis-[calc(50%-0.75rem)] lg:basis-[calc(20%-1rem)]"
         />
         <MiniStat
           label="Totens online"
           value={`${data?.totals.devicesOnline ?? 0}/${data?.totals.devices ?? 0}`}
           icon={<MonitorSmartphone size={17} strokeWidth={1.75} />}
           href="/dashboard/devices"
+          className="min-w-0 grow basis-[calc(50%-0.75rem)] lg:basis-[calc(20%-1rem)]"
         />
         <MiniStat
           label="Chamadas abertas"
           value={String(data?.totals.openSessions ?? 0)}
           icon={<ScanFace size={17} strokeWidth={1.75} />}
           href="/dashboard/sessions"
+          className="min-w-0 grow basis-[calc(50%-0.75rem)] lg:basis-[calc(20%-1rem)]"
         />
         <MiniStat
           label="Aulas hoje"
           value={String(data?.totals.sessionsToday ?? 0)}
           icon={<CalendarClock size={17} strokeWidth={1.75} />}
           href="/dashboard/sessions"
+          className="min-w-0 grow basis-[calc(50%-0.75rem)] lg:basis-[calc(20%-1rem)]"
         />
       </div>
 

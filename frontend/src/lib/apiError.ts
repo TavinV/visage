@@ -23,7 +23,7 @@ const messagesBySlug: Record<string, string> = {
     "Informe a matrícula — a instituição identifica os alunos por matrícula.",
   enrollment_code_already_exists: "Já existe um aluno com esta matrícula na instituição.",
   document_already_exists: "Já existe um usuário com este CPF na instituição.",
-  email_already_exists: "Já existe um usuário com este e-mail na instituição.",
+  email_already_exists: "Já existe um usuário com este e-mail no sistema.",
   email_required_for_panel_roles: "Informe um e-mail — este cargo acessa o painel.",
   password_too_short: "A senha precisa de pelo menos 8 caracteres.",
   current_password_incorrect: "A senha atual está incorreta.",

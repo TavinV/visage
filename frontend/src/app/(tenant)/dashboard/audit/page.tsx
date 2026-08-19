@@ -34,7 +34,9 @@ import {
   TableState,
   Pagination,
   Input,
+  DatePicker,
   Select,
+  MultiSelect,
   Button,
   Modal,
   Spinner,
@@ -167,8 +169,8 @@ function StatCard({
 
 function ActivityTab({ onOpenSession }: { onOpenSession: (id: string) => void }) {
   const [page, setPage] = useState(1);
-  const [action, setAction] = useState("");
-  const [category, setCategory] = useState("");
+  const [actions, setActions] = useState<string[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
   const [severity, setSeverity] = useState("");
   const [actorId, setActorId] = useState("");
   const [from, setFrom] = useState("");
@@ -176,10 +178,18 @@ function ActivityTab({ onOpenSession }: { onOpenSession: (id: string) => void })
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<AuditLog | null>(null);
 
-  const { eventOptions, categoryOptions } = useEventOptions(BASE);
+  const { eventMultiOptions, categoryMultiOptions } = useEventOptions(BASE);
   const actorOptions = useActorOptions(BASE);
 
-  const filters = { action, category, severity, actor_id: actorId, from, to, search };
+  const filters = {
+    action: actions.join(","),
+    category: categories.join(","),
+    severity,
+    actor_id: actorId,
+    from,
+    to,
+    search,
+  };
 
   const logs = useQuery({
     queryKey: ["audit-activity", { page, ...filters }],
@@ -218,34 +228,43 @@ function ActivityTab({ onOpenSession }: { onOpenSession: (id: string) => void })
       </div>
 
       <div className="mb-4 flex flex-wrap items-end gap-3">
-        <Input
+        <DatePicker
           label="De"
-          type="date"
           value={from}
-          onChange={(e) => onFilter(setFrom)(e.target.value)}
+          onChange={onFilter(setFrom)}
+          max={to || undefined}
+          clearable
           className="w-40"
         />
-        <Input
+        <DatePicker
           label="Até"
-          type="date"
           value={to}
-          onChange={(e) => onFilter(setTo)(e.target.value)}
+          onChange={onFilter(setTo)}
+          min={from || undefined}
+          clearable
           className="w-40"
         />
-        <Select
+        <MultiSelect
           label="Área"
-          value={category}
-          onChange={(e) => onFilter(setCategory)(e.target.value)}
+          value={categories}
+          onChange={(vals) => {
+            setCategories(vals);
+            setPage(1);
+          }}
           placeholder="Todas"
-          options={categoryOptions}
+          options={categoryMultiOptions}
           className="w-52"
         />
-        <Select
+        <MultiSelect
           label="Evento"
-          value={action}
-          onChange={(e) => onFilter(setAction)(e.target.value)}
+          value={actions}
+          onChange={(vals) => {
+            setActions(vals);
+            setPage(1);
+          }}
           placeholder="Todos"
-          options={eventOptions}
+          searchPlaceholder="Buscar evento…"
+          options={eventMultiOptions}
           className="w-72"
         />
         <Select
@@ -335,18 +354,20 @@ function SessionsTab({ onOpenSession }: { onOpenSession: (id: string) => void })
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-end gap-3">
-        <Input
+        <DatePicker
           label="De"
-          type="date"
           value={from}
-          onChange={(e) => onFilter(setFrom)(e.target.value)}
+          onChange={onFilter(setFrom)}
+          max={to || undefined}
+          clearable
           className="w-40"
         />
-        <Input
+        <DatePicker
           label="Até"
-          type="date"
           value={to}
-          onChange={(e) => onFilter(setTo)(e.target.value)}
+          onChange={onFilter(setTo)}
+          min={from || undefined}
+          clearable
           className="w-40"
         />
         <Select
@@ -434,14 +455,14 @@ function RecognitionTab() {
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-end gap-3">
-        <Input
+        <DatePicker
           label="Data"
-          type="date"
           value={date}
-          onChange={(e) => {
-            setDate(e.target.value);
+          onChange={(value) => {
+            setDate(value);
             setPage(1);
           }}
+          clearable
           className="w-44"
         />
         <Select

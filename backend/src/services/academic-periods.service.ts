@@ -40,6 +40,12 @@ export interface AcademicPeriodOutput {
 export interface ListAcademicPeriodsParams extends ListParams {
   tenantId: string;
   isActive?: boolean;
+  /** "current" (vigente agora) | "past" (encerrado) | "future" (ainda não começou). */
+  temporal?: string[];
+  startsFrom?: Date;
+  startsTo?: Date;
+  endsFrom?: Date;
+  endsTo?: Date;
 }
 
 // ── Serviço ───────────────────────────────────────────────────────────────────
@@ -60,6 +66,9 @@ class AcademicPeriodsService extends BaseService {
     const where = {
       tenantId: params.tenantId,
       ...(params.isActive !== undefined && { isActive: params.isActive }),
+      ...this.temporalCondition(params.temporal),
+      ...this.buildDateRange("startsAt", params.startsFrom, params.startsTo),
+      ...this.buildDateRange("endsAt", params.endsFrom, params.endsTo),
       ...(searchOr && { OR: searchOr }),
     };
 
@@ -174,6 +183,26 @@ class AcademicPeriodsService extends BaseService {
     });
 
     this.logger.info({ periodId: id, tenantId }, "Academic period deleted");
+  }
+
+  /**
+   * "Vigente agora" / "encerrado" / "futuro" — comparação de datas que a
+   * secretaria faria de cabeça toda vez que olhasse pra lista, feita uma vez
+   * aqui. Mais de um balde marcado vira OR entre eles.
+   */
+  private temporalCondition(buckets?: string[]) {
+    if (!buckets || buckets.length === 0) return undefined;
+    const now = new Date();
+    const conditions = buckets
+      .map((bucket) => {
+        if (bucket === "current") return { startsAt: { lte: now }, endsAt: { gte: now } };
+        if (bucket === "past") return { endsAt: { lt: now } };
+        if (bucket === "future") return { startsAt: { gt: now } };
+        return undefined;
+      })
+      .filter((c): c is NonNullable<typeof c> => c !== undefined);
+    if (conditions.length === 0) return undefined;
+    return conditions.length === 1 ? conditions[0] : { OR: conditions };
   }
 
   private toOutput(period: any): AcademicPeriodOutput {

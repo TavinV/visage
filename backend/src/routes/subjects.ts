@@ -23,17 +23,12 @@ const CreateSubjectSchema = z.object({
   courseId: z.string().uuid(),
   name: z.string().min(1).max(200),
   code: z.string().max(30).optional(),
-  // Carga sugerida ao aplicar o currículo do curso nas turmas
-  defaultLessonsPerSession: z.number().int().min(1).max(12).optional(),
-  defaultTotalLessonsPlanned: z.number().int().min(0).max(1000).optional(),
 });
 
 const UpdateSubjectSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   code: z.string().max(30).nullable().optional(),
   isActive: z.boolean().optional(),
-  defaultLessonsPerSession: z.number().int().min(1).max(12).optional(),
-  defaultTotalLessonsPlanned: z.number().int().min(0).max(1000).optional(),
 });
 
 type CreateSubjectRequest = z.infer<typeof CreateSubjectSchema>;

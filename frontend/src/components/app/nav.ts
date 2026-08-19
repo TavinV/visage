@@ -45,9 +45,8 @@ export const tenantNav: NavSection[] = [
     label: "Estrutura acadêmica",
     items: [
       { href: "/dashboard/periods", label: "Períodos", icon: CalendarRange, roles: ["admin"] },
-      // Disciplinas vivem dentro do curso (catálogo) e da turma (grade) —
-      // não têm página própria
       { href: "/dashboard/courses", label: "Cursos", icon: BookOpen, roles: ["admin", "teacher"] },
+      { href: "/dashboard/subjects", label: "Disciplinas", icon: Library, roles: ["admin", "teacher"] },
       { href: "/dashboard/classes", label: "Turmas", icon: GraduationCap, roles: ["admin", "teacher"] },
       { href: "/dashboard/locations", label: "Salas de aula", icon: MapPin, roles: ["admin", "teacher"] },
       { href: "/dashboard/devices", label: "Dispositivos", icon: MonitorSmartphone, roles: ["admin"] },

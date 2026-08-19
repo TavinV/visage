@@ -8,6 +8,7 @@ import { devicesService } from "../services/devices.service";
 import { calibrationService } from "../services/calibration.service";
 import { authenticate } from "../middleware/authenticate";
 import { validate } from "../middleware/validate";
+import { parseDate, boolParam } from "../utils/query";
 
 const router = Router();
 
@@ -71,6 +72,9 @@ router.get(
         search: req.query.search as string | undefined,
         isActive: req.query.isActive ? req.query.isActive === "true" : undefined,
         locationId: req.query.locationId as string | undefined,
+        allowEnrollment: boolParam(req.query.allowEnrollment),
+        lastSeenFrom: parseDate(req.query.last_seen_from),
+        lastSeenTo: parseDate(req.query.last_seen_to, true),
       });
 
       res.json(result);

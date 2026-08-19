@@ -309,7 +309,7 @@ export default function ClassDetailPage() {
           <div className="border-b border-flauzino-slate-200 px-5 py-4">
             <Input
               label="Adicionar aluno"
-              placeholder="Buscar por nome ou e-mail"
+              placeholder="Buscar por nome, e-mail, CPF ou matrícula"
               icon={<Search size={15} />}
               value={studentSearch}
               onChange={(e) => setStudentSearch(e.target.value)}

@@ -10,7 +10,24 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Monitor, Server, User as UserIcon, UserX, ArrowRight } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import {
+  Monitor,
+  Server,
+  User as UserIcon,
+  UserX,
+  ArrowRight,
+  LogIn,
+  Users,
+  GraduationCap,
+  ShieldCheck,
+  Fingerprint,
+  MonitorSmartphone,
+  Library,
+  ClipboardCheck,
+  Settings,
+  Building2,
+} from "lucide-react";
 import { api, qs } from "@/lib/api";
 import { friendlyError } from "@/lib/apiError";
 import { formatDateTime, formatDuration } from "@/lib/format";
@@ -20,7 +37,23 @@ import type {
   AuthSession,
   AuthSessionDetail,
 } from "@/lib/types";
-import { Badge, Button, Modal, Spinner, Table, Th, Td, Tr } from "@/components/ui";
+import { Badge, Button, Modal, Spinner, Table, Th, Td, Tr, type MultiSelectOption } from "@/components/ui";
+
+// ── Ícones por área ──────────────────────────────────────────────────────────
+
+/** Mesma chave de backend/src/lib/auditEvents.ts (AUDIT_CATEGORIES). */
+export const categoryIcons: Record<string, LucideIcon> = {
+  auth: LogIn,
+  user: Users,
+  student: GraduationCap,
+  consent: ShieldCheck,
+  data: Fingerprint,
+  device: MonitorSmartphone,
+  academic: Library,
+  attendance: ClipboardCheck,
+  settings: Settings,
+  tenant: Building2,
+};
 
 // ── Vocabulário ──────────────────────────────────────────────────────────────
 
@@ -663,7 +696,29 @@ export function useEventOptions(basePath: string) {
     [catalog.data]
   );
 
-  return { eventOptions, categoryOptions };
+  // Mesmos dados, moldados pro MultiSelect: evento agrupado por área (com
+  // ícone), área com ícone e sem grupo (ela já É o agrupamento).
+  const eventMultiOptions = useMemo<MultiSelectOption[]>(() => {
+    const events = catalog.data?.data.events ?? [];
+    return events.map((event) => ({
+      value: event.action,
+      label: event.label,
+      group: event.categoryLabel,
+      icon: categoryIcons[event.category],
+    }));
+  }, [catalog.data]);
+
+  const categoryMultiOptions = useMemo<MultiSelectOption[]>(
+    () =>
+      (catalog.data?.data.categories ?? []).map((category) => ({
+        value: category.value,
+        label: category.label,
+        icon: categoryIcons[category.value],
+      })),
+    [catalog.data]
+  );
+
+  return { eventOptions, categoryOptions, eventMultiOptions, categoryMultiOptions };
 }
 
 /** Atores para o filtro "quem fez". */

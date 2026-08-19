@@ -23,6 +23,7 @@ const ClassSubjectSchema = z
     teacherIds: z.array(z.string().uuid()).min(1).max(20).optional(),
     lessonsPerSession: z.number().int().min(1).max(12).optional(),
     totalLessonsPlanned: z.number().int().min(0).max(1000).optional(),
+    lessonDurationMin: z.number().int().min(1).max(480).optional(),
   })
   .refine((v) => Boolean(v.teacherId ?? v.teacherIds?.length), {
     message: "Informe ao menos um professor para a disciplina",
@@ -73,6 +74,7 @@ router.get(
         search: req.query.search as string | undefined,
         courseId: req.query.courseId as string | undefined,
         subjectId: req.query.subjectId as string | undefined,
+        locationId: req.query.locationId as string | undefined,
         // Professor: escopo travado nas próprias turmas
         teacherId: role === "teacher" ? userId : (req.query.teacherId as string | undefined),
       });

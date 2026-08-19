@@ -6,7 +6,7 @@
 
 import { BaseService, ListParams, PaginatedResult } from "./base.service";
 import { generateKey, generateIV } from "../utils/crypto";
-import { NotFoundError, ValidationError } from "../utils/errors";
+import { NotFoundError, ValidationError, ConflictError } from "../utils/errors";
 import { normalizeDocument } from "../utils/cpfQr";
 import { config } from "../lib/config";
 import { emailService } from "./email.service";
@@ -133,6 +133,13 @@ class TenantsService extends BaseService {
     const plan = await this.prisma.plan.findUnique({ where: { id: input.planId } });
     if (!plan) throw new NotFoundError("Plan not found");
     if (!plan.isActive) throw new ValidationError("Plan is not active");
+
+    // Email é único no sistema inteiro — sem checar aqui o P2002 estouraria
+    // dentro da transação como erro genérico em vez de um conflito amigável.
+    const existingEmail = await this.prisma.user.findFirst({
+      where: { email: input.adminUser.email },
+    });
+    if (existingEmail) throw new ConflictError("email_already_exists");
 
     // Gerar e cifrar DEK com MASTER_KEY (AES-256-GCM)
     const dek = generateKey(32);
