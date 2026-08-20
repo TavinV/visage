@@ -9,8 +9,6 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import {
   Plus,
   Search,
-  Copy,
-  KeyRound,
   CheckCircle2,
   Clock,
   CircleSlash,
@@ -116,12 +114,6 @@ const facialStatusFilterOptions: MultiSelectOption[] = [
   { value: "revoked", label: "Revogada", icon: ShieldOff },
 ];
 
-interface CreatedCredentials {
-  name: string;
-  email: string;
-  temporaryPassword: string;
-}
-
 export default function UsersPage() {
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -136,7 +128,6 @@ export default function UsersPage() {
   const debouncedSearch = useDebounced(search);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [credentials, setCredentials] = useState<CreatedCredentials | null>(null);
 
   const activeFilterCount =
     [role, status, facialStatus].filter((v) => v.length > 0).length +
@@ -184,7 +175,7 @@ export default function UsersPage() {
 
   const create = useMutation({
     mutationFn: (v: CreateUserForm) =>
-      api.post<{ data: User & { temporaryPassword?: string } }>("/users", {
+      api.post<{ data: User }>("/users", {
         name: v.name,
         email: v.email || undefined,
         role: v.role,
@@ -193,19 +184,14 @@ export default function UsersPage() {
           v.role === "student" && !cpfRegistered ? undefined : v.document || undefined,
         enrollmentCode: v.role === "student" ? v.enrollmentCode || undefined : undefined,
       }),
-    onSuccess: (res, variables) => {
+    onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
       setCreating(false);
-      if (res.data.temporaryPassword) {
-        // Senha gerada pelo backend — exibida uma única vez
-        setCredentials({
-          name: variables.name,
-          email: variables.email ?? "",
-          temporaryPassword: res.data.temporaryPassword,
-        });
-      } else {
-        toast.success("Aluno cadastrado.");
-      }
+      toast.success(
+        res.data.role === "student"
+          ? "Aluno cadastrado."
+          : `Usuário criado. As credenciais de acesso foram enviadas para ${res.data.email}.`
+      );
     },
     onError: (error) => toast.error(friendlyError(error)),
   });
@@ -374,7 +360,7 @@ export default function UsersPage() {
         open={creating}
         onClose={() => setCreating(false)}
         title="Criar usuário"
-        description="Quem acessa o painel recebe uma senha temporária gerada automaticamente."
+        description="Quem acessa o painel recebe as credenciais de acesso por e-mail."
         footer={
           <>
             <Button variant="secondary" onClick={() => setCreating(false)}>Cancelar</Button>
@@ -441,60 +427,11 @@ export default function UsersPage() {
           </div>
           {!isStudent && (
             <p className="rounded-lg bg-flauzino-accent-50 px-4 py-3 text-[13px] leading-relaxed text-flauzino-slate-700">
-              A senha inicial é gerada automaticamente e exibida uma única vez após a
-              criação. O usuário é obrigado a trocá-la no primeiro acesso.
+              A senha inicial é gerada automaticamente e enviada por e-mail para a
+              pessoa cadastrada. Ela é obrigada a trocá-la no primeiro acesso.
             </p>
           )}
         </form>
-      </Modal>
-
-      {/* Credenciais temporárias — exibidas uma única vez */}
-      <Modal
-        open={credentials !== null}
-        onClose={() => setCredentials(null)}
-        title="Usuário criado"
-        description="Entregue estas credenciais por um canal seguro. A senha não será exibida novamente."
-        size="sm"
-        footer={
-          <Button variant="secondary" onClick={() => setCredentials(null)}>
-            Concluir
-          </Button>
-        }
-      >
-        {credentials && (
-          <div className="flex flex-col gap-3">
-            <div className="rounded-lg bg-flauzino-slate-100 px-4 py-3">
-              <p className="text-xs font-medium text-flauzino-slate-500">E-mail de acesso</p>
-              <p className="mt-0.5 font-mono-ds text-sm text-flauzino-navy-900">{credentials.email}</p>
-            </div>
-            <div className="flex items-center gap-2 rounded-lg bg-flauzino-slate-100 px-4 py-3">
-              <span className="min-w-0 flex-1">
-                <p className="flex items-center gap-1.5 text-xs font-medium text-flauzino-slate-500">
-                  <KeyRound size={12} /> Senha temporária
-                </p>
-                <code className="mt-0.5 block truncate font-mono-ds text-base font-semibold text-flauzino-navy-900">
-                  {credentials.temporaryPassword}
-                </code>
-              </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() =>
-                  navigator.clipboard
-                    .writeText(credentials.temporaryPassword)
-                    .then(() => toast.success("Senha copiada."))
-                }
-                iconLeft={<Copy size={14} />}
-              >
-                Copiar
-              </Button>
-            </div>
-            <p className="text-xs leading-relaxed text-flauzino-slate-500">
-              No primeiro acesso, {credentials.name.split(" ")[0]} será direcionado a
-              definir uma senha própria.
-            </p>
-          </div>
-        )}
       </Modal>
     </div>
   );

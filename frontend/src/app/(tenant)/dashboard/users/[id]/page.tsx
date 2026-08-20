@@ -9,7 +9,6 @@ import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   ArrowLeft,
-  Copy,
   ScanFace,
   ShieldOff,
   Trash2,
@@ -37,7 +36,6 @@ import {
   Button,
   Input,
   Select,
-  Modal,
   ConfirmDialog,
   Skeleton,
   useToast,
@@ -57,17 +55,12 @@ const UpdateUserSchema = z.object({
 
 type UpdateUserForm = z.infer<typeof UpdateUserSchema>;
 
-function copyToClipboard(text: string, onDone: () => void) {
-  navigator.clipboard.writeText(text).then(onDone);
-}
-
 export default function UserDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const queryClient = useQueryClient();
   const toast = useToast();
 
-  const [tempPassword, setTempPassword] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<
     null | "revoke-consent" | "erase-data" | "delete-user"
   >(null);
@@ -155,9 +148,8 @@ export default function UserDetailPage() {
   });
 
   const resetPassword = useMutation({
-    mutationFn: () =>
-      api.post<{ data: { temporaryPassword: string } }>(`/users/${id}/reset-password`),
-    onSuccess: (res) => setTempPassword(res.data.temporaryPassword),
+    mutationFn: () => api.post(`/users/${id}/reset-password`),
+    onSuccess: () => toast.success("Nova senha temporária enviada por e-mail ao usuário."),
     onError: (error) => toast.error(friendlyError(error)),
   });
 
@@ -353,7 +345,11 @@ export default function UserDetailPage() {
           <Card>
             <CardHeader
               title="Acesso ao painel"
-              description="Gera uma senha temporária que o usuário troca no primeiro acesso."
+              description={
+                u.email
+                  ? "Gera uma nova senha temporária e envia por e-mail; o usuário a troca no primeiro acesso."
+                  : "Cadastre um e-mail acima para liberar o acesso ao painel."
+              }
               icon={<KeyRound size={18} strokeWidth={1.75} />}
             />
             <CardBody>
@@ -361,9 +357,10 @@ export default function UserDetailPage() {
                 variant="secondary"
                 onClick={() => resetPassword.mutate()}
                 loading={resetPassword.isPending}
+                disabled={!u.email}
                 iconLeft={<KeyRound size={15} />}
               >
-                Gerar senha temporária
+                Enviar nova senha por e-mail
               </Button>
             </CardBody>
           </Card>
@@ -432,36 +429,6 @@ export default function UserDetailPage() {
           </CardBody>
         </Card>
       </div>
-
-      {/* Senha temporária — exibida uma única vez */}
-      <Modal
-        open={tempPassword !== null}
-        onClose={() => setTempPassword(null)}
-        title="Senha temporária gerada"
-        description="Entregue ao usuário por um canal seguro. Ela não será exibida novamente."
-        size="sm"
-        footer={
-          <Button variant="secondary" onClick={() => setTempPassword(null)}>
-            Concluir
-          </Button>
-        }
-      >
-        {tempPassword && (
-          <div className="flex items-center gap-2 rounded-lg bg-flauzino-slate-100 px-3 py-2">
-            <code className="min-w-0 flex-1 truncate font-mono-ds text-sm text-flauzino-navy-900">
-              {tempPassword}
-            </code>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => copyToClipboard(tempPassword, () => toast.success("Senha copiada."))}
-              iconLeft={<Copy size={14} />}
-            >
-              Copiar
-            </Button>
-          </div>
-        )}
-      </Modal>
 
       <ConfirmDialog
         open={confirming === "revoke-consent"}

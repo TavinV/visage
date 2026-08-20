@@ -299,9 +299,8 @@ router.put(
 
 /**
  * POST /users/:id/reset-password
- * Reset de senha — admin gera senha temporária para usuário
- * Retorna { temporaryPassword: "ABC123XYZ" }
- * Usuário deve alterar essa senha no primeiro login
+ * Reset de senha — admin gera senha temporária para o usuário.
+ * A senha é enviada por email; a API nunca a retorna em texto puro.
  */
 router.post(
   "/:id/reset-password",
@@ -311,16 +310,12 @@ router.post(
     try {
       const { tenantId } = req.tenant!;
 
-      const temporaryPassword = await usersService.resetPassword(
-        req.params.id,
-        tenantId,
-      );
+      await usersService.resetPassword(req.params.id, tenantId);
 
       res.status(200).json({
         data: {
           userId: req.params.id,
-          temporaryPassword,
-          message: "Senha temporária gerada. Usuário deve alterá-la no primeiro login.",
+          message: "Nova senha temporária enviada por email. Usuário deve alterá-la no primeiro login.",
         },
       });
     } catch (error) {

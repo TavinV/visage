@@ -13,8 +13,8 @@
  * ```ts
  * await emailService.send({
  *   to: "aluno@escola.edu.br",
- *   templateId: "enrollment-invite",
- *   context: { studentName: "Maria", qrCodeUrl: "...", expiresAt: "..." },
+ *   templateId: "password-reset",
+ *   context: { userName: "Maria", resetUrl: "..." },
  * });
  * ```
  *
@@ -46,21 +46,8 @@ export interface WelcomeEmailContext {
   dashboardUrl: string;
 }
 
-export interface EnrollmentInviteEmailContext {
-  /** Nome completo do aluno */
-  studentName: string;
-  /** Nome da instituição */
-  institutionName: string;
-  /** URL da imagem do QR Code (data URL ou URL pública) */
-  qrCodeUrl: string;
-  /** Data/hora de expiração formatada (ex: "20/05/2026 às 14h00") */
-  expiresAt: string;
-  /** URL do totem de cadastro (opcional — para acesso web) */
-  enrollmentUrl?: string;
-}
-
 export interface AdminCredentialsEmailContext {
-  /** Nome completo do administrador */
+  /** Nome completo da pessoa */
   name: string;
   /** Nome da instituição/tenant */
   institutionName: string;
@@ -70,6 +57,8 @@ export interface AdminCredentialsEmailContext {
   temporaryPassword: string;
   /** URL do painel de acesso */
   dashboardUrl: string;
+  /** Rótulo do cargo em pt-BR usado no corpo do email (ex.: "administrador", "coordenação", "professor") */
+  roleLabel: string;
 }
 
 export interface PasswordResetEmailContext {
@@ -128,31 +117,38 @@ export interface AttendanceReportEmailContext {
 interface TemplateManifest {
   subject: string;
   file: string;
+  /**
+   * Texto de pré-visualização (suporta variáveis Handlebars) — some ao lado do
+   * assunto na caixa de entrada. Sem isso, o cliente de email cai para o
+   * primeiro texto visível do corpo, o que costuma ficar estranho.
+   */
+  preheader: string;
 }
 
 const TEMPLATE_REGISTRY = {
   welcome: {
     subject: "Bem-vindo ao Visage, {{name}}!",
+    preheader: "Sua conta em {{institutionName}} está pronta. Acesse o painel para começar.",
     file: "welcome.hbs",
-  },
-  "enrollment-invite": {
-    subject: "Seu convite de cadastro biométrico — {{institutionName}}",
-    file: "enrollment-invite.hbs",
   },
   "password-reset": {
     subject: "Redefinição de senha — Visage",
+    preheader: "Clique para criar uma nova senha. O link expira em {{expiresIn}}.",
     file: "password-reset.hbs",
   },
   "attendance-report": {
     subject: "Relatório de chamada: {{className}} — {{sessionDate}}",
+    preheader: "{{presentCount}} de {{totalCount}} presentes em {{className}}. Confira o relatório completo.",
     file: "attendance-report.hbs",
   },
   "admin-credentials": {
     subject: "Suas credenciais de acesso — {{institutionName}}",
+    preheader: "Seu acesso de {{roleLabel}} em {{institutionName}} está pronto. Confira suas credenciais.",
     file: "admin-credentials.hbs",
   },
   "demo-request": {
     subject: "Nova demonstração solicitada — {{institutionName}}",
+    preheader: "{{contactName}}, de {{institutionName}}, quer conhecer a Visage.",
     file: "demo-request.hbs",
   },
 } as const satisfies Record<string, TemplateManifest>;
@@ -162,7 +158,6 @@ export type EmailTemplateId = keyof typeof TEMPLATE_REGISTRY;
 /** Mapeia cada template ID ao tipo de contexto exigido. */
 export type TemplateContextMap = {
   welcome: WelcomeEmailContext;
-  "enrollment-invite": EnrollmentInviteEmailContext;
   "password-reset": PasswordResetEmailContext;
   "attendance-report": AttendanceReportEmailContext;
   "admin-credentials": AdminCredentialsEmailContext;
@@ -203,6 +198,7 @@ export interface SendEmailResult {
 type CompiledEntry = {
   content: Handlebars.TemplateDelegate;
   subject: Handlebars.TemplateDelegate;
+  preheader: Handlebars.TemplateDelegate;
 };
 
 // ── Serviço ───────────────────────────────────────────────────────────────────
@@ -228,18 +224,20 @@ class EmailService {
   ): Promise<SendEmailResult> {
     const { to, templateId, context, subjectOverride, replyTo } = opts;
 
-    const { content, subject: subjectTpl } = this.loadTemplate(templateId);
+    const { content, subject: subjectTpl, preheader: preheaderTpl } = this.loadTemplate(templateId);
     const layout = this.loadLayout();
 
-    // Renderiza conteúdo e assunto com os dados fornecidos
+    // Renderiza conteúdo, assunto e preheader com os dados fornecidos
     const bodyHtml = content(context);
     const subject = subjectOverride ?? subjectTpl(context);
+    const preheader = preheaderTpl(context);
 
     // Injeta conteúdo renderizado no layout base
     // `year` é adicionado automaticamente para uso no footer do layout
     const html = layout({
       ...context,
       body: bodyHtml,
+      preheader,
       year: new Date().getFullYear(),
     });
 
@@ -294,6 +292,7 @@ class EmailService {
     const entry: CompiledEntry = {
       content: Handlebars.compile(source),
       subject: Handlebars.compile(manifest.subject),
+      preheader: Handlebars.compile(manifest.preheader),
     };
 
     this.cache.set(id, entry);

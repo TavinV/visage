@@ -20,6 +20,8 @@ import {
 import { engineInvalidateEmbedding } from "../lib/faceEngine";
 import { auditService } from "./audit.service";
 import { snapshot } from "../utils/diff";
+import { emailService } from "./email.service";
+import { config } from "../lib/config";
 import bcryptjs from "bcryptjs";
 
 // ── DTOs ──────────────────────────────────────────────────────────────────────
@@ -95,6 +97,13 @@ const AUDITED_USER_FIELDS = [
   "enrollmentCode",
   "facialStatus",
 ] as const;
+
+/** Rótulo em pt-BR do cargo, usado no corpo do email de credenciais. */
+const ROLE_EMAIL_LABELS: Record<string, string> = {
+  admin: "administrador",
+  manager: "coordenação",
+  teacher: "professor",
+};
 
 // ── Serviço ───────────────────────────────────────────────────────────────────
 
@@ -185,7 +194,7 @@ class UsersService extends BaseService {
   /**
    * Criar novo usuário
    */
-  async create(input: CreateUserInput): Promise<UserOutput & { temporaryPassword?: string }> {
+  async create(input: CreateUserInput): Promise<UserOutput> {
     // Validar email único no sistema inteiro (não só no tenant)
     if (input.email) {
       const existing = await this.prisma.user.findFirst({
@@ -259,7 +268,19 @@ class UsersService extends BaseService {
       "User created",
     );
 
-    return { ...this.toOutput(user), temporaryPassword };
+    // Quem acessa o painel recebe as credenciais por email — a senha nunca é
+    // exposta na resposta da API nem precisa ser repassada manualmente
+    if (temporaryPassword && input.email) {
+      await this.sendCredentialsEmail({
+        tenantId: input.tenantId,
+        name: user.name,
+        email: input.email,
+        role: input.role,
+        temporaryPassword,
+      });
+    }
+
+    return this.toOutput(user);
   }
 
   /**
@@ -466,15 +487,22 @@ class UsersService extends BaseService {
 
   /**
    * Resetar senha de um usuário (apenas admin pode fazer)
-   * Retorna senha temporária que deve ser alterada no primeiro login
+   * A nova senha temporária é enviada por email — nunca retornada na API.
    */
-  async resetPassword(id: string, tenantId: string): Promise<string> {
+  async resetPassword(id: string, tenantId: string): Promise<void> {
     const user = await this.prisma.user.findFirst({
       where: { id, tenantId },
     });
 
     if (!user) {
       throw new NotFoundError("user_not_found");
+    }
+
+    // Sem email não há como entregar a senha — sem tela de texto puro como
+    // fallback, a operação não faz sentido (ex.: usuário migrado de aluno
+    // para um cargo do painel sem preencher o email ainda)
+    if (!user.email) {
+      throw new ValidationError("user_has_no_email");
     }
 
     // Gerar senha temporária aleatória
@@ -499,7 +527,13 @@ class UsersService extends BaseService {
       "User password reset by admin",
     );
 
-    return tempPassword;
+    await this.sendCredentialsEmail({
+      tenantId,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      temporaryPassword: tempPassword,
+    });
   }
 
   /**
@@ -620,6 +654,46 @@ class UsersService extends BaseService {
   }
 
   // ── Helpers privados ──────────────────────────────────────────────────────
+
+  /**
+   * Envia as credenciais de acesso (email + senha temporária) por email.
+   * Best-effort: falha de envio é logada mas nunca propagada — o usuário já
+   * foi criado/atualizado no banco e a senha já foi hasheada, então um SMTP
+   * fora do ar não pode reverter a operação. Sem fallback em tela: quem não
+   * receber o email usa "Esqueci minha senha" no login.
+   */
+  private async sendCredentialsEmail(params: {
+    tenantId: string;
+    name: string;
+    email: string;
+    role: string;
+    temporaryPassword: string;
+  }): Promise<void> {
+    try {
+      const tenant = await this.prisma.tenant.findUnique({
+        where: { id: params.tenantId },
+        select: { name: true },
+      });
+
+      await emailService.send({
+        to: params.email,
+        templateId: "admin-credentials",
+        context: {
+          name: params.name,
+          institutionName: tenant?.name ?? "",
+          email: params.email,
+          temporaryPassword: params.temporaryPassword,
+          dashboardUrl: `${config.frontendUrl}/login`,
+          roleLabel: ROLE_EMAIL_LABELS[params.role] ?? params.role,
+        },
+      });
+    } catch (err) {
+      this.logger.warn(
+        { tenantId: params.tenantId, email: params.email, err },
+        "Failed to send user credentials email",
+      );
+    }
+  }
 
   /** Política de identificação do tenant (o que registrar e como validar). */
   private async loadIdentificationPolicy(tenantId: string): Promise<IdentificationPolicy> {

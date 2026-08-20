@@ -223,7 +223,8 @@ class TenantsService extends BaseService {
           institutionName: input.name,
           email: input.adminUser.email,
           temporaryPassword: tenant.adminPassword,
-          dashboardUrl: config.apiUrl,
+          dashboardUrl: `${config.frontendUrl}/login`,
+          roleLabel: "administrador",
         },
       });
     } catch (err) {

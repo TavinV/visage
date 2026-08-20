@@ -29,6 +29,8 @@ const messagesBySlug: Record<string, string> = {
   current_password_incorrect: "A senha atual está incorreta.",
   new_password_same_as_current: "A nova senha precisa ser diferente da atual.",
   user_has_no_password: "Este usuário não possui senha de acesso ao painel.",
+  user_has_no_email:
+    "Este usuário não tem e-mail cadastrado — informe um e-mail antes de gerar a senha.",
   user_not_found: "Usuário não encontrado.",
   user_has_related_records:
     "Este usuário possui histórico de presença e não pode ser excluído. Inative o cadastro em vez de excluí-lo.",
