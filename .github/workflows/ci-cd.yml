@@ -16,9 +16,10 @@ name: CI/CD
 #
 #   SMTP para o e-mail de alerta — independente do .env do VPS, porque o
 #   runner do GitHub não tem acesso a ele:
-#     SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM_EMAIL
+#     SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD
+#     SMTP_FROM_EMAIL, SMTP_FROM_NAME
 #     CI_ALERT_EMAIL — destinatário do alerta
-#     SMTP_SECURE (opcional: "true" só para porta 465/SSL implícito)
+#     SMTP_SECURE ("true" para porta 465/SSL implícito; "false" para 587/STARTTLS)
 
 on:
   push:
@@ -160,7 +161,7 @@ jobs:
           secure: ${{ secrets.SMTP_SECURE || 'false' }}
           username: ${{ secrets.SMTP_USER }}
           password: ${{ secrets.SMTP_PASSWORD }}
-          from: ${{ secrets.SMTP_FROM_EMAIL }}
+          from: '"${{ secrets.SMTP_FROM_NAME }}" <${{ secrets.SMTP_FROM_EMAIL }}>'
           to: ${{ secrets.CI_ALERT_EMAIL }}
           subject: "[Visage] Pipeline CI/CD falhou — ${{ github.ref_name }}"
           body: ${{ steps.summary.outputs.body }}
