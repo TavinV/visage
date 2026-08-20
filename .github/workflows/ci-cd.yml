@@ -1,0 +1,166 @@
+name: CI/CD
+
+# Testes rodam em todo push e pull request contra main, nos 3 pacotes em
+# paralelo. O deploy (as 3 URLs de webhook do EasyPanel) só dispara em push
+# direto na main, e só quando os 3 pacotes passam. Qualquer falha — de teste
+# ou de deploy — dispara um e-mail de alerta.
+#
+# Migração do Prisma em produção fica de fora por enquanto (roda manual pelo
+# Console do Serviço do EasyPanel: `npx prisma migrate deploy`) — entra na
+# automação depois que o acesso SSH ao VPS estiver configurado.
+#
+# ── Secrets necessários (Settings → Secrets and variables → Actions → Secrets) ──
+#
+#   Deploy (as URLs têm um token no path — são credencial, nunca vão pro YAML):
+#     BACKEND_DEPLOY_URL, FACE_ENGINE_DEPLOY_URL, FRONTEND_DEPLOY_URL
+#
+#   SMTP para o e-mail de alerta — independente do .env do VPS, porque o
+#   runner do GitHub não tem acesso a ele:
+#     SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM_EMAIL
+#     CI_ALERT_EMAIL — destinatário do alerta
+#     SMTP_SECURE (opcional: "true" só para porta 465/SSL implícito)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Serializa deploys da mesma branch — evita duas runs disparando os mesmos
+# webhooks ao mesmo tempo. Não cancela um deploy em andamento.
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test-backend:
+    name: Testes — backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  test-engine:
+    name: Testes — face_engine
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: face_engine
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11" # mesma versão do Dockerfile de produção
+          cache: pip
+          cache-dependency-path: |
+            face_engine/requirements.txt
+            face_engine/requirements-dev.txt
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      # pytest.ini já restringe a marker "not integration and not models" —
+      # roda só a camada pura (numpy/cryptography), sem exigir a engine viva
+      # nem modelos ONNX carregados. Ver .claude/testing.md.
+      - run: python -m pytest
+
+  test-frontend:
+    name: Testes — frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  deploy:
+    name: Deploy — produção
+    needs: [test-backend, test-engine, test-frontend]
+    # `if:` customizado substitui a checagem implícita de sucesso dos
+    # `needs` — por isso `success()` entra explícito aqui. Sem ele, um
+    # teste vermelho não impediria o deploy.
+    if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Disparar deploy do backend
+        run: |
+          curl --fail --silent --show-error --max-time 30 \
+            --retry 2 --retry-delay 5 --retry-all-errors \
+            -X POST "${{ secrets.BACKEND_DEPLOY_URL }}"
+
+      - name: Disparar deploy da face_engine
+        run: |
+          curl --fail --silent --show-error --max-time 30 \
+            --retry 2 --retry-delay 5 --retry-all-errors \
+            -X POST "${{ secrets.FACE_ENGINE_DEPLOY_URL }}"
+
+      - name: Disparar deploy do frontend
+        run: |
+          curl --fail --silent --show-error --max-time 30 \
+            --retry 2 --retry-delay 5 --retry-all-errors \
+            -X POST "${{ secrets.FRONTEND_DEPLOY_URL }}"
+
+  notify-failure:
+    name: Notificar falha por e-mail
+    needs: [test-backend, test-engine, test-frontend, deploy]
+    # `failure()` substitui a checagem padrão — roda exatamente quando algum
+    # job do `needs` falhou, mesmo que outros tenham sido pulados (ex.: PR
+    # que nunca chega no job de deploy).
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Montar resumo da falha
+        id: summary
+        run: |
+          {
+            echo "body<<__VISAGE_CI_BODY__"
+            echo "O pipeline CI/CD do Visage falhou."
+            echo ""
+            echo "Branch: ${{ github.ref_name }}"
+            echo "Evento: ${{ github.event_name }}"
+            echo "Commit: ${{ github.sha }}"
+            echo "Autor: ${{ github.actor }}"
+            echo ""
+            echo "Resultado por etapa:"
+            echo "  backend  (testes): ${{ needs.test-backend.result }}"
+            echo "  engine   (testes): ${{ needs.test-engine.result }}"
+            echo "  frontend (testes): ${{ needs.test-frontend.result }}"
+            echo "  deploy            : ${{ needs.deploy.result }}"
+            echo ""
+            echo "Detalhes: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "__VISAGE_CI_BODY__"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Enviar e-mail de alerta
+        uses: dawidd6/action-send-mail@v18
+        with:
+          server_address: ${{ secrets.SMTP_HOST }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          secure: ${{ secrets.SMTP_SECURE || 'false' }}
+          username: ${{ secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          from: ${{ secrets.SMTP_FROM_EMAIL }}
+          to: ${{ secrets.CI_ALERT_EMAIL }}
+          subject: "[Visage] Pipeline CI/CD falhou — ${{ github.ref_name }}"
+          body: ${{ steps.summary.outputs.body }}
