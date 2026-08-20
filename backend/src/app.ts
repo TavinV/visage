@@ -26,7 +26,6 @@ import classesRoutes from "./routes/classes";
 import classEnrollmentsRoutes from "./routes/class-enrollments";
 import classSessionsRoutes from "./routes/class-sessions";
 import usersRoutes from "./routes/users";
-import studentsRoutes from "./routes/students";
 import enrollmentRoutes from "./routes/enrollment";
 import createDeviceRouter from "./routes/device";
 import reportsRoutes from "./routes/reports";
@@ -115,7 +114,6 @@ export function createApp(): Express {
   app.use("/class-enrollments", classEnrollmentsRoutes);
   app.use("/class-sessions", classSessionsRoutes);
   app.use("/users", usersRoutes);
-  app.use("/students", studentsRoutes);
   app.use("/enrollment", enrollmentRoutes);
   app.use("/device", createDeviceRouter());
   app.use("/attendance/reports", reportsRoutes);

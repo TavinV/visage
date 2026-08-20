@@ -90,8 +90,6 @@ export const config = {
   // Features
   debug: getEnvOptional("DEBUG", "false") === "true",
 
-  // QR Code de consentimento (CPF cifrado)
-  qrSecretKey: getEnv("QR_SECRET_KEY"),
 };
 
 // Validate critical env vars on startup
@@ -102,7 +100,6 @@ export function validateConfig(): void {
     "JWT_SECRET",
     "SUPER_ADMIN_EMAIL",
     "SUPER_ADMIN_PASSWORD",
-    "QR_SECRET_KEY",
     "ENGINE_API_KEY",
   ];
 
@@ -118,10 +115,6 @@ export function validateConfig(): void {
     throw new Error("MASTER_KEY must be 64 hex characters (32 bytes)");
   }
 
-  // Validate QR_SECRET_KEY length (must be 64 hex chars = 32 bytes)
-  if (process.env.QR_SECRET_KEY!.length !== 64) {
-    throw new Error("QR_SECRET_KEY must be 64 hex characters (32 bytes)");
-  }
 
   logger.info("Configuration validated successfully");
 }

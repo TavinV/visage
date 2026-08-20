@@ -10,7 +10,7 @@
 import { Prisma } from "@prisma/client";
 import { BaseService, ListParams, PaginatedResult } from "./base.service";
 import { NotFoundError, ConflictError, ValidationError } from "../utils/errors";
-import { normalizeDocument, isValidCpf } from "../utils/cpfQr";
+import { normalizeDocument, isValidCpf } from "../utils/document";
 import {
   resolveIdentification,
   registersCpf,

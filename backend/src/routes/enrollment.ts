@@ -18,10 +18,6 @@ router.use(deviceAuth);
 
 // ── Schemas de validação ──────────────────────────────────────────────────────
 
-const ValidateTokenSchema = z.object({
-  token: z.string().min(16).max(128),
-});
-
 // O totem envia `identifier` (CPF ou matrícula, conforme a instituição).
 // `document` é o nome antigo do campo — aceito para não quebrar totens que
 // ainda não recarregaram a página.
@@ -44,7 +40,6 @@ const FrameSchema = z.object({
   imageB64: z.string().min(100),
 });
 
-type ValidateTokenRequest = z.infer<typeof ValidateTokenSchema>;
 type IdentifierRequest = z.infer<typeof IdentifierSchema>;
 type SessionRequest = z.infer<typeof SessionSchema>;
 type FrameRequest = z.infer<typeof FrameSchema>;
@@ -81,29 +76,6 @@ router.post(
       const { tenantId, deviceId } = req.device!;
       const identifier = (req.body.identifier ?? req.body.document) as string;
       const result = await enrollmentService.startByIdentifier(tenantId, deviceId, identifier);
-      res.json({ data: result });
-    } catch (error) {
-      next(error);
-    }
-  }
-);
-
-/**
- * POST /enrollment/validate-token
- * Totem envia token escaneado — consumo atômico de uso único
- */
-router.post(
-  "/validate-token",
-  validate(ValidateTokenSchema),
-  async (req: Request<{}, {}, ValidateTokenRequest>, res: Response, next: NextFunction) => {
-    try {
-      const { tenantId, deviceId, deviceFingerprint } = req.device!;
-      const result = await enrollmentService.validateToken(
-        tenantId,
-        deviceId,
-        req.body.token,
-        deviceFingerprint
-      );
       res.json({ data: result });
     } catch (error) {
       next(error);

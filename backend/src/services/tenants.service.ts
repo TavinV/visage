@@ -7,7 +7,7 @@
 import { BaseService, ListParams, PaginatedResult } from "./base.service";
 import { generateKey, generateIV } from "../utils/crypto";
 import { NotFoundError, ValidationError, ConflictError } from "../utils/errors";
-import { normalizeDocument } from "../utils/cpfQr";
+import { normalizeDocument } from "../utils/document";
 import { config } from "../lib/config";
 import { emailService } from "./email.service";
 import { auditService } from "./audit.service";

@@ -154,7 +154,7 @@ const fieldLabels: Record<string, string> = {
   individualCheckoutEnabled: "Checkout individual ativo",
   saveFraudFrames: "Guardar fotos de fraude",
   fraudRetentionHours: "Retenção das fotos de fraude (h)",
-  enrollmentTokenExpiryHours: "Validade do QR Code (h)",
+  enrollmentTokenExpiryHours: "Validade da sessão de cadastro (h)",
   requireConsentBeforeFacial: "Exigir consentimento antes da biometria",
   enrollmentMultiFrameCount: "Frames no cadastro",
   totemPanelPassword: "Senha do painel do totem",

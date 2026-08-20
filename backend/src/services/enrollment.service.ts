@@ -1,16 +1,16 @@
 /**
  * EnrollmentService
- * Cadastro biométrico via QR Code — token de uso único, consentimento LGPD,
+ * Cadastro biométrico no totem — identificação do aluno, consentimento LGPD,
  * captura multi-frame e consolidação de embedding.
  *
  * Fluxo:
- *   1. Admin gera token (só o hash SHA-256 é persistido; o token bruto
- *      existe apenas na resposta da geração).
- *   2. Totem valida token — invalidação ATÔMICA via updateMany com
- *      status='pending' no where (duas leituras concorrentes: só uma vence).
- *   3. Sessão de cadastro vive no Redis com TTL de 10min. Se expirar, o
- *      próximo request falha com ENROLLMENT_SESSION_EXPIRED.
- *   4. Frames passam pela engine com pipeline rigoroso (det ≥ 0.85,
+ *   1. Aluno digita o identificador no totem (CPF ou matrícula, conforme
+ *      tenant_settings). `lookup` confirma o nome sem abrir sessão.
+ *   2. `start` abre a sessão de cadastro, que vive no Redis com TTL de 10min.
+ *      Se expirar, o próximo request falha com ENROLLMENT_SESSION_EXPIRED.
+ *   3. Consentimento LGPD registrado em biometric_consents antes de qualquer
+ *      captura (quando requireConsentBeforeFacial está ligado).
+ *   4. Frames passam pela engine com pipeline rigoroso (det ≥ 0.80,
  *      liveness_threshold_enrollment). Embeddings retornam cifrados.
  *   5. Finalize: engine calcula média vetorial + L2 e devolve o embedding
  *      consolidado cifrado, persistido em facial_embeddings.
@@ -57,19 +57,7 @@ interface EnrollmentSession {
   }>;
 }
 
-export interface GenerateTokenOutput {
-  token: string; // token bruto — única vez que existe fora do hash
-  expiresAt: Date;
-}
-
-export interface TokenStatusOutput {
-  status: string;
-  expiresAt: Date;
-  createdAt: Date;
-  usedAt?: Date;
-}
-
-export interface ValidateTokenOutput {
+export interface EnrollmentSessionOutput {
   sessionId: string;
   student: { id: string; name: string };
   requiresConsent: boolean;
@@ -98,186 +86,9 @@ export interface FrameResultOutput {
 // ── Serviço ───────────────────────────────────────────────────────────────────
 
 class EnrollmentService extends BaseService {
-  // ── Gestão de tokens (painel — JWT admin/manager) ──────────────────────────
-
-  async generateToken(
-    tenantId: string,
-    studentId: string,
-    createdById: string
-  ): Promise<GenerateTokenOutput> {
-    const student = await this.prisma.user.findFirst({
-      where: { id: studentId, tenantId },
-      select: { id: true, name: true, role: true, facialStatus: true },
-    });
-    if (!student) throw new NotFoundError("Student not found in this tenant");
-    if (student.role !== "student") {
-      throw new ValidationError("Enrollment tokens can only be issued for students", "NOT_A_STUDENT");
-    }
-
-    const settings = await this.prisma.tenantSettings.findUnique({ where: { tenantId } });
-    const expiryHours = settings?.enrollmentTokenExpiryHours ?? 72;
-
-    // Um único token pendente por aluno — revoga anteriores
-    await this.prisma.enrollmentToken.updateMany({
-      where: { tenantId, userId: studentId, status: "pending" },
-      data: { status: "revoked" },
-    });
-
-    const token = crypto.randomBytes(32).toString("base64url");
-    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
-    const expiresAt = new Date(Date.now() + expiryHours * 60 * 60 * 1000);
-
-    await this.prisma.enrollmentToken.create({
-      data: { tenantId, userId: studentId, tokenHash, status: "pending", expiresAt, createdById },
-    });
-
-    auditService.record({
-      action: "enrollment.token_generated",
-      tenantId,
-      targetId: studentId,
-      targetLabel: student.name,
-      details: `QR Code de cadastro biométrico gerado para ${student.name}`,
-      metadata: { expiresAt: expiresAt.toISOString(), expiryHours },
-    });
-
-    this.logger.info({ tenantId, studentId, expiresAt }, "Enrollment token generated");
-    return { token, expiresAt };
-  }
-
-  async getTokenStatus(tenantId: string, studentId: string): Promise<TokenStatusOutput> {
-    const row = await this.prisma.enrollmentToken.findFirst({
-      where: { tenantId, userId: studentId },
-      orderBy: { createdAt: "desc" },
-    });
-    if (!row) throw new NotFoundError("No enrollment token found for this student");
-
-    const effectiveStatus =
-      row.status === "pending" && row.expiresAt < new Date() ? "expired" : row.status;
-
-    return {
-      status: effectiveStatus,
-      expiresAt: row.expiresAt,
-      createdAt: row.createdAt,
-      usedAt: row.usedAt ?? undefined,
-    };
-  }
-
-  async revokeToken(tenantId: string, studentId: string): Promise<{ revoked: number }> {
-    const result = await this.prisma.enrollmentToken.updateMany({
-      where: { tenantId, userId: studentId, status: "pending" },
-      data: { status: "revoked" },
-    });
-
-    // Só registra se havia mesmo o que revogar — revogar um token inexistente
-    // não é um fato auditável, é um clique sem efeito
-    if (result.count > 0) {
-      const student = await this.prisma.user.findFirst({
-        where: { id: studentId, tenantId },
-        select: { name: true },
-      });
-      auditService.record({
-        action: "enrollment.token_revoked",
-        tenantId,
-        targetId: studentId,
-        targetLabel: student?.name,
-        details: `QR Code de cadastro de ${student?.name ?? studentId} revogado`,
-        metadata: { revoked: result.count },
-      });
-    }
-
-    this.logger.info({ tenantId, studentId, revoked: result.count }, "Enrollment token revoked");
-    return { revoked: result.count };
-  }
-
   // ── Fluxo do totem (X-Device-Key) ──────────────────────────────────────────
 
-  async validateToken(
-    tenantId: string,
-    deviceId: string,
-    token: string,
-    deviceFingerprint: string
-  ): Promise<ValidateTokenOutput> {
-    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
-    const now = new Date();
-
-    // Invalidação atômica: o filtro status='pending' garante que apenas UMA
-    // requisição concorrente consome o token (count === 1); as demais veem 0.
-    const consumed = await this.prisma.enrollmentToken.updateMany({
-      where: { tokenHash, tenantId, status: "pending", expiresAt: { gt: now } },
-      data: { status: "used", usedAt: now, usedByDevice: deviceFingerprint },
-    });
-
-    if (consumed.count === 0) {
-      // Diagnóstico do motivo (sem alterar o resultado da corrida)
-      const existing = await this.prisma.enrollmentToken.findFirst({
-        where: { tokenHash, tenantId },
-        select: { status: true, expiresAt: true },
-      });
-      if (!existing) throw new ValidationError("Token inválido", "TOKEN_INVALID");
-      if (existing.status === "used") throw new ValidationError("Token já utilizado", "TOKEN_ALREADY_USED");
-      if (existing.status === "revoked") throw new ValidationError("Token revogado", "TOKEN_REVOKED");
-      if (existing.expiresAt <= now) {
-        await this.prisma.enrollmentToken.updateMany({
-          where: { tokenHash, tenantId, status: "pending" },
-          data: { status: "expired" },
-        });
-        throw new ValidationError("Token expirado", "TOKEN_EXPIRED");
-      }
-      throw new ValidationError("Token inválido", "TOKEN_INVALID");
-    }
-
-    const tokenRow = await this.prisma.enrollmentToken.findFirst({
-      where: { tokenHash, tenantId },
-      select: { userId: true },
-    });
-    if (!tokenRow) throw new NotFoundError("Token not found after consumption");
-
-    const student = await this.prisma.user.findFirst({
-      where: { id: tokenRow.userId, tenantId },
-      select: { id: true, name: true },
-    });
-    if (!student) throw new NotFoundError("Student not found in this tenant");
-
-    const settings = await this.prisma.tenantSettings.findUnique({ where: { tenantId } });
-    const requiresConsent = settings?.requireConsentBeforeFacial ?? true;
-    const requiredFrames = settings?.enrollmentMultiFrameCount ?? 3;
-    // Clamp [0.5, 0.95]: calibração ruim não pode inviabilizar o cadastro
-    const livenessThresholdEnrollment = Math.min(
-      0.95,
-      Math.max(0.5, settings?.livenessThresholdEnrollment ?? 0.9)
-    );
-
-    const sessionId = crypto.randomBytes(16).toString("hex");
-    const session: EnrollmentSession = {
-      tenantId,
-      userId: student.id,
-      userName: student.name,
-      deviceId,
-      step: requiresConsent ? "consent" : "capture",
-      requiredFrames,
-      livenessThresholdEnrollment,
-      frames: [],
-    };
-
-    await redis.set(SESSION_KEY_PREFIX + sessionId, JSON.stringify(session), {
-      EX: SESSION_TTL_SECONDS,
-    });
-
-    this.logger.info({ tenantId, userId: student.id, deviceId }, "Enrollment session opened");
-
-    return {
-      sessionId,
-      student: { id: student.id, name: student.name },
-      requiresConsent,
-      requiredFrames,
-      consentTextVersion: CONSENT_TEXT_VERSION,
-      expiresInSeconds: SESSION_TTL_SECONDS,
-    };
-  }
-
-  // ── Cadastro por identificador digitado no totem (CPF ou matrícula) ────────
-
-  /** O fluxo por identificador só roda em totens com "permitir cadastro". */
+  /** O cadastro no totem só roda em dispositivos com "permitir cadastro". */
   private async assertEnrollmentAllowed(tenantId: string, deviceId: string): Promise<void> {
     const device = await this.prisma.device.findFirst({
       where: { id: deviceId, tenantId },
@@ -379,14 +190,14 @@ class EnrollmentService extends BaseService {
   }
 
   /**
-   * Abre uma sessão de cadastro para o aluno confirmado — mesmo formato da
-   * sessão criada por token QR; consent/frame/finalize seguem inalterados.
+   * Abre a sessão de cadastro para o aluno já confirmado no `lookup`.
+   * A partir daqui, consent/frame/finalize operam sobre o sessionId.
    */
   async startByIdentifier(
     tenantId: string,
     deviceId: string,
     identifier: string
-  ): Promise<ValidateTokenOutput> {
+  ): Promise<EnrollmentSessionOutput> {
     await this.assertEnrollmentAllowed(tenantId, deviceId);
     const policy = await this.loadIdentificationPolicy(tenantId);
     const student = await this.findStudentByIdentifier(tenantId, identifier, policy);

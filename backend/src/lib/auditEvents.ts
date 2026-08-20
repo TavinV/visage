@@ -70,8 +70,6 @@ export const AUDIT_EVENTS = {
   "consent.refused": { category: "consent", severity: "warning", label: "Consentimento biométrico recusado", targetType: "user" },
   "consent.revoked": { category: "consent", severity: "critical", label: "Consentimento biométrico revogado", targetType: "user" },
   "biometrics.registered": { category: "consent", severity: "critical", label: "Biometria facial cadastrada", targetType: "user" },
-  "enrollment.token_generated": { category: "consent", severity: "info", label: "QR Code de cadastro gerado", targetType: "user" },
-  "enrollment.token_revoked": { category: "consent", severity: "warning", label: "QR Code de cadastro revogado", targetType: "user" },
 
   // ── Dados pessoais ────────────────────────────────────────────────────────
   "data.erased": { category: "data", severity: "critical", label: "Dados biométricos excluídos definitivamente", targetType: "user" },
