@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { UnauthorizedError } from "../src/utils/errors";
+import { UnauthorizedError } from "../../src/utils/errors";
 
 // Redis fake baseado em Map — comportamento de setEx/get/del preservado
 const mocks = vi.hoisted(() => {
@@ -26,18 +26,18 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock("../src/lib/redis", () => ({
+vi.mock("../../src/lib/redis", () => ({
   redis: mocks.redis,
   connectRedis: vi.fn(),
   disconnectRedis: vi.fn(),
 }));
 
-vi.mock("../src/lib/prisma", () => ({
+vi.mock("../../src/lib/prisma", () => ({
   prisma: mocks.prisma,
   disconnectPrisma: vi.fn(),
 }));
 
-import { authService } from "../src/services/auth.service";
+import { authService } from "../../src/services/auth.service";
 
 describe("refresh token rotation", () => {
   beforeEach(() => {

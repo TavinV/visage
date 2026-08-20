@@ -7,7 +7,7 @@
 
 import { describe, it, expect } from "vitest";
 import { randomBytes } from "crypto";
-import { aesGcmEncrypt, aesGcmDecrypt, generateIV, generateKey } from "../src/utils/crypto";
+import { aesGcmEncrypt, aesGcmDecrypt, generateIV, generateKey } from "../../src/utils/crypto";
 
 describe("AES-256-GCM (utils/crypto)", () => {
   it("roundtrip cifra → decifra recupera o plaintext", () => {

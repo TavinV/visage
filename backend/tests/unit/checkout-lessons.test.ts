@@ -7,8 +7,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { lessonsCompletedOnCheckout } from "../src/services/class-sessions.service";
-import { lessonDurationToMinutes } from "../src/services/subjects.service";
+import { lessonsCompletedOnCheckout } from "../../src/services/class-sessions.service";
+import { lessonDurationToMinutes } from "../../src/services/subjects.service";
 
 const at = (hhmm: string) => new Date(`2026-08-12T${hhmm}:00.000Z`);
 

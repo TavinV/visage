@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { diffStates, snapshot, REDACTED } from "../src/utils/diff";
+import { diffStates, snapshot, REDACTED } from "../../src/utils/diff";
 
 describe("diffStates — só o que mudou", () => {
   it("ignora campos idênticos", () => {
@@ -97,14 +97,14 @@ describe("diffStates — redação de dados sensíveis", () => {
         apiKeyHash: "abc",
         totemPanelPassword: "adminumc{{data}}",
         tokenHash: "xyz",
-        qrSecretKey: "s3cr3t",
+        dekCiphertext: "s3cr3t",
         embeddingCt: "vetor",
       },
       {
         apiKeyHash: "def",
         totemPanelPassword: "novasenha",
         tokenHash: "uvw",
-        qrSecretKey: "outro",
+        dekCiphertext: "outro",
         embeddingCt: "outro vetor",
       },
     );

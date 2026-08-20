@@ -17,14 +17,14 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("../src/lib/prisma", () => ({ prisma: mocks.prisma, disconnectPrisma: vi.fn() }));
+vi.mock("../../src/lib/prisma", () => ({ prisma: mocks.prisma, disconnectPrisma: vi.fn() }));
 
 import {
   getCandidatesForClass,
   getCandidatesForLocation,
   getTenantDekPayload,
-} from "../src/services/facial-payload";
-import { NotFoundError } from "../src/utils/errors";
+} from "../../src/services/facial-payload";
+import { NotFoundError } from "../../src/utils/errors";
 
 describe("facial-payload — isolamento multi-tenant", () => {
   beforeEach(() => {

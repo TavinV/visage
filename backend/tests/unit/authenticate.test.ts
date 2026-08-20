@@ -7,13 +7,13 @@ import { describe, it, expect, vi } from "vitest";
 import jwt from "jsonwebtoken";
 import { Request, Response, NextFunction } from "express";
 
-vi.mock("../src/lib/redis", () => ({
+vi.mock("../../src/lib/redis", () => ({
   redis: {},
   connectRedis: vi.fn(),
   disconnectRedis: vi.fn(),
 }));
 
-import { authenticate } from "../src/middleware/authenticate";
+import { authenticate } from "../../src/middleware/authenticate";
 
 function mockResponse() {
   const res = {
