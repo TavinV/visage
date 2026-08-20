@@ -131,27 +131,28 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Montar resumo da falha
+      # Checkout completo (sem sparse-checkout): este job só roda quando algo
+      # JÁ falhou — não é o lugar pra arriscar uma configuração mais fina que
+      # possa quebrar sozinha e silenciar o alerta.
+      - uses: actions/checkout@v4
+
+      # Monta texto puro (fallback) e HTML (mesmo layout de
+      # backend/templates/email/layouts/base.hbs) em
+      # .github/workflows/scripts/build-failure-email.sh — script à parte
+      # porque o HTML da marca é grande demais pra viver legível dentro do YAML.
+      - name: Montar e-mail de alerta
         id: summary
-        run: |
-          {
-            echo "body<<__VISAGE_CI_BODY__"
-            echo "O pipeline CI/CD do Visage falhou."
-            echo ""
-            echo "Branch: ${{ github.ref_name }}"
-            echo "Evento: ${{ github.event_name }}"
-            echo "Commit: ${{ github.sha }}"
-            echo "Autor: ${{ github.actor }}"
-            echo ""
-            echo "Resultado por etapa:"
-            echo "  backend  (testes): ${{ needs.test-backend.result }}"
-            echo "  engine   (testes): ${{ needs.test-engine.result }}"
-            echo "  frontend (testes): ${{ needs.test-frontend.result }}"
-            echo "  deploy            : ${{ needs.deploy.result }}"
-            echo ""
-            echo "Detalhes: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-            echo "__VISAGE_CI_BODY__"
-          } >> "$GITHUB_OUTPUT"
+        env:
+          RESULT_BACKEND: ${{ needs.test-backend.result }}
+          RESULT_ENGINE: ${{ needs.test-engine.result }}
+          RESULT_FRONTEND: ${{ needs.test-frontend.result }}
+          RESULT_DEPLOY: ${{ needs.deploy.result }}
+          BRANCH: ${{ github.ref_name }}
+          EVENT: ${{ github.event_name }}
+          COMMIT_SHA: ${{ github.sha }}
+          ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash .github/workflows/scripts/build-failure-email.sh
 
       - name: Enviar e-mail de alerta
         uses: dawidd6/action-send-mail@v18
@@ -165,3 +166,4 @@ jobs:
           to: ${{ secrets.CI_ALERT_EMAIL }}
           subject: "[Visage] Pipeline CI/CD falhou — ${{ github.ref_name }}"
           body: ${{ steps.summary.outputs.body }}
+          html_body: ${{ steps.summary.outputs.html_body }}
