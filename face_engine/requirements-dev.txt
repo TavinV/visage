@@ -1,0 +1,6 @@
+# Dependências só de teste — não vão para a imagem de produção (Dockerfile
+# instala apenas requirements.txt). Ver .claude/testing.md.
+pytest>=8.0.0
+pytest-cov>=7.0.0
+httpx>=0.28.0
+requests>=2.31.0

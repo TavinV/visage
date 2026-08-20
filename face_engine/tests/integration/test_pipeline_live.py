@@ -3,14 +3,21 @@ Exemplo de teste de integração com requisições HTTP.
 Demonstra como chamar API da Face Recognition Engine.
 """
 
-import requests
-import json
 import base64
+import json
+import os
 from pathlib import Path
 
+import pytest
+import requests
 
-BASE_URL = "http://localhost:8001"
-API_KEY = "sk-face-engine-secret-key-1234567890"
+# Precisa da engine viva COM os modelos ONNX carregados e de imagens de rosto
+# reais em tests/fixtures/. Fora do tier padrão — ver .claude/testing.md.
+pytestmark = [pytest.mark.integration, pytest.mark.models]
+
+
+BASE_URL = os.environ.get("ENGINE_BASE_URL", "http://localhost:8001")
+API_KEY = os.environ.get("ENGINE_API_KEY", "")
 TENANT_ID = "tenant-123"
 
 
