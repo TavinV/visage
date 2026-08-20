@@ -15,7 +15,12 @@
     "seed": "tsx --env-file .env.local scripts/seed.ts",
     "lint": "eslint src --ext .ts",
     "type-check": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:unit": "cross-env TEST_TIER=unit vitest run",
+    "test:integration": "cross-env TEST_TIER=integration vitest run",
+    "test:db": "cross-env TEST_TIER=db vitest run",
+    "test:cov": "vitest run --coverage"
   },
   "prisma": {
     "seed": "tsx --env-file .env.local scripts/seed.ts"
@@ -46,12 +51,15 @@
     "@types/jsonwebtoken": "^9.0.7",
     "@types/node": "^20.19.40",
     "@types/nodemailer": "^8.0.0",
+    "@types/supertest": "^7.2.1",
     "@typescript-eslint/eslint-plugin": "^6.17.0",
     "@typescript-eslint/parser": "^6.17.0",
+    "@vitest/coverage-v8": "^4.1.11",
     "cross-env": "^10.1.0",
     "dotenv": "^17.4.2",
     "eslint": "^8.56.0",
     "prisma": "^7.8.0",
+    "supertest": "^7.2.2",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3",
     "vitest": "^4.1.9"
