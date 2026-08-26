@@ -46,6 +46,8 @@ export interface EngineRecognizeResult {
   detection_score_raw?: number | null;
   best_distance_raw?: number | null;
   processing_ms: number;
+  /** Diagnóstico: duração de cada etapa do pipeline dentro da engine, em ms. */
+  timings_ms?: Record<string, number> | null;
 }
 
 export interface EngineEnrollFrameResult {
@@ -94,10 +96,12 @@ export class FaceEngineError extends Error {
 async function engineFetch(
   path: string,
   init: RequestInit,
-  timeoutMs: number = config.faceEngineTimeout
+  timeoutMs: number = config.faceEngineTimeout,
+  traceId?: string
 ): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const startedAt = Date.now();
 
   try {
     const response = await fetch(`${config.faceEngineUrl}${path}`, {
@@ -110,24 +114,30 @@ async function engineFetch(
     });
 
     const body = await response.json().catch(() => null);
+    const elapsedMs = Date.now() - startedAt;
 
     if (!response.ok) {
       const detail =
         body && typeof body === "object" && "detail" in body
           ? String((body as { detail: unknown }).detail)
           : `HTTP ${response.status}`;
-      logger.warn({ path, status: response.status, detail }, "Face engine returned error");
+      logger.warn({ path, status: response.status, detail, elapsedMs, traceId }, "Face engine returned error");
       throw new FaceEngineError(detail, response.status);
     }
 
+    // Diagnóstico de latência: tempo de rede+processamento visto do Node,
+    // correlacionável com trace_id nos logs da engine e do totem.
+    logger.debug({ path, elapsedMs, traceId }, "Face engine request completed");
+
     return body;
   } catch (error) {
+    const elapsedMs = Date.now() - startedAt;
     if (error instanceof FaceEngineError) throw error;
     if (error instanceof Error && error.name === "AbortError") {
-      logger.error({ path, timeoutMs }, "Face engine request timed out");
+      logger.error({ path, timeoutMs, elapsedMs, traceId }, "Face engine request timed out");
       throw new FaceEngineError("Face engine timeout", 504);
     }
-    logger.error({ path, error }, "Face engine unreachable");
+    logger.error({ path, error, elapsedMs, traceId }, "Face engine unreachable");
     throw new FaceEngineError("Face engine unreachable", 502);
   } finally {
     clearTimeout(timer);
@@ -152,6 +162,8 @@ export async function engineRecognize(params: {
   dek: EncryptedDekPayload;
   candidates: EncryptedCandidate[];
   thresholds?: RecognizeThresholds;
+  /** Id de correlação opcional (gerado no totem) — só para diagnóstico de latência. */
+  traceId?: string;
 }): Promise<EngineRecognizeResult> {
   const form = new FormData();
   form.append("tenant_id", params.tenantId);
@@ -163,8 +175,14 @@ export async function engineRecognize(params: {
   if (t?.recognitionThreshold !== undefined) form.append("recognition_threshold", String(t.recognitionThreshold));
   if (t?.livenessThreshold !== undefined) form.append("liveness_threshold", String(t.livenessThreshold));
   if (t?.detectionScoreMin !== undefined) form.append("detection_score_min", String(t.detectionScoreMin));
+  if (params.traceId) form.append("trace_id", params.traceId);
 
-  return (await engineFetch("/recognize", { method: "POST", body: form })) as EngineRecognizeResult;
+  return (await engineFetch(
+    "/recognize",
+    { method: "POST", body: form },
+    config.faceEngineTimeout,
+    params.traceId
+  )) as EngineRecognizeResult;
 }
 
 /**

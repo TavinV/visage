@@ -7,6 +7,7 @@
  * GET  /device/stream           — SSE: eventos em tempo real
  */
 
+import { randomUUID } from "crypto";
 import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { recognitionService } from "../services/recognition.service";
@@ -47,11 +48,16 @@ export default function createDeviceRouter(): Router {
     async (req: Request<{}, {}, RecognizeRequest>, res: Response, next: NextFunction) => {
       try {
         const { tenantId, deviceId, locationId } = req.device!;
+        // Trace id do totem amarra os logs desta captura em backend + engine;
+        // gera um se o totem não mandou (ex.: versão antiga do frontend).
+        const traceIdHeader = req.headers["x-trace-id"];
+        const traceId = (Array.isArray(traceIdHeader) ? traceIdHeader[0] : traceIdHeader) || randomUUID();
         const result = await recognitionService.recognize({
           tenantId,
           deviceId,
           locationId,
           imageB64: req.body.imageB64,
+          traceId,
         });
         res.json({ data: result });
       } catch (error) {

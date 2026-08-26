@@ -30,6 +30,8 @@ export interface RecognizeDeviceInput {
   deviceId: string;
   locationId?: string;
   imageB64: string;
+  /** Id de correlação opcional (gerado no totem) — amarra os logs desta captura. */
+  traceId?: string;
 }
 
 export interface RecognizeDeviceOutput {
@@ -69,7 +71,8 @@ class RecognitionService extends BaseService {
    * POST /device/recognize — hot path.
    */
   async recognize(input: RecognizeDeviceInput): Promise<RecognizeDeviceOutput> {
-    const { tenantId, deviceId, locationId } = input;
+    const { tenantId, deviceId, locationId, traceId } = input;
+    const t0 = Date.now();
 
     const [settings, device] = await Promise.all([
       this.prisma.tenantSettings.findUnique({ where: { tenantId } }),
@@ -79,8 +82,10 @@ class RecognitionService extends BaseService {
         select: { recognitionThreshold: true, livenessThreshold: true, livenessEnabled: true },
       }),
     ]);
+    const tLookup = Date.now();
 
     const session = await this.findActiveSession(tenantId, locationId);
+    const tSession = Date.now();
     const preAttendanceMode = !session && (settings?.preAttendanceEnabled ?? false);
 
     if (!session && !preAttendanceMode) {
@@ -99,6 +104,7 @@ class RecognitionService extends BaseService {
         ? getCandidatesForClass(tenantId, session.classId)
         : getCandidatesForLocation(tenantId, locationId),
     ]);
+    const tDekCandidates = Date.now();
 
     // Threshold do totem quando calibrado; senão, o do tenant
     const recognitionThreshold =
@@ -120,31 +126,12 @@ class RecognitionService extends BaseService {
         recognitionThreshold,
         livenessThreshold,
       },
+      traceId,
     });
+    const tEngine = Date.now();
 
     const status = this.mapEngineStatus(engineResult.status);
 
-    // Log por camada do anti-spoofing — base do debug de falsos positivos
-    this.logger.info(
-      {
-        tenantId,
-        deviceId,
-        status,
-        detScore: engineResult.detection_score_raw,
-        livenessV1: engineResult.liveness_v1_raw,
-        livenessV2: engineResult.liveness_v2_raw,
-        livenessCombined: engineResult.liveness_combined_raw,
-        livenessThreshold: livenessThreshold ?? 0.85,
-        saturationMean: engineResult.saturation_mean,
-        saturationStd: engineResult.saturation_std,
-        bestDistance: engineResult.best_distance_raw,
-        recognitionThreshold: recognitionThreshold ?? 1.1,
-        deviceCalibrated: device?.recognitionThreshold != null,
-        candidates: candidates.length,
-        processingMs: engineResult.processing_ms,
-      },
-      "Engine recognize result"
-    );
     const personId =
       engineResult.person_id !== null && engineResult.person_id !== undefined
         ? String(engineResult.person_id)
@@ -165,6 +152,40 @@ class RecognitionService extends BaseService {
         processingMs: engineResult.processing_ms,
       },
     });
+    const tPersist = Date.now();
+
+    // Log por camada do anti-spoofing — base do debug de falsos positivos,
+    // com o breakdown de latência de cada trecho do backend + a engine
+    this.logger.info(
+      {
+        traceId,
+        tenantId,
+        deviceId,
+        status,
+        detScore: engineResult.detection_score_raw,
+        livenessV1: engineResult.liveness_v1_raw,
+        livenessV2: engineResult.liveness_v2_raw,
+        livenessCombined: engineResult.liveness_combined_raw,
+        livenessThreshold: livenessThreshold ?? 0.85,
+        saturationMean: engineResult.saturation_mean,
+        saturationStd: engineResult.saturation_std,
+        bestDistance: engineResult.best_distance_raw,
+        recognitionThreshold: recognitionThreshold ?? 1.1,
+        deviceCalibrated: device?.recognitionThreshold != null,
+        candidates: candidates.length,
+        processingMs: engineResult.processing_ms,
+        engineTimingsMs: engineResult.timings_ms,
+        backendTimingsMs: {
+          settingsAndDeviceLookup: tLookup - t0,
+          sessionLookup: tSession - tLookup,
+          dekAndCandidates: tDekCandidates - tSession,
+          engineCall: tEngine - tDekCandidates,
+          dbPersist: tPersist - tEngine,
+          totalBackend: tPersist - t0,
+        },
+      },
+      "Engine recognize result"
+    );
 
     // Camada 4 anti-spoofing: fraud frame (fire-and-forget, fora do hot path)
     if (status === "liveness_failed" && (settings?.saveFraudFrames ?? true)) {
