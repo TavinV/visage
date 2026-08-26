@@ -6,6 +6,7 @@ import {
   Activity,
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
   MonitorSmartphone,
   ScanFace,
   ShieldCheck,
@@ -19,6 +20,7 @@ import { friendlyError } from "@/lib/apiError";
 import { formatPercent } from "@/lib/format";
 import { cn } from "@/lib/cn";
 import { Modal, Button, Badge, Checkbox, Skeleton, useToast } from "@/components/ui";
+import { RecognitionDistanceChart } from "./RecognitionDistanceChart";
 
 // ── Tipos espelhando o backend/engine ─────────────────────────────────────────
 
@@ -34,6 +36,19 @@ interface RecognitionOption {
   interpretation: string;
 }
 
+interface HistogramBin {
+  range_start: number;
+  range_end: number;
+  genuine_count: number;
+  impostor_count: number;
+}
+
+interface ThresholdCurvePoint {
+  threshold: number;
+  genuine_accept_rate: number;
+  false_acceptance_rate: number;
+}
+
 interface RecognitionCalibration {
   dprime: number;
   eer: number;
@@ -46,6 +61,8 @@ interface RecognitionCalibration {
   overall_interpretation: string;
   persons_processed: Array<{ person_id: string; photo_count: number; failed_photos: number }>;
   impostor_count: number;
+  /** Dados prontos para o gráfico — vêm calculados da engine. */
+  chart_data: { histogram: HistogramBin[]; threshold_curve: ThresholdCurvePoint[] };
 }
 
 interface ThresholdAnalysis {
@@ -113,6 +130,13 @@ const confidenceLabels: Record<string, { label: string; variant: "success" | "wa
 const fmtNum = (n: number | null | undefined, digits = 2) =>
   n === null || n === undefined ? "—" : n.toFixed(digits);
 
+/** O que priorizar em cada perfil — dito em uma linguagem que não exige saber estatística. */
+const profilePriority: Record<string, string> = {
+  conservative: "Prioriza segurança",
+  balanced: "Equilíbrio entre os dois",
+  liberal: "Prioriza praticidade",
+};
+
 interface CalibrationModalProps {
   /** Totem que vai conduzir a coleta — a calibração é dele, não da instituição. */
   device: Device;
@@ -132,6 +156,7 @@ export function CalibrationModal({ device, onClose }: CalibrationModalProps) {
   const [running, setRunning] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<string | null>(null);
   const [applyLiveness, setApplyLiveness] = useState(true);
+  const [showTechnical, setShowTechnical] = useState(false);
 
   const report = useQuery({
     queryKey: ["calibration", deviceId],
@@ -392,30 +417,21 @@ export function CalibrationModal({ device, onClose }: CalibrationModalProps) {
 
             {recognition ? (
               <>
-                <div className="mb-3 flex flex-wrap gap-2">
-                  <span
-                    title="O quanto os rostos do grupo 1 se distinguem dos do grupo 2 (d′)"
-                    className="rounded-full bg-flauzino-slate-100 px-3 py-1 font-mono-ds text-xs text-flauzino-slate-600"
-                  >
-                    Separação {fmtNum(recognition.dprime)}
-                  </span>
-                  <span
-                    title="Precisão geral do modelo nesta calibração (AUC)"
-                    className="rounded-full bg-flauzino-slate-100 px-3 py-1 font-mono-ds text-xs text-flauzino-slate-600"
-                  >
-                    Precisão {fmtNum(recognition.auc, 3)}
-                  </span>
-                  <span
-                    title="Taxa de erro no ponto de equilíbrio entre falsos positivos e negativos (EER)"
-                    className="rounded-full bg-flauzino-slate-100 px-3 py-1 font-mono-ds text-xs text-flauzino-slate-600"
-                  >
-                    Taxa de erro {formatPercent(recognition.eer * 100)}
-                  </span>
-                  <span className="rounded-full bg-flauzino-slate-100 px-3 py-1 font-mono-ds text-xs text-flauzino-slate-600">
-                    <Users size={11} className="mr-1 inline" />
-                    {recognition.persons_processed.length} no grupo 1 · {recognition.impostor_count} no grupo 2
-                  </span>
-                </div>
+                <p className="mb-3 text-[13px] text-flauzino-slate-600">
+                  Calibrado com {recognition.persons_processed.length} pessoas do grupo 1 e{" "}
+                  {recognition.impostor_count} do grupo 2.
+                </p>
+
+                {recognition.chart_data.threshold_curve.length > 0 && (
+                  <div className="mb-4">
+                    <RecognitionDistanceChart
+                      curve={recognition.chart_data.threshold_curve}
+                      options={recognition.options}
+                      selectedProfile={selectedProfile ?? recognition.recommended_profile}
+                      onSelectProfile={setSelectedProfile}
+                    />
+                  </div>
+                )}
 
                 <div role="radiogroup" aria-label="Perfil de limiar" className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
                   {recognition.options.map((option) => {
@@ -447,19 +463,28 @@ export function CalibrationModal({ device, onClose }: CalibrationModalProps) {
                           </span>
                           {recommended && <Badge variant="accent">Recomendado</Badge>}
                         </span>
-                        <span className="font-mono-ds text-2xl font-semibold text-flauzino-navy-900">
-                          {fmtNum(option.threshold, 4)}
-                        </span>
-                        <span className="text-[11px] leading-relaxed text-flauzino-slate-500">
-                          Reconhece {formatPercent(option.genuine_accept_rate * 100, 0)} de quem é do grupo 1
-                          {" · "}barra {formatPercent(option.impostor_reject_rate * 100, 0)} de quem é de fora
-                        </span>
                         <span
-                          title="Índice de equilíbrio entre acertos e bloqueios (índice de Youden)"
-                          className="font-mono-ds text-[11px] text-flauzino-slate-400"
+                          className={cn(
+                            "text-[11px] font-semibold uppercase tracking-wide",
+                            selected ? "text-flauzino-accent-600" : "text-flauzino-slate-400"
+                          )}
                         >
-                          Equilíbrio {fmtNum(option.youden_score)}
+                          {profilePriority[option.profile]}
                         </span>
+                        <div className="mt-1 flex flex-col gap-1 text-[13px] leading-snug text-flauzino-slate-700">
+                          <span>
+                            <b className="font-semibold text-flauzino-navy-900">
+                              {formatPercent(option.genuine_accept_rate * 100, 0)}
+                            </b>{" "}
+                            do grupo 1 é reconhecido de primeira
+                          </span>
+                          <span>
+                            <b className="font-semibold text-flauzino-navy-900">
+                              {formatPercent(option.false_acceptance_rate * 100, 0)}
+                            </b>{" "}
+                            do grupo 2 consegue passar
+                          </span>
+                        </div>
                       </button>
                     );
                   })}
@@ -477,6 +502,50 @@ export function CalibrationModal({ device, onClose }: CalibrationModalProps) {
                     {recognition.warning}
                   </p>
                 )}
+
+                <div className="mt-3 border-t border-flauzino-slate-100 pt-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowTechnical((v) => !v)}
+                    className="flex items-center gap-1.5 text-[12px] font-medium text-flauzino-slate-500 transition-colors hover:text-flauzino-slate-700"
+                  >
+                    <ChevronDown size={14} className={cn("transition-transform", showTechnical && "rotate-180")} />
+                    Detalhes técnicos
+                  </button>
+                  {showTechnical && (
+                    <div className="mt-2.5 flex flex-col gap-2.5 text-[12px] leading-relaxed text-flauzino-slate-500">
+                      <div>
+                        <p>
+                          Separação entre os grupos:{" "}
+                          <b className="font-mono-ds font-normal text-flauzino-slate-700">
+                            {fmtNum(recognition.dprime)}
+                          </b>
+                        </p>
+                        <p>Quanto maior, mais fácil o sistema distingue quem é conhecido de quem é de fora.</p>
+                      </div>
+                      <div>
+                        <p>
+                          Taxa de erro nos testes:{" "}
+                          <b className="font-mono-ds font-normal text-flauzino-slate-700">
+                            {formatPercent(recognition.eer * 100)}
+                          </b>
+                        </p>
+                        <p>Proporção de comparações erradas ao equilibrar os dois tipos de erro possíveis.</p>
+                      </div>
+                      {selectedOption && (
+                        <div>
+                          <p>
+                            Valor técnico do limiar selecionado:{" "}
+                            <b className="font-mono-ds font-normal text-flauzino-slate-700">
+                              {fmtNum(selectedOption.threshold, 4)}
+                            </b>
+                          </p>
+                          <p>Número interno usado pelo sistema para decidir se um rosto bate — não precisa ser lido diretamente.</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </>
             ) : (
               <p className="rounded-lg bg-flauzino-danger-100 px-4 py-3 text-[13px] text-flauzino-slate-700">

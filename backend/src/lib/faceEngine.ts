@@ -337,6 +337,30 @@ export interface EngineRecognitionOption {
   interpretation: string;
 }
 
+export interface EngineHistogramBin {
+  range_start: number;
+  range_end: number;
+  genuine_count: number;
+  impostor_count: number;
+}
+
+export interface EngineThresholdCurvePoint {
+  threshold: number;
+  genuine_accept_rate: number;
+  impostor_reject_rate: number;
+  false_rejection_rate: number;
+  false_acceptance_rate: number;
+  youden_score: number;
+}
+
+export interface EngineCalibrationChartData {
+  histogram: EngineHistogramBin[];
+  /** 100 pontos interpolados — usados para desenhar a curva de troca acerto × risco. */
+  threshold_curve: EngineThresholdCurvePoint[];
+  eer_threshold: number;
+  eer_value: number;
+}
+
 export interface EngineRecognitionCalibration {
   persons_processed: Array<{ person_id: string; photo_count: number; failed_photos: number }>;
   impostor_count: number;
@@ -352,6 +376,8 @@ export interface EngineRecognitionCalibration {
   confidence: "low" | "medium" | "high";
   warning?: string | null;
   overall_interpretation: string;
+  /** Bins prontos para o histograma de distâncias — vem da engine, só passa direto. */
+  chart_data: EngineCalibrationChartData;
 }
 
 function appendJpegs(form: FormData, field: string, files: Array<{ name: string; jpeg: Buffer }>) {

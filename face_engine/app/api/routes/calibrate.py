@@ -165,31 +165,31 @@ def _generate_interpretation_liveness(
     # Qualidade da separação
     if attack_block_rate >= 0.95 and real_pass_rate >= 0.95:
         parts.append(
-            f"Excelente separação. Com threshold {threshold:.2f}, "
+            f"Excelente separação. Com o limiar em {threshold:.2f}, "
             f"{real_pass_rate * 100:.0f}% das pessoas reais passam e "
-            f"{attack_block_rate * 100:.0f}% dos ataques são bloqueados."
+            f"{attack_block_rate * 100:.0f}% das tentativas de fraude são bloqueadas."
         )
     elif attack_block_rate < 0.80:
         parts.append(
-            f"Separação fraca para ataques. Apenas {attack_block_rate * 100:.0f}% dos ataques "
-            f"seriam bloqueados. Considere melhorar a iluminação ou testar com ataques mais variados."
+            f"Proteção fraca contra fraude. Apenas {attack_block_rate * 100:.0f}% das tentativas "
+            f"seriam bloqueadas. Considere melhorar a iluminação ou testar com mais variedade de fraudes."
         )
     elif real_pass_rate < 0.85:
         parts.append(
-            f"Threshold muito restritivo — {real_pass_rate * 100:.0f}% das pessoas reais passariam. "
-            f"Muitos funcionários/alunos podem ser bloqueados. Reduza o threshold ou capture "
+            f"Limiar muito restritivo — só {real_pass_rate * 100:.0f}% das pessoas reais passariam. "
+            f"Muitos funcionários/alunos podem ser barrados por engano. Reduza o limiar ou capture "
             f"amostras reais com melhor qualidade."
         )
     else:
         parts.append(
-            f"Boa separação. Com threshold {threshold:.2f}, {real_pass_rate * 100:.0f}% das pessoas "
-            f"reais passam e {attack_block_rate * 100:.0f}% dos ataques são bloqueados."
+            f"Boa separação. Com o limiar em {threshold:.2f}, {real_pass_rate * 100:.0f}% das pessoas "
+            f"reais passam e {attack_block_rate * 100:.0f}% das tentativas de fraude são bloqueadas."
         )
 
     # Confiança
     if confidence == 'low':
         parts.append(
-            f" ⚠️ Resultado indicativo — menos de 5 amostras válidas em algum grupo. "
+            f" Resultado indicativo — menos de 5 amostras válidas em algum grupo. "
             f"Capture mais amostras para maior precisão."
         )
 
@@ -210,19 +210,19 @@ def _generate_interpretation_hsv(
 
     if attack_block_rate >= 0.8 and real_pass_rate >= 0.9:
         parts.append(
-            f"Boa separação por saturação. Com limite de {threshold:.1f}, "
+            f"Boa separação por cor da imagem. Com o limite em {threshold:.1f}, "
             f"{real_pass_rate * 100:.0f}% das amostras reais passam e "
-            f"{attack_block_rate * 100:.0f}% dos ataques são detectados como tela."
+            f"{attack_block_rate * 100:.0f}% das fotos de tela são identificadas como tal."
         )
     elif attack_block_rate < 0.5:
         parts.append(
-            f"Separação fraca por saturação — apenas {attack_block_rate * 100:.0f}% dos ataques seriam "
-            f"detectados. Use este threshold como complemento ao liveness, não como bloqueador direto."
+            f"Detecção fraca de telas — apenas {attack_block_rate * 100:.0f}% das fotos de tela seriam "
+            f"identificadas. Use este limite como reforço, não como a principal proteção contra fraude."
         )
     elif real_pass_rate < 0.85:
         parts.append(
             f"Muitas amostras reais estão sendo marcadas como suspeitas de tela "
-            f"({real_pass_rate * 100:.0f}% passam). Aumente o threshold de saturação ou revise a iluminação."
+            f"({real_pass_rate * 100:.0f}% passam). Aumente o limite de saturação ou revise a iluminação."
         )
     else:
         parts.append(
@@ -230,7 +230,7 @@ def _generate_interpretation_hsv(
         )
 
     if confidence == 'low':
-        parts.append(" ⚠️ Poucas amostras — resultado indicativo.")
+        parts.append(" Poucas amostras — resultado indicativo.")
 
     return "".join(parts)
 
@@ -631,48 +631,49 @@ def _interpret_threshold_option(
     """Gera interpretação em português para uma opção de threshold."""
     if profile == 'conservative':
         base = (
-            f"Threshold conservador ({threshold:.2f}): {gar:.0%} das verificações legítimas "
-            f"são aceitas e {irr:.0%} dos impostores são bloqueados."
+            f"Limiar conservador ({threshold:.2f}): {gar:.0%} das pessoas conhecidas "
+            f"são reconhecidas de primeira e {irr:.0%} de quem é de fora é barrado."
         )
         extras = []
         if frr > 0.15:
             extras.append(
-                f" ⚠️ Taxa alta de rejeição de pessoas legítimas ({frr:.0%}) — "
-                "alguns usuários podem ter dificuldade para se identificar."
+                f" Rejeita pessoas conhecidas com frequência ({frr:.0%} delas) — "
+                "alguns alunos ou funcionários podem ter dificuldade para serem reconhecidos."
             )
         if far > 0.05:
             extras.append(
-                f" ⚠️ Ainda permite {far:.0%} de impostores — considere "
-                "combinar com anti-spoofing rigoroso."
+                f" Ainda deixa passar {far:.0%} de pessoas de fora — considere "
+                "reforçar com outra camada de proteção contra fraude."
             )
         return base + "".join(extras)
 
     elif profile == 'balanced':
         base = (
-            f"Threshold balanceado ({threshold:.2f}): melhor equilíbrio entre segurança "
-            f"e conveniência. {gar:.0%} de aceitação legítima e {irr:.0%} de "
-            "bloqueio de impostores."
+            f"Limiar balanceado ({threshold:.2f}): melhor equilíbrio entre segurança "
+            f"e praticidade no dia a dia. {gar:.0%} das pessoas conhecidas são reconhecidas "
+            f"de primeira e {irr:.0%} de quem é de fora é barrado."
         )
         extras = []
         if youden > 0.7:
-            extras.append(" Boa separação entre os grupos.")
+            extras.append(" Boa separação entre os dois grupos.")
         elif youden < 0.4:
             extras.append(
-                " ⚠️ Separação fraca — os grupos têm distribuições "
-                "próximas neste ambiente."
+                " Separação fraca — os dois grupos ficaram parecidos demais "
+                "neste ambiente."
             )
         return base + "".join(extras)
 
     else:  # liberal
         base = (
-            f"Threshold liberal ({threshold:.2f}): prioriza conveniência. {gar:.0%} "
-            f"de aceitação legítima, mas permite {far:.0%} de impostores."
+            f"Limiar liberal ({threshold:.2f}): prioriza praticidade no dia a dia. {gar:.0%} "
+            f"das pessoas conhecidas são reconhecidas de primeira, mas {far:.0%} "
+            "de pessoas de fora conseguem passar."
         )
         extras = []
         if far > 0.10:
             extras.append(
-                " ⚠️ Taxa de falsa aceitação elevada — recomendado apenas "
-                "em ambientes de baixo risco ou combinado com outras camadas de segurança."
+                " Deixa passar muita gente de fora — recomendado só "
+                "em ambientes de baixo risco ou combinado com outras camadas de proteção."
             )
         return base + "".join(extras)
 
@@ -757,29 +758,29 @@ def _compute_warning_recognition(
     n_persons: int,
     confidence: Literal['low', 'medium', 'high'],
 ) -> Optional[str]:
-    """Gera aviso baseado nas condições da calibração de reconhecimento."""
+    """Gera aviso baseado nas condições da calibração de reconhecimento, sem jargão técnico."""
     if dprime < 0.5:
         return (
-            f"Separação muito fraca entre pessoas legítimas e impostores (d'={dprime:.2f}). "
-            "Os grupos têm distribuições de distância muito similares. Capture mais fotos "
-            "variadas ou verifique se as imagens de impostores são suficientemente "
-            "diferentes das legítimas."
+            "Separação muito fraca entre pessoas conhecidas e pessoas de fora. "
+            "Os dois grupos ficaram parecidos demais nas fotos enviadas. Capture mais fotos "
+            "variadas ou verifique se as pessoas de fora são realmente diferentes das "
+            "pessoas conhecidas."
         )
     if genuine_dist.std > 0.3:
         return (
-            f"Alta variabilidade nas fotos legítimas (desvio padrão={genuine_dist.std:.3f}). "
+            "As fotos das pessoas conhecidas variam muito entre si. "
             "Fotos com iluminação, ângulo ou qualidade muito diferentes podem estar "
-            "distorcendo a calibração. Tente usar fotos mais homogêneas."
+            "distorcendo a calibração. Tente usar fotos mais parecidas entre si."
         )
     if n_persons < 3:
         return (
-            f"Calibração baseada em apenas {n_persons} pessoas legítimas. Recomendado "
-            "usar pelo menos 5 pessoas diferentes para uma calibração representativa do tenant."
+            f"Calibração baseada em apenas {n_persons} pessoas conhecidas. Recomendado "
+            "usar pelo menos 5 pessoas diferentes para um resultado representativo da instituição."
         )
     if confidence == 'low':
         return (
-            "Poucos pares de distância calculados. Capture mais fotos (mínimo 3 fotos por "
-            "pessoa, mínimo 5 pessoas diferentes) para maior precisão."
+            "Poucas fotos foram comparadas. Capture mais fotos (mínimo 3 fotos por "
+            "pessoa, mínimo 5 pessoas diferentes) para um resultado mais preciso."
         )
     return None
 
@@ -793,7 +794,7 @@ def _build_overall_interpretation(
     recommended: RecognitionThresholdOption,
     confidence: Literal['low', 'medium', 'high'],
 ) -> str:
-    """Gera diagnóstico completo da calibração de reconhecimento em português."""
+    """Gera diagnóstico completo da calibração de reconhecimento em português, sem jargão técnico."""
     if dprime >= 3.0:
         quality = "excelente"
         ability = "distinguir facilmente"
@@ -807,24 +808,15 @@ def _build_overall_interpretation(
         quality = "fraca"
         ability = "distinguir com dificuldade"
 
-    if auc >= 0.95:
-        auc_label = "excelente (AUC={:.3f})".format(auc)
-    elif auc >= 0.85:
-        auc_label = "boa (AUC={:.3f})".format(auc)
-    elif auc >= 0.70:
-        auc_label = "razoável (AUC={:.3f})".format(auc)
-    else:
-        auc_label = "fraca (AUC={:.3f})".format(auc)
-
     eer_pct = eer * 100
     if eer_pct <= 5:
-        eer_label = "muito baixa ({:.1f}%) — sistema altamente preciso".format(eer_pct)
+        precision_note = "o sistema errou muito pouco nos testes"
     elif eer_pct <= 10:
-        eer_label = "baixa ({:.1f}%) — sistema preciso".format(eer_pct)
+        precision_note = "o sistema errou pouco nos testes"
     elif eer_pct <= 20:
-        eer_label = "moderada ({:.1f}%) — desempenho aceitável".format(eer_pct)
+        precision_note = "o sistema teve um desempenho aceitável nos testes"
     else:
-        eer_label = "alta ({:.1f}%) — separação insuficiente".format(eer_pct)
+        precision_note = "o sistema teve dificuldade para separar os dois grupos nos testes"
 
     gar = recommended.genuine_accept_rate
     irr = recommended.impostor_reject_rate
@@ -834,22 +826,24 @@ def _build_overall_interpretation(
     confidence_note = ""
     if confidence == 'low':
         confidence_note = (
-            " ⚠️ Confiança baixa por número reduzido de pares — os valores acima são indicativos."
+            " Poucas pessoas foram testadas — trate os números acima como uma estimativa inicial."
         )
     elif confidence == 'medium':
-        confidence_note = " Confiança média — resultados confiáveis mas recomenda-se mais amostras."
+        confidence_note = (
+            " O número de pessoas testadas já dá um resultado confiável, mas mais amostras "
+            "deixariam a calibração mais precisa."
+        )
 
     return (
-        f"Calibração concluída com {n_persons} pessoas legítimas e {n_impostors} impostores "
-        f"({recommended.genuine_accept_rate.__class__.__name__} omitido — ver métricas abaixo).\n\n"
-        f"Separabilidade entre os grupos: {quality} (d'={dprime:.2f}). "
-        f"A curva ROC é {auc_label} e a taxa de erro de equilíbrio (EER) é {eer_label}. "
-        f"Isso indica que o sistema consegue {ability} pessoas legítimas de impostores neste ambiente.\n\n"
-        f"Threshold recomendado: {recommended.threshold:.4f} (perfil {recommended.profile_label}) — "
-        f"{gar:.0%} de aceitação de pessoas legítimas, {irr:.0%} de bloqueio de impostores, "
-        f"FRR={frr:.0%} (legítimos rejeitados), FAR={far:.0%} (impostores aceitos).\n\n"
-        f"Para aplicar, envie esse valor como 'recognition' no campo 'thresholds' "
-        f"das requisições de reconhecimento.{confidence_note}"
+        f"Calibração concluída com {n_persons} pessoas conhecidas e {n_impostors} pessoas de fora.\n\n"
+        f"Separação entre os grupos: {quality}. Isso indica que o sistema consegue {ability} "
+        f"pessoas conhecidas de pessoas de fora neste ambiente, e {precision_note} "
+        f"(taxa de erro de {eer_pct:.1f}%).\n\n"
+        f"Perfil recomendado: {recommended.profile_label} (limiar {recommended.threshold:.4f}) — "
+        f"{gar:.0%} das pessoas conhecidas são reconhecidas de primeira e {irr:.0%} de quem é "
+        f"de fora é barrado. Isso deixa passar {far:.0%} de pessoas de fora por engano e faz "
+        f"{frr:.0%} das pessoas conhecidas precisarem de uma segunda tentativa.\n\n"
+        f"Ao aplicar, esse limiar passa a valer para o reconhecimento neste totem.{confidence_note}"
     )
 
 
@@ -1146,16 +1140,16 @@ async def calibrate_recognition(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=(
-                "Nenhum par legítimo calculado. Certifique-se de que pelo menos "
-                "2 pessoas têm 2 ou mais fotos com face detectada."
+                "Não foi possível comparar fotos de uma mesma pessoa conhecida. Certifique-se "
+                "de que pelo menos 2 pessoas têm 2 ou mais fotos com o rosto detectado."
             ),
         )
     if len(impostor_distances) < 3:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=(
-                "Menos de 3 distâncias de impostores calculadas. Verifique se "
-                "as fotos de impostores têm faces detectáveis."
+                "Menos de 3 pessoas de fora tiveram o rosto reconhecido nas fotos. Verifique "
+                "se as fotos de fora mostram o rosto claramente."
             ),
         )
 
