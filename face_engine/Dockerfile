@@ -12,6 +12,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
+# Bibliotecas nativas (OpenBLAS/OpenMP sob numpy e onnxruntime) dimensionam
+# seus pools por os.cpu_count(), que em ambientes de container pode devolver
+# os núcleos do HOST — não a cota real. Sem limites, o processo abre threads
+# demais para a cota disponível e a latência de inferência fica errática.
+#
+# Default = 1: seguro para o deploy de produção atual (1 vCPU, EasyPanel).
+# Numa máquina com mais núcleos, sobrescreva via variável de ambiente na
+# plataforma de deploy (não precisa rebuildar a imagem) — dev local já faz
+# isso no docker-compose.yml, que roda com cota de 2 CPUs.
+ENV OMP_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1 \
+    NUMEXPR_NUM_THREADS=1
+
 # Copiar requirements
 COPY requirements.txt .
 
@@ -38,5 +52,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 EXPOSE 8001
 
 # Comando para iniciar a aplicação
-# Usar workers=1 para garantir cache em memória compartilhado
+# workers=1 é obrigatório: o cache de embeddings vive na memória do processo e
+# não tem TTL — com N workers, DELETE /embeddings/... invalidaria apenas um.
+# A concorrência vem do pool de threads interno (ENGINE_THREAD_POOL_SIZE).
 CMD ["sh", "-c", "python scripts/download_models.py && uvicorn app.main:app --host 0.0.0.0 --port 8001 --workers 1"]

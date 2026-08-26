@@ -53,6 +53,19 @@ services:
     container_name: visage-face-engine
     env_file:
       - ./face_engine/.env
+    environment:
+      # A imagem (Dockerfile + config.py) nasce com default seguro para 1
+      # vCPU (o deploy de produção atual). Este compose roda com cota de 2
+      # CPUs (ver deploy.resources abaixo) — sobrescrevemos aqui para
+      # aproveitar o segundo núcleo só no ambiente local. Ver docs/PERFORMANCE.md.
+      ONNX_INTRA_OP_THREADS: "1" # mantém 1 mesmo com 2 CPUs — cauda melhor (ver docs)
+      ONNX_INTER_OP_THREADS: "1"
+      CV2_NUM_THREADS: "2"
+      ENGINE_THREAD_POOL_SIZE: "2"
+      OMP_NUM_THREADS: "2"
+      OPENBLAS_NUM_THREADS: "2"
+      MKL_NUM_THREADS: "2"
+      NUMEXPR_NUM_THREADS: "2"
     ports:
       - "8001:8001"
     volumes:

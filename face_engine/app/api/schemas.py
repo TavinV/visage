@@ -84,6 +84,10 @@ class RecognizeResponse(BaseModel):
     detection_score_raw: Optional[float] = None
     best_distance_raw: Optional[float] = None
     processing_ms: int
+    timings_ms: Optional[dict[str, float]] = Field(
+        default=None,
+        description="Diagnóstico: duração de cada etapa do pipeline em ms (dek, detecção, liveness, hsv, embedding, cache/decrypt de candidatos, comparação, total).",
+    )
 
 
 # ============================================================================

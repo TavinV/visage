@@ -10,11 +10,14 @@ Score final = 0.4 × score_v1 + 0.6 × score_v2
 Os modelos esperam entrada uint8 [0-255] em CHW sem normalização.
 """
 
+import time
 import cv2
 import numpy as np
 import onnxruntime as ort
 from pathlib import Path
-from typing import Tuple
+from typing import Optional, Tuple
+
+from app.core.logging import logger
 
 
 class LivenessDetector:
@@ -30,13 +33,22 @@ class LivenessDetector:
     _SCALE_V1 = 2.7
     _SCALE_V2 = 4.0
 
-    def __init__(self, model_v1_path: str, model_v2_path: str) -> None:
+    def __init__(
+        self,
+        model_v1_path: str,
+        model_v2_path: str,
+        intra_op_threads: int = 1,
+        inter_op_threads: int = 1,
+    ) -> None:
         """
         Carrega os dois modelos MiniFASNet ONNX.
 
         Args:
             model_v1_path: Caminho para 2.7_80x80_MiniFASNetV1.onnx
             model_v2_path: Caminho para 4_0_80x80_MiniFASNetV2.onnx
+            intra_op_threads: Threads por operador (alinhar à cota de CPU —
+                com o pool de inferência, 1 evita disputa entre requisições)
+            inter_op_threads: Threads entre operadores do grafo
 
         Raises:
             FileNotFoundError: Se algum dos arquivos não existir
@@ -46,8 +58,8 @@ class LivenessDetector:
                 raise FileNotFoundError(f"Modelo ONNX não encontrado: {path}")
 
         opts = ort.SessionOptions()
-        opts.inter_op_num_threads = 1
-        opts.intra_op_num_threads = 2
+        opts.inter_op_num_threads = inter_op_threads
+        opts.intra_op_num_threads = intra_op_threads
         providers = ["CPUExecutionProvider"]
 
         self._sess_v1 = ort.InferenceSession(str(model_v1_path), sess_options=opts, providers=providers)
@@ -70,6 +82,7 @@ class LivenessDetector:
         threshold: float = 0.85,
         v1_weight: float = 0.40,
         v2_weight: float = 0.60,
+        trace_id: Optional[str] = None,
     ) -> Tuple[bool, float, float, float]:
         """
         Verifica se a face no frame pertence a uma pessoa real com thresholds dinâmicos.
@@ -80,19 +93,30 @@ class LivenessDetector:
             threshold: Threshold de score de liveness (padrão 0.85).
             v1_weight: Peso do modelo V1 (padrão 0.40).
             v2_weight: Peso do modelo V2 (padrão 0.60).
+            trace_id: Id de correlação opcional, só para logging de diagnóstico.
 
         Returns:
             (is_live, score_combined, score_v1_raw, score_v2_raw)
             Os scores raw sempre são retornados independente do threshold.
         """
+        t0 = time.perf_counter()
         score_v1 = self._infer(self._sess_v1, self._in_v1, self._out_v1,
                                frame_bgr, bbox, self._SCALE_V1)
+        t1 = time.perf_counter()
         score_v2 = self._infer(self._sess_v2, self._in_v2, self._out_v2,
                                frame_bgr, bbox, self._SCALE_V2)
+        t2 = time.perf_counter()
 
         score_combined = float(v1_weight * score_v1 + v2_weight * score_v2)
         score_combined = float(np.clip(score_combined, 0.0, 1.0))
         is_live = score_combined >= threshold
+
+        # Ainda sequencial (V1 então V2) — o objetivo aqui é só medir quanto
+        # cada um custa isoladamente antes de decidir se vale a pena paralelizar.
+        logger.info(
+            "liveness_timing trace=%s v1_ms=%.2f v2_ms=%.2f total_ms=%.2f",
+            trace_id, (t1 - t0) * 1000.0, (t2 - t1) * 1000.0, (t2 - t0) * 1000.0,
+        )
 
         return is_live, score_combined, float(score_v1), float(score_v2)
 
