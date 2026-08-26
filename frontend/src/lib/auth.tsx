@@ -35,20 +35,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [restoring, setRestoring] = useState(true);
 
   const clearSession = useCallback(() => {
-    tokenStore.setAccess(null);
-    tokenStore.setRefresh(null);
     tokenStore.setStoredUser(null);
     setUser(null);
   }, []);
 
-  // Restaura a sessão: se há refreshToken salvo, troca por um access token novo.
+  // Restaura a sessão: o refresh token vive num cookie httpOnly, invisível
+  // aqui — a única forma de saber se ainda é válido é tentar trocá-lo. O
+  // perfil salvo em localStorage só serve de sinal para não bater no backend
+  // em toda página pública (landing, login) sem sessão nenhuma.
   useEffect(() => {
     let cancelled = false;
 
     async function restore() {
-      const refreshToken = tokenStore.getRefresh();
       const storedUser = tokenStore.getStoredUser<AuthUser>();
-      if (!refreshToken || !storedUser) {
+      if (!storedUser) {
         setRestoring(false);
         return;
       }
@@ -78,9 +78,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (email: string, password: string, remember = true): Promise<AuthUser> => {
-      const res = await api.post<{ data: AuthTokens }>("/auth/login", { email, password });
-      tokenStore.setAccess(res.data.accessToken);
-      tokenStore.setRefresh(res.data.refreshToken, remember);
+      // O backend seta access_token + refresh_token como cookies httpOnly no
+      // Set-Cookie da resposta — o client só recebe o perfil do usuário.
+      const res = await api.post<{ data: Pick<AuthTokens, "user"> }>("/auth/login", {
+        email,
+        password,
+        remember,
+      });
       tokenStore.setStoredUser(res.data.user);
       setUser(res.data.user);
       return res.data.user;
@@ -89,13 +93,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(async () => {
-    const refreshToken = tokenStore.getRefresh();
-    if (refreshToken) {
-      try {
-        await api.post("/auth/logout", { refreshToken });
-      } catch {
-        // sessão já inválida no servidor — segue com a limpeza local
-      }
+    try {
+      // Sem body: o backend lê o refresh token do cookie httpOnly.
+      await api.post("/auth/logout");
+    } catch {
+      // sessão já inválida no servidor — segue com a limpeza local
     }
     clearSession();
     router.replace("/login");

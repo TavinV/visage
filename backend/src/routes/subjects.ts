@@ -88,7 +88,7 @@ router.post(
         return;
       }
 
-      const result = await subjectsService.create({ tenantId, ...req.body });
+      const result = await subjectsService.create({ ...req.body, tenantId });
       res.status(201).json({ data: result });
     } catch (error) {
       next(error);

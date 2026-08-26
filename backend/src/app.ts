@@ -5,6 +5,7 @@
 import express, { Express, Request, Response, NextFunction } from "express";
 import cors from "cors";
 import helmet from "helmet";
+import cookieParser from "cookie-parser";
 import { config } from "./lib/config";
 import { logger } from "./lib/logger";
 import { errorHandler } from "./middleware/errorHandler";
@@ -26,7 +27,7 @@ import classesRoutes from "./routes/classes";
 import classEnrollmentsRoutes from "./routes/class-enrollments";
 import classSessionsRoutes from "./routes/class-sessions";
 import usersRoutes from "./routes/users";
-import enrollmentRoutes from "./routes/enrollment";
+import createEnrollmentRouter from "./routes/enrollment";
 import createDeviceRouter from "./routes/device";
 import reportsRoutes from "./routes/reports";
 import dashboardRoutes from "./routes/dashboard";
@@ -57,6 +58,9 @@ export function createApp(): Express {
       credentials: true,
     })
   );
+
+  // access_token/refresh_token chegam como cookies httpOnly (ver routes/auth.ts)
+  app.use(cookieParser());
 
   // Contexto da requisição (IP, user agent, rota, ator) — precisa vir antes de
   // qualquer rota para que os services enxerguem quem disparou a ação
@@ -114,7 +118,7 @@ export function createApp(): Express {
   app.use("/class-enrollments", classEnrollmentsRoutes);
   app.use("/class-sessions", classSessionsRoutes);
   app.use("/users", usersRoutes);
-  app.use("/enrollment", enrollmentRoutes);
+  app.use("/enrollment", createEnrollmentRouter());
   app.use("/device", createDeviceRouter());
   app.use("/attendance/reports", reportsRoutes);
   app.use("/dashboard", dashboardRoutes);

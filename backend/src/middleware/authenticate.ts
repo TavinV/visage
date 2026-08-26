@@ -23,9 +23,16 @@ declare global {
 }
 
 /**
- * Extrai token do header Authorization: Bearer <token>
+ * Extrai o access token: cookie httpOnly `access_token` (console web, via
+ * proxy same-origin do Next.js) com fallback para o header
+ * `Authorization: Bearer <token>` (clientes não-browser).
  */
 function extractToken(req: Request): string | null {
+  const cookieToken = req.cookies?.access_token;
+  if (typeof cookieToken === "string" && cookieToken.length > 0) {
+    return cookieToken;
+  }
+
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith("Bearer ")) {
     return null;

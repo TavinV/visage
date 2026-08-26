@@ -102,8 +102,8 @@ router.post(
       }
 
       const result = await devicesService.create({
-        tenantId,
         ...req.body,
+        tenantId,
       });
 
       res.status(201).json({ data: result });

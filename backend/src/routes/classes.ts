@@ -104,8 +104,8 @@ router.post(
       }
 
       const result = await classesService.create({
-        tenantId,
         ...req.body,
+        tenantId,
       });
 
       res.status(201).json({ data: result });

@@ -21,6 +21,21 @@ export function errorHandler(
     return;
   }
 
+  // Corpo maior que o limite configurado (express.json({ limit })) — o
+  // body-parser lança PayloadTooLargeError com .status/.type setados, mas
+  // não é uma instância de erro custom da aplicação, então precisa de
+  // tratamento explícito antes de cair no 500 genérico.
+  if (
+    error instanceof Error &&
+    (error as { type?: string }).type === "entity.too.large"
+  ) {
+    res.status(413).json({
+      error: "Payload too large",
+      code: "payload_too_large",
+    });
+    return;
+  }
+
   if (isHttpError(error)) {
     res.status(error.status).json({
       error: error.message,

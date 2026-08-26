@@ -113,3 +113,21 @@ export function createDeviceHeartbeatLimiter(): RateLimitRequestHandler {
     handler,
   });
 }
+
+/**
+ * Factory — limiter para POST /enrollment/lookup e /enrollment/start
+ * (20 req/min por device). Sem isso, uma X-Device-Key vazada vira oráculo de
+ * CPF: consulta nome + status biométrico de qualquer aluno em volume,
+ * limitada só pelo teto global de 3000 req/15min por IP.
+ */
+export function createEnrollmentLookupLimiter(): RateLimitRequestHandler {
+  return rateLimit({
+    windowMs: 60 * 1000,
+    limit: 20,
+    standardHeaders: "draft-7",
+    legacyHeaders: false,
+    store: makeStore("enrollment-lookup"),
+    keyGenerator: (req: Request) => req.device?.deviceId ?? "unauthenticated-device",
+    handler,
+  });
+}

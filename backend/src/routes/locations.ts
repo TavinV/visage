@@ -82,8 +82,8 @@ router.post(
       }
 
       const result = await locationsService.create({
-        tenantId,
         ...req.body,
+        tenantId,
       });
 
       res.status(201).json({ data: result });

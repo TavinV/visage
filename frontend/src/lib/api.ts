@@ -1,9 +1,12 @@
 /**
- * API client — fetch com Bearer token e refresh automático.
+ * API client — fetch com sessão via cookie httpOnly.
  *
- * accessToken vive em memória; refreshToken em localStorage. Num 401 o
- * client tenta UMA vez POST /auth/refresh e repete a request original.
- * Se o refresh falhar, dispara logout global (o AuthProvider redireciona).
+ * access_token e refresh_token vivem em cookies httpOnly/Secure/SameSite=Strict
+ * setados pelo backend (ver backend/src/routes/auth.ts) — nunca em
+ * localStorage/sessionStorage nem visíveis ao JS. O browser os anexa
+ * automaticamente em toda chamada same-origin a /api/*. Num 401 o client
+ * tenta UMA vez POST /auth/refresh e repete a request original. Se o refresh
+ * falhar, dispara logout global (o AuthProvider redireciona).
  */
 
 // Sempre relativo: o Next.js faz o proxy server-side para o backend real
@@ -11,7 +14,6 @@
 // então o domínio dele não aparece no menu Network.
 export const API_URL = "/api";
 
-const REFRESH_KEY = "visage.refreshToken";
 const USER_KEY = "visage.user";
 
 export interface ApiValidationIssue {
@@ -33,41 +35,13 @@ export class ApiError extends Error {
 }
 
 // ── Token store (módulo, compartilhado com o AuthProvider) ───────────────────
+// Só guarda o perfil do usuário (não-sensível, só para renderizar a UI antes
+// do primeiro round-trip) — a credencial em si é o cookie httpOnly, invisível
+// aqui de propósito.
 
-let accessToken: string | null = null;
 let onSessionExpired: (() => void) | null = null;
 
 export const tokenStore = {
-  getAccess: () => accessToken,
-  setAccess: (token: string | null) => {
-    accessToken = token;
-  },
-  getRefresh: (): string | null => {
-    if (typeof window === "undefined") return null;
-    return (
-      window.localStorage.getItem(REFRESH_KEY) ?? window.sessionStorage.getItem(REFRESH_KEY)
-    );
-  },
-  /**
-   * "Lembrar de mim": com remember=true o token vive em localStorage
-   * (sobrevive ao fechamento do navegador); com false, em sessionStorage.
-   * Sem o argumento (rotação de token), mantém o storage atual.
-   */
-  setRefresh: (token: string | null, remember?: boolean) => {
-    if (typeof window === "undefined") return;
-    if (!token) {
-      window.localStorage.removeItem(REFRESH_KEY);
-      window.sessionStorage.removeItem(REFRESH_KEY);
-      return;
-    }
-    const inSessionOnly =
-      window.sessionStorage.getItem(REFRESH_KEY) !== null &&
-      window.localStorage.getItem(REFRESH_KEY) === null;
-    const useLocal = remember ?? !inSessionOnly;
-    window.localStorage.removeItem(REFRESH_KEY);
-    window.sessionStorage.removeItem(REFRESH_KEY);
-    (useLocal ? window.localStorage : window.sessionStorage).setItem(REFRESH_KEY, token);
-  },
   getStoredUser: <T,>(): T | null => {
     if (typeof window === "undefined") return null;
     const raw = window.localStorage.getItem(USER_KEY);
@@ -93,29 +67,22 @@ export const tokenStore = {
 let refreshPromise: Promise<boolean> | null = null;
 
 /**
- * Troca o refreshToken salvo por um novo par de tokens. Deduplicado no nível
- * do módulo: chamadas concorrentes (StrictMode, várias requests 401)
- * compartilham a mesma promise — essencial porque o backend rotaciona o
- * refresh token a cada uso.
+ * Pede ao backend para rotacionar o refresh token (lido do cookie httpOnly)
+ * por um novo par — o Set-Cookie da resposta atualiza os cookies sozinho,
+ * não há token para o client guardar. Deduplicado no nível do módulo:
+ * chamadas concorrentes (StrictMode, várias requests 401) compartilham a
+ * mesma promise — essencial porque o backend rotaciona o refresh token a
+ * cada uso.
  */
 export async function refreshSession(): Promise<boolean> {
   if (!refreshPromise) {
     refreshPromise = (async () => {
-      const refreshToken = tokenStore.getRefresh();
-      if (!refreshToken) return false;
       try {
         const res = await fetch(`${API_URL}/auth/refresh`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ refreshToken }),
+          credentials: "same-origin",
         });
-        if (!res.ok) return false;
-        const body = (await res.json()) as {
-          data: { accessToken: string; refreshToken: string };
-        };
-        tokenStore.setAccess(body.data.accessToken);
-        tokenStore.setRefresh(body.data.refreshToken);
-        return true;
+        return res.ok;
       } catch {
         return false;
       }
@@ -144,16 +111,13 @@ async function parseError(res: Response): Promise<ApiError> {
 }
 
 async function rawFetch(path: string, init: RequestInit): Promise<Response> {
-  const headers = new Headers(init.headers);
-  const token = tokenStore.getAccess();
-  if (token) headers.set("Authorization", `Bearer ${token}`);
-  return fetch(`${API_URL}${path}`, { ...init, headers });
+  return fetch(`${API_URL}${path}`, { ...init, credentials: "same-origin" });
 }
 
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   let res = await rawFetch(path, init);
 
-  if (res.status === 401 && tokenStore.getRefresh()) {
+  if (res.status === 401) {
     const refreshed = await refreshSession();
     if (refreshed) {
       res = await rawFetch(path, init);
@@ -186,12 +150,13 @@ export const api = {
 
 /**
  * Busca um recurso binário autenticado (ex.: fraud frame JPEG) e devolve um
- * object URL. Um <img src> direto não enviaria o header Authorization.
- * O chamador é responsável por URL.revokeObjectURL.
+ * object URL. Um <img src> direto mandaria o cookie automaticamente, mas o
+ * caller ainda precisa de um blob URL para <img>/download — mantido por
+ * consistência com o resto do client.
  */
 export async function fetchAuthenticatedBlobUrl(path: string): Promise<string> {
   let res = await rawFetch(path, {});
-  if (res.status === 401 && tokenStore.getRefresh()) {
+  if (res.status === 401) {
     const refreshed = await refreshSession();
     if (!refreshed) {
       onSessionExpired?.();

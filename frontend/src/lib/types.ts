@@ -26,9 +26,8 @@ export interface AuthUser {
   mustChangePassword?: boolean;
 }
 
+/** access_token/refresh_token não aparecem aqui — chegam como cookies httpOnly. */
 export interface AuthTokens {
-  accessToken: string;
-  refreshToken: string;
   expiresIn: number;
   user: AuthUser;
 }

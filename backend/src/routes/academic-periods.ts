@@ -85,8 +85,8 @@ router.post(
       }
 
       const result = await academicPeriodsService.create({
-        tenantId,
         ...req.body,
+        tenantId,
       });
 
       res.status(201).json({ data: result });

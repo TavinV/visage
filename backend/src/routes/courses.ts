@@ -108,8 +108,8 @@ router.post(
       }
 
       const result = await coursesService.create({
-        tenantId,
         ...req.body,
+        tenantId,
       });
 
       res.status(201).json({ data: result });

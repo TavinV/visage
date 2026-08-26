@@ -19,6 +19,9 @@ import { setActor } from "../lib/requestContext";
 export interface LoginInput {
   email: string;
   password: string;
+  /** "Lembrar de mim" — atravessa a rotação para que o cookie do refresh
+   *  token continue persistente (ou de sessão) a cada renovação. */
+  remember?: boolean;
 }
 
 export interface AuthTokens {
@@ -44,13 +47,15 @@ interface RefreshPayload {
   /** auth_sessions.id — atravessa a rotação do refresh token para que toda a
    *  atividade do usuário fique amarrada ao mesmo login. */
   sessionId?: string;
+  /** Repassado a cada rotação — decide se o cookie do refresh token é
+   *  persistente ou de sessão. */
+  remember: boolean;
 }
 
 // ── Constantes ───────────────────────────────────────────────────────────────
 
 const REFRESH_PREFIX = "rtoken:";
 const RESET_PREFIX = "pwdreset:";
-const ACCESS_TOKEN_TTL_SECONDS = 900; // 15 minutos
 const RESET_TTL_SECONDS = 900; // link de redefinição vive só 15 minutos
 
 // ── Serviço ───────────────────────────────────────────────────────────────────
@@ -58,8 +63,15 @@ const RESET_TTL_SECONDS = 900; // link de redefinição vive só 15 minutos
 class AuthService extends BaseService {
   // ── Helpers privados ───────────────────────────────────────────────────────
 
-  private generateAccessToken(payload: RefreshPayload): string {
-    return jwt.sign(
+  /**
+   * Assina o access token e devolve, junto, o TTL real (segundos) extraído do
+   * claim `exp` do próprio token — única fonte de verdade. Antes disso o
+   * `expiresIn` devolvido ao cliente vinha de uma constante separada
+   * (900s) enquanto o token era assinado com `config.jwtExpiresIn`
+   * (JWT_EXPIRES_IN), podendo divergir silenciosamente do valor real.
+   */
+  private generateAccessToken(payload: RefreshPayload): { token: string; expiresIn: number } {
+    const token = jwt.sign(
       {
         sub: payload.userId,
         tenantId: payload.tenantId,
@@ -72,6 +84,9 @@ class AuthService extends BaseService {
       config.jwtSecret,
       { expiresIn: config.jwtExpiresIn } as jwt.SignOptions,
     );
+
+    const { exp, iat } = jwt.decode(token) as { exp: number; iat: number };
+    return { token, expiresIn: exp - iat };
   }
 
   private async storeRefreshToken(
@@ -137,9 +152,10 @@ class AuthService extends BaseService {
       role: user.role,
       email: user.email ?? "",
       sessionId,
+      remember: input.remember ?? true,
     };
 
-    const accessToken = this.generateAccessToken(rtPayload);
+    const { token: accessToken, expiresIn } = this.generateAccessToken(rtPayload);
     const refreshToken = crypto.randomBytes(32).toString("hex");
     await this.storeRefreshToken(refreshToken, rtPayload);
 
@@ -168,7 +184,7 @@ class AuthService extends BaseService {
     return {
       accessToken,
       refreshToken,
-      expiresIn: ACCESS_TOKEN_TTL_SECONDS,
+      expiresIn,
       user: {
         id: user.id,
         email: user.email ?? "",
@@ -185,7 +201,7 @@ class AuthService extends BaseService {
    */
   async refresh(
     refreshToken: string,
-  ): Promise<Pick<AuthTokens, "accessToken" | "refreshToken" | "expiresIn">> {
+  ): Promise<Pick<AuthTokens, "accessToken" | "refreshToken" | "expiresIn"> & { remember: boolean }> {
     const key = `${REFRESH_PREFIX}${refreshToken}`;
     const raw = await redis.get(key);
 
@@ -199,7 +215,7 @@ class AuthService extends BaseService {
     const newRefreshToken = crypto.randomBytes(32).toString("hex");
     await this.storeRefreshToken(newRefreshToken, payload);
 
-    const accessToken = this.generateAccessToken(payload);
+    const { token: accessToken, expiresIn } = this.generateAccessToken(payload);
 
     // O refresh é a única prova de que a sessão continua viva — sem isso, uma
     // sessão de 6 horas apareceria na auditoria com "última atividade" no login
@@ -209,7 +225,7 @@ class AuthService extends BaseService {
 
     this.logger.info({ userId: payload.userId }, "Access token refreshed");
 
-    return { accessToken, refreshToken: newRefreshToken, expiresIn: ACCESS_TOKEN_TTL_SECONDS };
+    return { accessToken, refreshToken: newRefreshToken, expiresIn, remember: payload.remember ?? true };
   }
 
   /**
