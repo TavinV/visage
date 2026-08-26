@@ -9,22 +9,16 @@ import {
   MonitorSmartphone,
   ScanFace,
   ShieldCheck,
+  Smartphone,
+  UserRound,
   Users,
 } from "lucide-react";
-import { api, qs } from "@/lib/api";
-import type { Device, Paginated } from "@/lib/types";
+import { api } from "@/lib/api";
+import type { Device } from "@/lib/types";
 import { friendlyError } from "@/lib/apiError";
 import { formatPercent } from "@/lib/format";
 import { cn } from "@/lib/cn";
-import {
-  Modal,
-  Button,
-  Select,
-  Badge,
-  Checkbox,
-  Skeleton,
-  useToast,
-} from "@/components/ui";
+import { Modal, Button, Badge, Checkbox, Skeleton, useToast } from "@/components/ui";
 
 // ── Tipos espelhando o backend/engine ─────────────────────────────────────────
 
@@ -104,9 +98,9 @@ interface CalibrationReport {
 }
 
 const phaseLabels: Record<string, string> = {
-  genuine: "Fase 1 · Pessoas do sistema",
-  impostor: "Fase 2 · Impostores",
-  attack: "Fase 3 · Ataques",
+  genuine: "Etapa 1 · Grupo 1",
+  impostor: "Etapa 2 · Grupo 2",
+  attack: "Etapa 3 · Teste da foto",
   done: "Coleta concluída",
 };
 
@@ -120,33 +114,29 @@ const fmtNum = (n: number | null | undefined, digits = 2) =>
   n === null || n === undefined ? "—" : n.toFixed(digits);
 
 interface CalibrationModalProps {
-  open: boolean;
+  /** Totem que vai conduzir a coleta — a calibração é dele, não da instituição. */
+  device: Device;
   onClose: () => void;
 }
 
 /**
- * Calibração guiada: seleciona o totem, acompanha a coleta em três fases,
- * calcula os limiares via índice de Youden na engine e aplica o perfil
- * escolhido nas configurações da instituição.
+ * Calibração guiada de um totem: acompanha a coleta em três etapas, calcula
+ * os limiares via índice de Youden na engine e aplica o perfil escolhido
+ * neste totem (e o limiar do cadastro, que é da instituição).
  */
-export function CalibrationModal({ open, onClose }: CalibrationModalProps) {
+export function CalibrationModal({ device, onClose }: CalibrationModalProps) {
   const queryClient = useQueryClient();
   const toast = useToast();
-  const [deviceId, setDeviceId] = useState("");
+  const deviceId = device.id;
+  const deviceName = device.label ?? device.deviceFingerprint;
   const [running, setRunning] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<string | null>(null);
   const [applyLiveness, setApplyLiveness] = useState(true);
 
-  const devices = useQuery({
-    queryKey: ["devices", "calibration-options"],
-    queryFn: () => api.get<Paginated<Device>>(`/devices${qs({ isActive: true, limit: 100 })}`),
-    enabled: open,
-  });
-
   const report = useQuery({
     queryKey: ["calibration", deviceId],
     queryFn: () => api.get<{ data: CalibrationReport }>(`/devices/${deviceId}/calibration`),
-    enabled: open && running && deviceId !== "",
+    enabled: running,
     refetchInterval: 2500,
   });
 
@@ -169,17 +159,13 @@ export function CalibrationModal({ open, onClose }: CalibrationModalProps) {
   });
 
   const stopAndClose = async () => {
-    if (running && deviceId) {
+    if (running) {
       try {
         await api.delete(`/devices/${deviceId}/calibration`);
       } catch {
         // TTL do Redis encerra sozinho — falha aqui não bloqueia o fechamento
       }
     }
-    setRunning(false);
-    setDeviceId("");
-    setSelectedProfile(null);
-    setApplyLiveness(true);
     onClose();
   };
 
@@ -225,17 +211,11 @@ export function CalibrationModal({ open, onClose }: CalibrationModalProps) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tenant-settings"] });
       queryClient.invalidateQueries({ queryKey: ["devices"] });
-      toast.success("Calibração aplicada a este totem.");
-      setRunning(false);
-      setDeviceId("");
-      setSelectedProfile(null);
+      toast.success(`Calibração aplicada a ${deviceName}.`);
       onClose();
     },
     onError: (error) => toast.error(friendlyError(error)),
   });
-
-  const deviceOptions =
-    devices.data?.data.map((d) => ({ value: d.id, label: d.label ?? d.deviceFingerprint })) ?? [];
 
   const collectStat = (label: string, value: string, ok: boolean) => (
     <div
@@ -253,10 +233,10 @@ export function CalibrationModal({ open, onClose }: CalibrationModalProps) {
 
   return (
     <Modal
-      open={open}
+      open
       onClose={stopAndClose}
-      title="Calibrar reconhecimento e vivacidade"
-      description="A coleta é guiada no totem escolhido e o resultado vale só para ele — câmera e iluminação mudam de sala para sala. Depois dá para copiar a calibração para outros totens."
+      title={`Calibrar pelo totem — ${deviceName}`}
+      description="A coleta é guiada na tela deste totem e o resultado vale só para ele: câmera e iluminação mudam de sala para sala. Depois dá para copiar a calibração para outros totens."
       size="lg"
       footer={
         !running ? (
@@ -265,7 +245,6 @@ export function CalibrationModal({ open, onClose }: CalibrationModalProps) {
             <Button
               onClick={() => start.mutate()}
               loading={start.isPending}
-              disabled={!deviceId}
               iconLeft={<Activity size={15} />}
             >
               Iniciar calibração
@@ -300,32 +279,45 @@ export function CalibrationModal({ open, onClose }: CalibrationModalProps) {
     >
       {!running ? (
         <div className="flex flex-col gap-4">
-          <Select
-            label="Totem"
-            placeholder={
-              devices.isPending
-                ? "Carregando dispositivos…"
-                : deviceOptions.length === 0
-                  ? "Nenhum dispositivo ativo"
-                  : "Selecione o dispositivo"
-            }
-            options={deviceOptions}
-            value={deviceId}
-            onChange={(e) => setDeviceId(e.target.value)}
-          />
-          <div className="rounded-lg bg-flauzino-slate-100 px-4 py-3 text-[13px] leading-relaxed text-flauzino-slate-700">
-            O totem muda para o assistente de calibração em até 10 segundos. Lá, a
-            coleta acontece em três fases: <b className="font-semibold">pessoas do sistema</b>{" "}
-            (2+ pessoas, 3 fotos cada), <b className="font-semibold">impostores</b> (3+ fotos de
-            pessoas de fora) e <b className="font-semibold">ataques</b> (foto impressa ou tela).
-          </div>
+          <p className="text-[13px] leading-relaxed text-flauzino-slate-600">
+            Antes de começar, reúna <b className="font-semibold text-flauzino-navy-900">5 pessoas</b>{" "}
+            perto do totem e tenha um celular à mão. A tela do totem explica cada passo;
+            aqui você só acompanha e aplica o resultado no fim.
+          </p>
+          <ul className="flex flex-col gap-2.5">
+            <li className="flex items-start gap-3 rounded-lg bg-flauzino-slate-100 px-4 py-3">
+              <UserRound size={16} className="mt-0.5 shrink-0 text-flauzino-accent-600" />
+              <span className="text-[13px] leading-relaxed text-flauzino-slate-700">
+                <b className="font-semibold text-flauzino-navy-900">Grupo 1 — 2 pessoas.</b>{" "}
+                O totem tira 3 fotos de cada uma. São os rostos que ele vai aprender a reconhecer.
+              </span>
+            </li>
+            <li className="flex items-start gap-3 rounded-lg bg-flauzino-slate-100 px-4 py-3">
+              <Users size={16} className="mt-0.5 shrink-0 text-flauzino-accent-600" />
+              <span className="text-[13px] leading-relaxed text-flauzino-slate-700">
+                <b className="font-semibold text-flauzino-navy-900">Grupo 2 — 3 pessoas.</b>{" "}
+                Uma foto de cada. Servem para o totem aprender a diferença entre elas e as do grupo 1.
+              </span>
+            </li>
+            <li className="flex items-start gap-3 rounded-lg bg-flauzino-slate-100 px-4 py-3">
+              <Smartphone size={16} className="mt-0.5 shrink-0 text-flauzino-accent-600" />
+              <span className="text-[13px] leading-relaxed text-flauzino-slate-700">
+                <b className="font-semibold text-flauzino-navy-900">Teste da foto.</b>{" "}
+                Alguém mostra à câmera a foto de um rosto na tela do celular — é assim que o
+                totem aprende a recusar quem tenta se passar por outra pessoa.
+              </span>
+            </li>
+          </ul>
+          <p className="text-[13px] leading-relaxed text-flauzino-slate-500">
+            Ao iniciar, a tela do totem muda sozinha em até 10 segundos.
+          </p>
         </div>
       ) : !results ? (
         <div className="flex flex-col gap-5">
           <div className="flex items-center justify-between rounded-lg bg-flauzino-slate-100 px-4 py-3">
             <span className="flex items-center gap-2 text-sm font-medium text-flauzino-slate-700">
               <MonitorSmartphone size={16} className="text-flauzino-slate-500" />
-              {deviceOptions.find((d) => d.value === deviceId)?.label}
+              {deviceName}
             </span>
             {data ? (
               <Badge variant={data.phase === "done" ? "success" : "accent"} dot>
@@ -343,18 +335,18 @@ export function CalibrationModal({ open, onClose }: CalibrationModalProps) {
               <>
                 <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                   {collectStat(
-                    "Pessoas",
-                    `${data.people}`,
+                    "Pessoas do grupo 1",
+                    `${data.people}/${data.limits.minPeople}+`,
                     data.people >= data.limits.minPeople
                   )}
-                  {collectStat("Fotos legítimas", `${data.genuineTotal}`, data.genuineTotal >= 4)}
+                  {collectStat("Fotos do grupo 1", `${data.genuineTotal}`, data.genuineTotal >= 4)}
                   {collectStat(
-                    "Impostores",
+                    "Pessoas do grupo 2",
                     `${data.impostors}/${data.limits.minImpostors}+`,
                     data.impostors >= data.limits.minImpostors
                   )}
                   {collectStat(
-                    "Ataques",
+                    "Fotos na tela",
                     `${data.attacks}/${data.limits.minAttacks}+`,
                     data.attacks >= data.limits.minAttacks
                   )}
@@ -363,11 +355,11 @@ export function CalibrationModal({ open, onClose }: CalibrationModalProps) {
                 <div className="flex flex-col gap-2 text-[13px] text-flauzino-slate-600">
                   <span className="flex items-center gap-2">
                     <ScanFace size={14} className={data.canComputeRecognition ? "text-flauzino-success-600" : "text-flauzino-slate-400"} />
-                    Reconhecimento: {data.canComputeRecognition ? "pronto para calcular" : "aguardando pessoas e impostores"}
+                    Reconhecimento: {data.canComputeRecognition ? "pronto para calcular" : "aguardando os dois grupos de pessoas"}
                   </span>
                   <span className="flex items-center gap-2">
                     <ShieldCheck size={14} className={data.canComputeLiveness ? "text-flauzino-success-600" : "text-flauzino-slate-400"} />
-                    Vivacidade: {data.canComputeLiveness ? "pronto para calcular" : "aguardando fotos reais e ataques"}
+                    Vivacidade: {data.canComputeLiveness ? "pronto para calcular" : "aguardando o teste da foto na tela"}
                   </span>
                 </div>
 
@@ -402,7 +394,7 @@ export function CalibrationModal({ open, onClose }: CalibrationModalProps) {
               <>
                 <div className="mb-3 flex flex-wrap gap-2">
                   <span
-                    title="Separação estatística entre pessoas legítimas e impostores (d′)"
+                    title="O quanto os rostos do grupo 1 se distinguem dos do grupo 2 (d′)"
                     className="rounded-full bg-flauzino-slate-100 px-3 py-1 font-mono-ds text-xs text-flauzino-slate-600"
                   >
                     Separação {fmtNum(recognition.dprime)}
@@ -421,7 +413,7 @@ export function CalibrationModal({ open, onClose }: CalibrationModalProps) {
                   </span>
                   <span className="rounded-full bg-flauzino-slate-100 px-3 py-1 font-mono-ds text-xs text-flauzino-slate-600">
                     <Users size={11} className="mr-1 inline" />
-                    {recognition.persons_processed.length} pessoas · {recognition.impostor_count} impostores
+                    {recognition.persons_processed.length} no grupo 1 · {recognition.impostor_count} no grupo 2
                   </span>
                 </div>
 
@@ -459,8 +451,8 @@ export function CalibrationModal({ open, onClose }: CalibrationModalProps) {
                           {fmtNum(option.threshold, 4)}
                         </span>
                         <span className="text-[11px] leading-relaxed text-flauzino-slate-500">
-                          Aceita {formatPercent(option.genuine_accept_rate * 100, 0)} dos legítimos
-                          {" · "}bloqueia {formatPercent(option.impostor_reject_rate * 100, 0)} dos impostores
+                          Reconhece {formatPercent(option.genuine_accept_rate * 100, 0)} de quem é do grupo 1
+                          {" · "}barra {formatPercent(option.impostor_reject_rate * 100, 0)} de quem é de fora
                         </span>
                         <span
                           title="Índice de equilíbrio entre acertos e bloqueios (índice de Youden)"
@@ -488,7 +480,7 @@ export function CalibrationModal({ open, onClose }: CalibrationModalProps) {
               </>
             ) : (
               <p className="rounded-lg bg-flauzino-danger-100 px-4 py-3 text-[13px] text-flauzino-slate-700">
-                {results.recognitionError ?? "Reconhecimento não calculado — amostras insuficientes."}
+                {results.recognitionError ?? "Reconhecimento não calculado — faltaram pessoas em algum dos grupos."}
               </p>
             )}
           </section>
@@ -532,13 +524,13 @@ export function CalibrationModal({ open, onClose }: CalibrationModalProps) {
                   </div>
                   <div className="text-right text-[12px] text-flauzino-slate-500">
                     <p>
-                      Reais aprovados:{" "}
+                      Rostos reais aceitos:{" "}
                       <b className="font-mono-ds text-flauzino-success-600">
                         {formatPercent(liveness.liveness_analysis.real_pass_rate * 100, 0)}
                       </b>
                     </p>
                     <p>
-                      Ataques bloqueados:{" "}
+                      Fotos na tela barradas:{" "}
                       <b className="font-mono-ds text-flauzino-success-600">
                         {formatPercent(liveness.liveness_analysis.attack_block_rate * 100, 0)}
                       </b>
@@ -558,7 +550,7 @@ export function CalibrationModal({ open, onClose }: CalibrationModalProps) {
               </div>
             ) : (
               <p className="rounded-lg bg-flauzino-slate-100 px-4 py-3 text-[13px] text-flauzino-slate-600">
-                {results.livenessError ?? "Vivacidade não calculada — sem amostras de ataque."}
+                {results.livenessError ?? "Vivacidade não calculada — o teste da foto na tela não foi feito."}
               </p>
             )}
           </section>

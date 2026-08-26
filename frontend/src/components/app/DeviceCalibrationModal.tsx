@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, RotateCcw, SlidersHorizontal } from "lucide-react";
+import { Activity, Copy, RotateCcw, SlidersHorizontal } from "lucide-react";
 import { api, qs } from "@/lib/api";
 import type { Device, Paginated } from "@/lib/types";
 import { formatDateTime } from "@/lib/format";
@@ -20,6 +20,8 @@ import {
 interface DeviceCalibrationModalProps {
   device: Device;
   onClose: () => void;
+  /** Abre a coleta guiada na tela deste totem (CalibrationModal). */
+  onStartGuided: () => void;
 }
 
 /**
@@ -30,7 +32,11 @@ interface DeviceCalibrationModalProps {
  * onde se corrige à mão e se copia uma calibração boa para totens de salas
  * equivalentes, sem repetir a coleta inteira.
  */
-export function DeviceCalibrationModal({ device, onClose }: DeviceCalibrationModalProps) {
+export function DeviceCalibrationModal({
+  device,
+  onClose,
+  onStartGuided,
+}: DeviceCalibrationModalProps) {
   const queryClient = useQueryClient();
   const toast = useToast();
   const calibration = device.calibration;
@@ -107,7 +113,7 @@ export function DeviceCalibrationModal({ device, onClose }: DeviceCalibrationMod
         open
         onClose={onClose}
         title={`Calibração — ${deviceName}`}
-        description="Limiares deste totem. Campo vazio herda o valor da instituição."
+        description="Calibre pela câmera do totem ou ajuste os limiares à mão. Campo vazio herda o valor da instituição."
         footer={
           <>
             <Button variant="secondary" onClick={onClose}>
@@ -142,6 +148,32 @@ export function DeviceCalibrationModal({ device, onClose }: DeviceCalibrationMod
               </Badge>
             ) : (
               <Badge variant="neutral">Herdado</Badge>
+            )}
+          </div>
+
+          {/* Caminho principal: medir na própria sala em vez de chutar números */}
+          <div className="rounded-xl border border-flauzino-accent-100 bg-flauzino-accent-50 p-4">
+            <h3 className="flex items-center gap-2 text-sm font-medium text-flauzino-navy-900">
+              <Activity size={15} className="text-flauzino-accent-600" />
+              Calibrar pelo totem
+            </h3>
+            <p className="mt-1 text-xs leading-relaxed text-flauzino-slate-600">
+              O próprio totem conduz a coleta na tela: cinco pessoas passam pela câmera e ele
+              descobre os números certos para a luz desta sala. Leva poucos minutos.
+            </p>
+            <Button
+              size="sm"
+              className="mt-3"
+              disabled={!device.isActive}
+              onClick={onStartGuided}
+              iconLeft={<Activity size={14} />}
+            >
+              {calibration?.isCalibrated ? "Calibrar de novo" : "Começar calibração"}
+            </Button>
+            {!device.isActive && (
+              <p className="mt-2 text-xs text-flauzino-slate-500">
+                Ative o dispositivo para poder calibrar.
+              </p>
             )}
           </div>
 

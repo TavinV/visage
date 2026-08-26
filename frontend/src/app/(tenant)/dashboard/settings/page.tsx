@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useEffect, useRef } from "react";
 import {
   ScanFace,
   ClipboardCheck,
@@ -8,7 +9,6 @@ import {
   IdCard,
   Fingerprint,
   MonitorSmartphone,
-  Activity,
   Image as ImageIcon,
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -31,7 +31,6 @@ import {
   Skeleton,
   useToast,
 } from "@/components/ui";
-import { CalibrationModal } from "@/components/app/CalibrationModal";
 import { PhotoUpload } from "@/components/app/PhotoUpload";
 import { useAuthenticatedImage } from "@/lib/useAuthenticatedImage";
 import { useAuth } from "@/lib/auth";
@@ -96,7 +95,6 @@ export default function SettingsPage() {
   const queryClient = useQueryClient();
   const toast = useToast();
   const { user } = useAuth();
-  const [calibrating, setCalibrating] = useState(false);
 
   const settings = useQuery({
     queryKey: ["tenant-settings"],
@@ -189,9 +187,7 @@ export default function SettingsPage() {
 
   const errors = form.formState.errors;
 
-  // Modal de calibração vive fora do <form> para não disparar submit
   return (
-    <>
     <form onSubmit={form.handleSubmit((v) => save.mutate(v))} className="mx-auto max-w-5xl">
       <PageHeader
         title="Configurações da instituição"
@@ -238,16 +234,6 @@ export default function SettingsPage() {
             title="Reconhecimento"
             description="Sensibilidade do reconhecimento facial e da proteção contra fraudes (fotos, vídeos e telas)."
             icon={<ScanFace size={18} strokeWidth={1.75} />}
-            actions={
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setCalibrating(true)}
-                iconLeft={<Activity size={14} />}
-              >
-                Calibrar pelo totem
-              </Button>
-            }
           />
           <CardBody className="flex flex-col gap-4">
             <Input
@@ -272,6 +258,19 @@ export default function SettingsPage() {
               error={errors.livenessThreshold?.message}
               {...form.register("livenessThreshold", asNumber)}
             />
+            {/* Estes são os valores da instituição; cada totem pode ter os
+                seus, medidos na própria sala pela calibração guiada. */}
+            <p className="rounded-lg bg-flauzino-slate-100 px-4 py-3 text-[13px] leading-relaxed text-flauzino-slate-600">
+              Não sabe que números usar? Em{" "}
+              <Link
+                href="/dashboard/devices"
+                className="font-medium text-flauzino-accent-600 underline-offset-2 hover:underline"
+              >
+                Dispositivos
+              </Link>{" "}
+              você calibra pela câmera de cada totem, e o sistema sugere os
+              valores certos para a luz daquela sala.
+            </p>
           </CardBody>
         </Card>
 
@@ -445,8 +444,5 @@ export default function SettingsPage() {
         </Card>
       </div>
     </form>
-
-    <CalibrationModal open={calibrating} onClose={() => setCalibrating(false)} />
-    </>
   );
 }

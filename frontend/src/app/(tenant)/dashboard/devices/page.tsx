@@ -49,6 +49,7 @@ const tristateOptions = (yes: string, no: string) => [
 import { ActiveBadge } from "@/components/app/badges";
 import { ShowInactiveToggle, inactiveRowClass } from "@/components/app/ShowInactive";
 import { DeviceCalibrationModal } from "@/components/app/DeviceCalibrationModal";
+import { CalibrationModal } from "@/components/app/CalibrationModal";
 
 const DeviceSchema = z.object({
   deviceFingerprint: z.string().min(1, "Informe o identificador do dispositivo."),
@@ -77,6 +78,8 @@ export default function DevicesPage() {
   const [deleting, setDeleting] = useState<Device | null>(null);
   const [regenerating, setRegenerating] = useState<Device | null>(null);
   const [calibrating, setCalibrating] = useState<Device | null>(null);
+  // Coleta guiada na tela do totem — sai do modal de limiares e assume a tela
+  const [guiding, setGuiding] = useState<Device | null>(null);
   const [createdKey, setCreatedKey] = useState<{ label: string; apiKey: string } | null>(null);
 
   const activeFilterCount =
@@ -355,8 +358,8 @@ export default function DevicesPage() {
                       variant="ghost"
                       size="sm"
                       onClick={() => setCalibrating(d)}
-                      aria-label={`Calibração de ${d.label ?? d.deviceFingerprint}`}
-                      title="Calibração do totem"
+                      aria-label={`Calibrar ${d.label ?? d.deviceFingerprint}`}
+                      title="Calibrar totem"
                     >
                       <SlidersHorizontal size={15} />
                     </Button>
@@ -494,8 +497,17 @@ export default function DevicesPage() {
       />
 
       {calibrating && (
-        <DeviceCalibrationModal device={calibrating} onClose={() => setCalibrating(null)} />
+        <DeviceCalibrationModal
+          device={calibrating}
+          onClose={() => setCalibrating(null)}
+          onStartGuided={() => {
+            setGuiding(calibrating);
+            setCalibrating(null);
+          }}
+        />
       )}
+
+      {guiding && <CalibrationModal device={guiding} onClose={() => setGuiding(null)} />}
     </div>
   );
 }
