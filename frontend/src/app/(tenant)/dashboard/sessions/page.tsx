@@ -1,14 +1,27 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Plus, Square, Ban, ClipboardList, Clock } from "lucide-react";
+import {
+  Plus,
+  Square,
+  Ban,
+  ClipboardList,
+  Clock,
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  GraduationCap,
+  MapPin,
+  ClipboardCheck,
+} from "lucide-react";
 import { api, qs } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { cn } from "@/lib/cn";
 import type { ClassItem, ClassSession, Location, Paginated, User } from "@/lib/types";
 import {
   formatDateTime,
@@ -59,6 +72,7 @@ export default function SessionsPage() {
   const [statusFilter, setStatusFilter] = useState("");
   const [classFilter, setClassFilter] = useState("");
   const [creating, setCreating] = useState(false);
+  const [step, setStep] = useState<1 | 2 | 3>(1);
   const [closing, setClosing] = useState<ClassSession | null>(null);
   const [cancelling, setCancelling] = useState<ClassSession | null>(null);
 
@@ -157,6 +171,7 @@ export default function SessionsPage() {
       // Agora por padrão; quem abriu com atraso corrige para a hora real
       startedAt: toDateTimeLocalValue(new Date()),
     });
+    setStep(1);
     setCreating(true);
   };
 
@@ -167,6 +182,33 @@ export default function SessionsPage() {
     // A turma tem várias disciplinas agora — a escolha anterior não vale mais
     form.setValue("classSubjectId", "");
     form.setValue("teacherId", "");
+  };
+
+  const goToStep2 = async () => {
+    const valid = await form.trigger(["classId", "classSubjectId"]);
+    if (!valid) return;
+    // teacherId é opcional no schema (some sozinho pela disciplina), mas o
+    // admin precisa ver quem vai responder antes de seguir
+    if (!isTeacher && !form.getValues("teacherId")) {
+      form.setError("teacherId", { type: "manual", message: "Selecione o professor." });
+      return;
+    }
+    setStep(2);
+  };
+
+  const goToStep3 = async () => {
+    const valid = await form.trigger(["locationId", "startedAt"]);
+    if (!valid) return;
+    setStep(3);
+  };
+
+  const submitSession = form.handleSubmit((v) => create.mutate(v));
+
+  const onFormSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (step === 1) return void goToStep2();
+    if (step === 2) return void goToStep3();
+    submitSession();
   };
 
   return (
@@ -302,106 +344,217 @@ export default function SessionsPage() {
         open={creating}
         onClose={() => setCreating(false)}
         title="Abrir chamada"
-        description="Informe a sala e a hora em que a aula começou. Quantas aulas a chamada vale já vem da disciplina."
-        size="sm"
+        description={
+          step === 1
+            ? "Etapa 1 de 3 — turma e disciplina"
+            : step === 2
+              ? "Etapa 2 de 3 — sala e horário"
+              : "Etapa 3 de 3 — confirme antes de abrir"
+        }
+        size="md"
         footer={
-          <>
-            <Button variant="secondary" onClick={() => setCreating(false)}>Cancelar</Button>
-            <Button onClick={form.handleSubmit((v) => create.mutate(v))} loading={create.isPending}>
-              Abrir chamada
-            </Button>
-          </>
+          step === 1 ? (
+            <>
+              <Button variant="secondary" onClick={() => setCreating(false)}>Cancelar</Button>
+              <Button onClick={goToStep2} iconRight={<ArrowRight size={15} />}>
+                Continuar
+              </Button>
+            </>
+          ) : step === 2 ? (
+            <>
+              <Button variant="secondary" onClick={() => setStep(1)} iconLeft={<ArrowLeft size={15} />}>
+                Voltar
+              </Button>
+              <Button onClick={goToStep3} iconRight={<ArrowRight size={15} />}>
+                Continuar
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="secondary" onClick={() => setStep(2)} iconLeft={<ArrowLeft size={15} />}>
+                Voltar
+              </Button>
+              <Button onClick={submitSession} loading={create.isPending} iconLeft={<Check size={15} />}>
+                Abrir chamada
+              </Button>
+            </>
+          )
         }
       >
-        <form className="flex flex-col gap-4" onSubmit={form.handleSubmit((v) => create.mutate(v))}>
-          <Select
-            label="Turma"
-            required
-            placeholder={
-              classes.isPending
-                ? "Carregando turmas…"
-                : classOptions.length === 0
-                  ? "Nenhuma turma disponível"
-                  : "Selecione a turma"
-            }
-            options={classOptions}
-            error={form.formState.errors.classId?.message}
-            {...form.register("classId", { onChange: (e) => onClassChange(e.target.value) })}
-          />
-          <Select
-            label="Disciplina"
-            required
-            disabled={!selectedClass}
-            placeholder={
-              !selectedClass
-                ? "Escolha a turma primeiro"
-                : subjectOptions.length === 0
-                  ? isTeacher
-                    ? "Você não leciona nenhuma disciplina desta turma"
-                    : "A turma não tem disciplinas na grade"
-                  : "Selecione a disciplina"
-            }
-            hint="A chamada é de uma disciplina — a frequência é contada separadamente em cada uma."
-            options={subjectOptions}
-            error={form.formState.errors.classSubjectId?.message}
-            {...form.register("classSubjectId", {
-              onChange: (e) => {
-                // Admin abre para o professor daquela disciplina
-                const cs = selectedClass?.subjects.find((x) => x.id === e.target.value);
-                if (!isTeacher && cs) form.setValue("teacherId", cs.teacherId);
-              },
-            })}
-          />
-          {!isTeacher && (
-            <Select
-              label="Professor responsável"
-              required
-              placeholder="Selecione o professor"
-              options={teacherOptions}
-              hint="Pré-selecionado pelo professor da disciplina."
-              error={form.formState.errors.teacherId?.message}
-              {...form.register("teacherId")}
-            />
-          )}
-          <Select
-            label="Sala"
-            placeholder="Sala padrão da turma"
-            options={locationOptions}
-            hint="A sala não pode ter outra chamada em andamento."
-            error={form.formState.errors.locationId?.message}
-            {...form.register("locationId")}
-          />
-          <Input
-            label="A aula começou às"
-            required
-            type="datetime-local"
-            hint="Informe o horário real de início, mesmo que a chamada esteja sendo aberta com atraso — é dele que sai o fechamento automático."
-            error={form.formState.errors.startedAt?.message}
-            {...form.register("startedAt")}
-          />
-
-          {selectedSubject && (
-            <div className="flex items-start gap-2 rounded-lg bg-flauzino-accent-50 px-3 py-2.5 text-sm text-flauzino-navy-900">
-              <Clock size={15} className="mt-0.5 shrink-0 text-flauzino-accent-600" />
-              <span>
-                <strong>{selectedSubject.subjectName}</strong> · vale{" "}
-                <strong>{formatLessons(selectedSubject.lessonsPerSession)}</strong> e fecha
-                sozinha após {formatDuration(selectedSubject.sessionDurationMin)}
-                {startedAtValue && !Number.isNaN(new Date(startedAtValue).getTime()) && (
-                  <>
-                    , às{" "}
-                    <strong>
-                      {formatTime(
-                        new Date(
-                          new Date(startedAtValue).getTime() +
-                            selectedSubject.sessionDurationMin * 60_000
-                        ).toISOString()
-                      )}
-                    </strong>
-                  </>
+        {/* Trilha das etapas */}
+        <ol className="mb-5 flex items-center gap-2 text-xs font-medium">
+          {[
+            { n: 1 as const, label: "Turma" },
+            { n: 2 as const, label: "Sala e horário" },
+            { n: 3 as const, label: "Confirmar" },
+          ].map(({ n, label }, i, arr) => (
+            <li key={n} className="flex flex-1 items-center gap-2 last:flex-none">
+              <span
+                className={cn(
+                  "flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold",
+                  step === n
+                    ? "bg-flauzino-accent-600 text-white"
+                    : step > n
+                      ? "bg-flauzino-success-100 text-flauzino-success-600"
+                      : "bg-flauzino-slate-100 text-flauzino-slate-400"
                 )}
-                .
+              >
+                {step > n ? <Check size={12} strokeWidth={3} /> : n}
               </span>
+              <span
+                className={cn(
+                  "whitespace-nowrap",
+                  step === n ? "text-flauzino-navy-900" : "text-flauzino-slate-500"
+                )}
+              >
+                {label}
+              </span>
+              {i < arr.length - 1 && <span className="h-px flex-1 bg-flauzino-slate-200" />}
+            </li>
+          ))}
+        </ol>
+
+        <form className="flex flex-col gap-4" onSubmit={onFormSubmit}>
+          {step === 1 && (
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-flauzino-navy-900">
+                <GraduationCap size={16} className="text-flauzino-accent-600" />
+                Turma e disciplina
+              </div>
+              <Select
+                label="Turma"
+                required
+                placeholder={
+                  classes.isPending
+                    ? "Carregando turmas…"
+                    : classOptions.length === 0
+                      ? "Nenhuma turma disponível"
+                      : "Selecione a turma"
+                }
+                options={classOptions}
+                error={form.formState.errors.classId?.message}
+                {...form.register("classId", { onChange: (e) => onClassChange(e.target.value) })}
+              />
+              <Select
+                label="Disciplina"
+                required
+                disabled={!selectedClass}
+                placeholder={
+                  !selectedClass
+                    ? "Escolha a turma primeiro"
+                    : subjectOptions.length === 0
+                      ? isTeacher
+                        ? "Você não leciona nenhuma disciplina desta turma"
+                        : "A turma não tem disciplinas na grade"
+                      : "Selecione a disciplina"
+                }
+                hint="A chamada é de uma disciplina — a frequência é contada separadamente em cada uma."
+                options={subjectOptions}
+                error={form.formState.errors.classSubjectId?.message}
+                {...form.register("classSubjectId", {
+                  onChange: (e) => {
+                    // Admin abre para o professor daquela disciplina
+                    const cs = selectedClass?.subjects.find((x) => x.id === e.target.value);
+                    if (!isTeacher && cs) form.setValue("teacherId", cs.teacherId);
+                  },
+                })}
+              />
+              {!isTeacher && (
+                <Select
+                  label="Professor responsável"
+                  required
+                  placeholder="Selecione o professor"
+                  options={teacherOptions}
+                  hint="Pré-selecionado pelo professor da disciplina."
+                  error={form.formState.errors.teacherId?.message}
+                  {...form.register("teacherId")}
+                />
+              )}
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-flauzino-navy-900">
+                <MapPin size={16} className="text-flauzino-accent-600" />
+                Sala e horário
+              </div>
+              <Select
+                label="Sala"
+                placeholder="Sala padrão da turma"
+                options={locationOptions}
+                hint="A sala não pode ter outra chamada em andamento."
+                error={form.formState.errors.locationId?.message}
+                {...form.register("locationId")}
+              />
+              <Input
+                label="A aula começou às"
+                required
+                type="datetime-local"
+                hint="Informe o horário real de início, mesmo que a chamada esteja sendo aberta com atraso — é dele que sai o fechamento automático."
+                error={form.formState.errors.startedAt?.message}
+                {...form.register("startedAt")}
+              />
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-flauzino-navy-900">
+                <ClipboardCheck size={16} className="text-flauzino-accent-600" />
+                Confirme os dados
+              </div>
+              <div className="overflow-hidden rounded-xl border border-flauzino-slate-200">
+                {[
+                  { label: "Turma", value: selectedClass?.name ?? "—" },
+                  { label: "Disciplina", value: selectedSubject?.subjectName ?? "—" },
+                  {
+                    label: "Professor",
+                    value: isTeacher
+                      ? (user?.name ?? "Você")
+                      : (teacherOptions.find((t) => t.value === form.watch("teacherId"))?.label ?? "—"),
+                  },
+                  {
+                    label: "Sala",
+                    value:
+                      locationOptions.find((l) => l.value === form.watch("locationId"))?.label ??
+                      "Sala padrão da turma",
+                  },
+                  { label: "Início", value: formatDateTime(startedAtValue) },
+                ].map((row) => (
+                  <div
+                    key={row.label}
+                    className="flex items-center justify-between gap-4 border-b border-flauzino-slate-200 bg-white px-4 py-2.5 text-sm last:border-b-0"
+                  >
+                    <span className="text-flauzino-slate-500">{row.label}</span>
+                    <span className="font-medium text-flauzino-navy-900">{row.value}</span>
+                  </div>
+                ))}
+              </div>
+
+              {selectedSubject && (
+                <div className="flex items-start gap-2 rounded-lg bg-flauzino-accent-50 px-3 py-2.5 text-sm text-flauzino-navy-900">
+                  <Clock size={15} className="mt-0.5 shrink-0 text-flauzino-accent-600" />
+                  <span>
+                    Vale <strong>{formatLessons(selectedSubject.lessonsPerSession)}</strong> e fecha
+                    sozinha após {formatDuration(selectedSubject.sessionDurationMin)}
+                    {startedAtValue && !Number.isNaN(new Date(startedAtValue).getTime()) && (
+                      <>
+                        , às{" "}
+                        <strong>
+                          {formatTime(
+                            new Date(
+                              new Date(startedAtValue).getTime() +
+                                selectedSubject.sessionDurationMin * 60_000
+                            ).toISOString()
+                          )}
+                        </strong>
+                      </>
+                    )}
+                    .
+                  </span>
+                </div>
+              )}
             </div>
           )}
         </form>
