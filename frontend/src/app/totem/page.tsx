@@ -215,10 +215,22 @@ export default function TotemPage() {
   );
 
   const handleCapture = useCallback(
-    async (imageB64: string) => {
+    async (imageB64: string, detectionMs: number) => {
       setProcessing(true);
+      // traceId amarra esta captura aos logs do backend e da engine —
+      // diagnóstico de latência ponta-a-ponta
+      const traceId =
+        typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+      const networkStart = performance.now();
       try {
-        const data = await deviceApi.recognize(imageB64);
+        const data = await deviceApi.recognize(imageB64, traceId);
+        const networkMs = performance.now() - networkStart;
+        console.debug("[totem:perf]", {
+          traceId,
+          status: data.status,
+          detectionMs: Math.round(detectionMs),
+          networkMs: Math.round(networkMs),
+        });
         presentResult(
           resultFor(
             data.status,
@@ -230,6 +242,13 @@ export default function TotemPage() {
           )
         );
       } catch (error) {
+        const networkMs = performance.now() - networkStart;
+        console.debug("[totem:perf:error]", {
+          traceId,
+          detectionMs: Math.round(detectionMs),
+          networkMs: Math.round(networkMs),
+          error: error instanceof Error ? error.message : String(error),
+        });
         if (error instanceof DeviceApiError && error.status === 401) {
           presentResult({
             kind: "error",

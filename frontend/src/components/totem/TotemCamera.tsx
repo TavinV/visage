@@ -42,7 +42,8 @@ interface TotemCameraProps {
   session: CurrentSession | null;
   processing: boolean;
   result: TotemResult | null;
-  onCapture: (imageB64: string) => void;
+  /** detectionMs: tempo desde a câmera ficar pronta (ou o último resultado) até a captura disparar. */
+  onCapture: (imageB64: string, detectionMs: number) => void;
   onClose: () => void;
 }
 
@@ -69,6 +70,8 @@ export function TotemCamera({
   const busyRef = useRef(false);
   const stableTicks = useRef(0);
   const lastLuminance = useRef<Uint8ClampedArray | null>(null);
+  /** Marca o início do ciclo de detecção atual — reseta quando a câmera fica pronta ou um resultado é exibido. */
+  const cycleStartRef = useRef(performance.now());
 
   const busy = processing || result !== null;
   const cameraError = camera.status === "error";
@@ -92,6 +95,11 @@ export function TotemCamera({
     return camera.stop;
   }, [camera.start, camera.stop]);
 
+  // Câmera pronta = início de um novo ciclo de detecção (diagnóstico de latência)
+  useEffect(() => {
+    if (camera.status === "ready") cycleStartRef.current = performance.now();
+  }, [camera.status]);
+
   // Contagem de inatividade — pausa durante processamento/resultado
   useEffect(() => {
     if (busy || cameraError) return;
@@ -113,6 +121,7 @@ export function TotemCamera({
     if (result) {
       setCountdown(IDLE_TIMEOUT_S);
       stableTicks.current = 0;
+      cycleStartRef.current = performance.now();
     }
   }, [result]);
 
@@ -184,8 +193,11 @@ export function TotemCamera({
       if (stableTicks.current < 2) return;
       stableTicks.current = 0;
 
-      const imageB64 = camera.captureJpegB64();
-      if (imageB64) onCapture(imageB64);
+      // 640px: a engine reduz a imagem para 640 no maior lado antes de
+      // detectar, então enviar mais que isso só custa upload e decode de
+      // pixels que serão descartados (medido: decode de até 96ms).
+      const imageB64 = camera.captureJpegB64(640, 0.85);
+      if (imageB64) onCapture(imageB64, performance.now() - cycleStartRef.current);
     } finally {
       busyRef.current = false;
     }

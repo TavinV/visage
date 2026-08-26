@@ -147,9 +147,11 @@ export interface CalibrationProgress {
 }
 
 export const deviceApi = {
-  recognize: (imageB64: string) =>
+  /** traceId (opcional) amarra os logs desta captura no backend e na engine. */
+  recognize: (imageB64: string, traceId?: string) =>
     deviceFetch<{ data: RecognizeResult }>("/device/recognize", {
       method: "POST",
+      headers: traceId ? { "X-Trace-Id": traceId } : undefined,
       body: JSON.stringify({ imageB64 }),
     }).then((r) => r.data),
 
