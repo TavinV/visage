@@ -15,6 +15,7 @@ import cv2
 import numpy as np
 from fastapi import APIRouter, File, UploadFile, HTTPException, status
 
+from app.core.config import settings
 from app.api.schemas import (
     CalibrationSampleResult,
     ThresholdAnalysis,
@@ -32,6 +33,14 @@ from app.api.schemas import (
 
 router = APIRouter(tags=["calibration"])
 
+# Faixa que o backend aceita para o limiar de vivacidade de um totem e do cadastro
+# (devices.service.ts LIVENESS_RANGE, enrollment.service.ts). Sugerir fora dela
+# faria o "Aplicar" falhar — ou, no cadastro, ser silenciosamente ajustado.
+LIVENESS_SUGGESTION_BOUNDS = (0.5, 0.95)
+
+# Folga abaixo do pior score real para o limiar de cadastro
+ENROLLMENT_LIVENESS_MARGIN = 0.02
+
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -42,6 +51,8 @@ def _find_optimal_threshold(
     attack_scores: list[float],
     direction: Literal['higher_is_real', 'lower_is_real'],
     genuine_bias: float = 0.05,
+    prefer: Optional[float] = None,
+    bounds: Optional[tuple[float, float]] = None,
 ) -> tuple[float, float, float, float]:
     """
     Encontra threshold usando EER (Equal Error Rate) — padrão biométrico ISO/IEC 19795.
@@ -62,6 +73,8 @@ def _find_optimal_threshold(
         attack_scores: Scores/distâncias de ataques/impostores
         direction:     'higher_is_real' para liveness; 'lower_is_real' para distâncias L2
         genuine_bias:  Quanto FAR pode aumentar acima do EER para aceitar mais reais (padrão 5%)
+        prefer:        Valor preferido dentro do intervalo de limiares equivalentes (ver _centralize_threshold)
+        bounds:        (mín, máx) que o limiar sugerido precisa respeitar para ser aplicável
 
     Returns:
         (threshold, real_pass_rate, attack_block_rate, youden_score)
@@ -126,8 +139,63 @@ def _find_optimal_threshold(
                 best_attack_block = 1.0 - far_t
                 break
 
+    # --- Passo 3: tirar o limiar da beirada ---
+    # FAR/FRR só mudam quando o limiar cruza um score observado. Qualquer valor entre
+    # dois scores vizinhos dá exatamente as mesmas taxas — e a varredura acima sempre
+    # para na ponta do intervalo, colada num ataque (ou num real) da amostra. Com um
+    # único ataque de score 0.0002 isso sugeria vivacidade 0.00: passa qualquer coisa.
+    best_threshold = _centralize_threshold(
+        best_threshold, real_arr, attack_arr, direction, prefer
+    )
+
+    if bounds is not None:
+        best_threshold = min(max(best_threshold, bounds[0]), bounds[1])
+
+    if direction == 'higher_is_real':
+        best_real_pass = float(np.mean(real_arr >= best_threshold))
+        best_attack_block = 1.0 - float(np.mean(attack_arr >= best_threshold))
+    else:
+        best_real_pass = float(np.mean(real_arr <= best_threshold))
+        best_attack_block = 1.0 - float(np.mean(attack_arr <= best_threshold))
+
     youden = best_real_pass + best_attack_block - 1.0
     return best_threshold, best_real_pass, best_attack_block, youden
+
+
+def _centralize_threshold(
+    threshold: float,
+    real_arr: np.ndarray,
+    attack_arr: np.ndarray,
+    direction: Literal['higher_is_real', 'lower_is_real'],
+    prefer: Optional[float],
+) -> float:
+    """
+    Move o limiar para dentro do intervalo entre os dois scores observados que o
+    cercam, sem alterar quem passa e quem é barrado.
+
+    Se `prefer` (ex.: o padrão da engine) cabe no intervalo, usa ele — a calibração
+    só afrouxa a proteção quando os dados exigem. Senão, usa o ponto médio.
+    """
+    observed = np.unique(np.concatenate([real_arr, attack_arr]))
+
+    if direction == 'higher_is_real':
+        # passa quem tem score >= t: t ∈ (abaixo, acima] dá o mesmo resultado
+        below = observed[observed < threshold]
+        above = observed[observed >= threshold]
+        if below.size == 0 or above.size == 0:
+            return threshold
+        lo, hi = float(below.max()), float(above.min())
+    else:
+        # passa quem tem score <= t: t ∈ [abaixo, acima) dá o mesmo resultado
+        below = observed[observed <= threshold]
+        above = observed[observed > threshold]
+        if below.size == 0 or above.size == 0:
+            return threshold
+        lo, hi = float(below.max()), float(above.min())
+
+    if prefer is not None and lo < prefer < hi:
+        return float(prefer)
+    return (lo + hi) / 2.0
 
 
 def _confidence_level(n_real: int, n_attack: int) -> Literal['low', 'medium', 'high']:
@@ -425,13 +493,26 @@ async def calibrate(
 
     # Encontrar thresholds ótimos
     liveness_threshold, liveness_real_pass, liveness_attack_block, liveness_youden = \
-        _find_optimal_threshold(real_liveness_scores, attack_liveness_scores, 'higher_is_real')
+        _find_optimal_threshold(
+            real_liveness_scores,
+            attack_liveness_scores,
+            'higher_is_real',
+            prefer=settings.liveness_threshold,
+            bounds=LIVENESS_SUGGESTION_BOUNDS,
+        )
 
-    # Threshold de cadastro (mais rigoroso): média dos scores reais + margem fixa.
-    # O cadastro exige qualidade melhor que o reconhecimento do dia a dia — em vez do
-    # EER, usa a média de quem realmente passou na captura como piso e soma 0.15.
+    # Threshold de cadastro (mais rigoroso que o do dia a dia): o cadastro grava o
+    # embedding de referência, então vale exigir uma captura melhor. Mas precisa ser
+    # atingível — fica logo abaixo do pior score real da amostra (todo mundo que foi
+    # calibrado passaria), nunca abaixo do limiar do dia a dia.
     liveness_enrollment_suggested = float(
-        min(1.0, np.mean(real_liveness_scores) + 0.15)
+        min(
+            LIVENESS_SUGGESTION_BOUNDS[1],
+            max(
+                liveness_threshold,
+                min(real_liveness_scores) - ENROLLMENT_LIVENESS_MARGIN,
+            ),
+        )
     )
 
     hsv_threshold, hsv_real_pass, hsv_attack_block, hsv_youden = \
