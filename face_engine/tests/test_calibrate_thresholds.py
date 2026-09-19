@@ -8,16 +8,28 @@ qualquer coisa — e o cadastro sugerido saía como 1.00, que nenhum rosto real 
 Numpy puro: não carrega modelo ONNX.
 """
 
+import os
+from unittest import mock
+
 import pytest
 
 pytest.importorskip("fastapi")
 pytest.importorskip("cv2")
 
-from app.api.routes.calibrate import (  # noqa: E402
-    ENROLLMENT_LIVENESS_MARGIN,
-    LIVENESS_SUGGESTION_BOUNDS,
-    _find_optimal_threshold,
-)
+# app.core.config valida MASTER_KEY/ENGINE_API_KEY ao ser importado e o CI não tem
+# .env. Valores fictícios só durante o import — depois restaura o ambiente, para
+# não fazer os testes de integração acharem que há uma ENGINE_API_KEY real.
+_env_ficticio = {
+    chave: valor
+    for chave, valor in {"MASTER_KEY": "0" * 64, "ENGINE_API_KEY": "teste"}.items()
+    if chave not in os.environ
+}
+with mock.patch.dict(os.environ, _env_ficticio):
+    from app.api.routes.calibrate import (  # noqa: E402
+        ENROLLMENT_LIVENESS_MARGIN,
+        LIVENESS_SUGGESTION_BOUNDS,
+        _find_optimal_threshold,
+    )
 
 pytestmark = pytest.mark.unit
 
