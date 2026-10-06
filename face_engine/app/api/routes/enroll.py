@@ -4,9 +4,12 @@ Rotas POST /enroll/frame e POST /enroll/finalize.
 Fluxo de cadastro biométrico via QR Code (consumido pelo Node.js):
 
   /enroll/frame — pipeline MAIS RIGOROSO que /recognize:
-    - SCRFD com det_score >= 0.80 (vs 0.75 no reconhecimento; 0.85 rejeitava
-      demais com webcams de notebook — o det_score do SCRFD cai para a faixa
-      0.78–0.84 com pouca luz/compressão, e o frame ainda gera bom embedding)
+    - SCRFD com det_score >= 0.75 por padrão; o Node manda um mínimo menor
+      nas fotos de rosto virado. O det_score é a confiança de que HÁ um rosto,
+      não uma medida de nitidez: o buffalo_s (det_500m, entrada 320) dá
+      0.74–0.85 a rostos frontais bem iluminados conforme a pessoa, e cai
+      0.05–0.15 com a cabeça virada. Com 0.80 algumas pessoas não conseguiam
+      se cadastrar em nenhuma luz.
     - Liveness com threshold de enrollment (default 0.90, vs 0.85)
     - Exatamente UMA face no frame
     Frame aprovado retorna o embedding cifrado individualmente com a DEK
@@ -36,7 +39,7 @@ from app.core.logging import logger
 router = APIRouter(tags=["enrollment"], prefix="/enroll")
 
 # Thresholds de cadastro — mais rigorosos que o reconhecimento
-ENROLLMENT_DET_SCORE_MIN = 0.80
+ENROLLMENT_DET_SCORE_MIN = 0.75
 ENROLLMENT_LIVENESS_THRESHOLD_DEFAULT = 0.90
 
 
@@ -91,7 +94,7 @@ async def enroll_frame(
     """
     Processa um frame individual do fluxo de cadastro.
 
-    Pipeline: decodificar → SCRFD (det >= 0.80, exatamente 1 face) →
+    Pipeline: decodificar → SCRFD (det >= mínimo, exatamente 1 face) →
     liveness (threshold de enrollment) → ArcFace → cifrar com DEK do tenant.
 
     Frames rejeitados retornam HTTP 200 com status explicativo — o totem
@@ -135,7 +138,7 @@ async def enroll_frame(
         return int((time.time() - start_time) * 1000)
 
     # ------------------------------------------------------------------
-    # Detecção com threshold de enrollment (0.80 vs 0.75 do reconhecimento)
+    # Detecção com o mínimo de cadastro (padrão 0.75; menor no rosto virado)
     # ------------------------------------------------------------------
     all_faces = face_detector.detect_all_faces(
         image_array, min_det_score=effective_det_score_min
@@ -145,8 +148,9 @@ async def enroll_frame(
         # Distinguir "sem face" de "face com score baixo" para feedback melhor
         relaxed = face_detector.detect_all_faces(image_array, min_det_score=0.5)
         reason = "low_detection_score" if len(relaxed) > 0 else "no_face_detected"
+        best_relaxed: Optional[float] = None
         if reason == "low_detection_score":
-            best_relaxed = max(f.get("det_score", 0.0) for f in relaxed)
+            best_relaxed = max(float(f.get("det_score", 0.0)) for f in relaxed)
             logger.info(
                 "enroll[%s]: LOW_DETECTION_SCORE — melhor face %.3f < mínimo %.2f",
                 tenant_id, best_relaxed, effective_det_score_min,
@@ -156,7 +160,12 @@ async def enroll_frame(
                 "enroll[%s]: NO_FACE — nenhuma face nem com det_score 0.5",
                 tenant_id,
             )
-        return EnrollFrameResponse(status=reason, processing_ms=elapsed_ms())
+        # Score medido volta na resposta para o Node registrar e calibrar o corte
+        return EnrollFrameResponse(
+            status=reason,
+            detection_score=best_relaxed,
+            processing_ms=elapsed_ms(),
+        )
 
     if len(all_faces) > 1:
         logger.info(

@@ -213,7 +213,9 @@ export function EnrollmentWizard({ identification, onExit }: EnrollmentWizardPro
           setCaptureFeedback(null);
           return;
         }
-        if (ratio > 0.46) {
+        // Teto 0.38: acima de ~40% da largura o detector da engine perde
+        // confiança e recusa a foto como "pouco nítida"
+        if (ratio > 0.38) {
           stableTicks.current = 0;
           setFraming("close");
           setCaptureFeedback(null);

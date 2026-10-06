@@ -27,8 +27,8 @@ export function useTotemCamera() {
     setStatus("starting");
     try {
       // 1080p ideal: navegadores degradam sozinhos, e partir de um frame
-      // maior deixa a captura reduzida bem mais nítida (menos rejeição
-      // por low_detection_score no cadastro)
+      // maior deixa a captura reduzida mais nítida para o embedding. Não
+      // afeta o low_detection_score: a engine detecta em 320px de qualquer jeito
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "user", width: { ideal: 1920 }, height: { ideal: 1080 } },
       });

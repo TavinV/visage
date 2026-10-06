@@ -186,13 +186,15 @@ export async function engineRecognize(params: {
 }
 
 /**
- * POST /enroll/frame — pipeline rigoroso do cadastro (det ≥ 0.85, liveness ≥ 0.90).
+ * POST /enroll/frame — pipeline rigoroso do cadastro (det ≥ mínimo da pose,
+ * liveness ≥ 0.90). Sem detectionScoreMin a engine usa 0.75.
  */
 export async function engineEnrollFrame(params: {
   tenantId: string;
   imageJpeg: Buffer;
   dek: EncryptedDekPayload;
   livenessThresholdEnrollment?: number;
+  detectionScoreMin?: number;
 }): Promise<EngineEnrollFrameResult> {
   const form = new FormData();
   form.append("tenant_id", params.tenantId);
@@ -200,6 +202,9 @@ export async function engineEnrollFrame(params: {
   appendDekFields(form, params.dek);
   if (params.livenessThresholdEnrollment !== undefined) {
     form.append("liveness_threshold", String(params.livenessThresholdEnrollment));
+  }
+  if (params.detectionScoreMin !== undefined) {
+    form.append("detection_score_min", String(params.detectionScoreMin));
   }
 
   return (await engineFetch("/enroll/frame", { method: "POST", body: form })) as EngineEnrollFrameResult;

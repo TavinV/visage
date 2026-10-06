@@ -10,7 +10,8 @@
  *      Se expirar, o próximo request falha com ENROLLMENT_SESSION_EXPIRED.
  *   3. Consentimento LGPD registrado em biometric_consents antes de qualquer
  *      captura (quando requireConsentBeforeFacial está ligado).
- *   4. Frames passam pela engine com pipeline rigoroso (det ≥ 0.80,
+ *   4. Frames passam pela engine com pipeline rigoroso (det ≥ 0.75 na foto
+ *      frontal e 0.68 nas viradas — ver utils/enrollmentPose —, mais
  *      liveness_threshold_enrollment). Embeddings retornam cifrados.
  *   5. Finalize: engine calcula média vetorial + L2 e devolve o embedding
  *      consolidado cifrado, persistido em facial_embeddings.
@@ -32,6 +33,7 @@ import {
   engineInvalidateEmbedding,
 } from "../lib/faceEngine";
 import { auditService } from "./audit.service";
+import { enrollmentPose, enrollmentDetScoreMin } from "../utils/enrollmentPose";
 
 // Versão do texto de consentimento LGPD exibido no totem (rastreabilidade)
 export const CONSENT_TEXT_VERSION = "v1.0";
@@ -339,14 +341,33 @@ class EnrollmentService extends BaseService {
     const imageJpeg = this.decodeImage(imageB64);
     const dek = await getTenantDekPayload(tenantId);
 
+    const pose = enrollmentPose(session.frames.length);
+    const detectionScoreMin = enrollmentDetScoreMin(session.frames.length);
+
     const result = await engineEnrollFrame({
       tenantId,
       imageJpeg,
       dek,
       livenessThresholdEnrollment: session.livenessThresholdEnrollment,
+      detectionScoreMin,
     });
 
     if (result.status !== "frame_accepted" || !result.embedding_iv || !result.embedding_tag || !result.embedding_ct) {
+      // Score medido x corte, por pose — base para recalibrar os mínimos
+      // com dados reais das escolas
+      this.logger.info(
+        {
+          tenantId,
+          userId: session.userId,
+          frameIndex: session.frames.length,
+          pose,
+          reason: result.status,
+          detectionScore: result.detection_score ?? null,
+          detectionScoreMin,
+          livenessScore: result.liveness_score ?? null,
+        },
+        "Enrollment frame rejected"
+      );
       // Frame rejeitado — totem exibe feedback vermelho e re-tenta
       return {
         accepted: false,
