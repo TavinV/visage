@@ -1,10 +1,15 @@
-FROM python:3.11-bullseye
+# Bookworm: o bullseye saiu do LTS (ago/2026) e o espelho de segurança passou
+# a dar 404 nos pacotes do mesa, quebrando o build
+FROM python:3.11-bookworm
 
 WORKDIR /app
 
-# Instalar dependências do sistema necessárias para OpenCV e InsightFace
+# Instalar dependências do sistema necessárias para OpenCV e InsightFace.
+# libgl1 (no bookworm substitui o libgl1-mesa-glx): o insightface puxa o
+# opencv-python não-headless, que carrega libGL.so.1 no import
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgl1-mesa-glx \
+    libgl1 \
+    libglib2.0-0 \
     libsm6 \
     libxext6 \
     libxrender-dev \
