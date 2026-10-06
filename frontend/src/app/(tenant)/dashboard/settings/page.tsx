@@ -10,6 +10,7 @@ import {
   Fingerprint,
   MonitorSmartphone,
   Image as ImageIcon,
+  Play,
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
@@ -32,8 +33,10 @@ import {
   useToast,
 } from "@/components/ui";
 import { PhotoUpload } from "@/components/app/PhotoUpload";
+import { TOTEM_VOICES, totemAudio, voiceCueUrl } from "@/components/totem/totemAudio";
 import { useAuthenticatedImage } from "@/lib/useAuthenticatedImage";
 import { useAuth } from "@/lib/auth";
+import { cn } from "@/lib/cn";
 
 // O backend não impõe teto — o limiar de reconhecimento pode passar de 1
 // (escala de distância, ex.: 1.1 com thresholds dinâmicos).
@@ -63,6 +66,8 @@ const SettingsSchema = z.object({
   livenessThresholdEnrollment: threshold("o limiar de vivacidade do cadastro"),
   totemPanelPassword: z.string().max(200, "Máximo de 200 caracteres.").optional().or(z.literal("")),
   totemClockTimezone: z.string(),
+  totemAudioEnabled: z.boolean(),
+  totemVoice: z.enum(["telma", "eduardo"]),
   studentIdentification: z.enum(["cpf", "enrollment_code", "both"]),
   totemIdentification: z.enum(["cpf", "enrollment_code", "any"]),
   validateCpf: z.boolean(),
@@ -134,6 +139,8 @@ export default function SettingsPage() {
       livenessThresholdEnrollment: s.livenessThresholdEnrollment,
       totemPanelPassword: s.totemPanelPassword ?? "",
       totemClockTimezone: s.totemClockTimezone ?? "local",
+      totemAudioEnabled: s.totemAudioEnabled ?? false,
+      totemVoice: s.totemVoice ?? "telma",
       studentIdentification: s.studentIdentification ?? "cpf",
       totemIdentification: s.totemIdentification ?? "cpf",
       validateCpf: s.validateCpf ?? true,
@@ -154,6 +161,12 @@ export default function SettingsPage() {
       form.setValue("totemIdentification", "enrollment_code");
     }
   }, [studentIdentification, form]);
+
+  const audioEnabled = form.watch("totemAudioEnabled");
+  const selectedVoice = form.watch("totemVoice");
+
+  // Prévia tocando quando o admin sai da página não segue nas outras telas
+  useEffect(() => () => totemAudio.stop(), []);
 
   const save = useMutation({
     mutationFn: (v: SettingsForm) =>
@@ -416,7 +429,7 @@ export default function SettingsPage() {
         <Card className="xl:col-span-2">
           <CardHeader
             title="Totem"
-            description="Comportamento dos dispositivos de parede: relógio e painel oculto."
+            description="Comportamento dos dispositivos de parede: relógio, painel oculto e áudio."
             icon={<MonitorSmartphone size={18} strokeWidth={1.75} />}
           />
           <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -440,6 +453,82 @@ export default function SettingsPage() {
               error={errors.totemClockTimezone?.message}
               {...form.register("totemClockTimezone")}
             />
+
+            <div className="flex flex-col gap-4 border-t border-flauzino-slate-200 pt-4 sm:col-span-2">
+              <Switch
+                label="Usar áudio nos totens"
+                hint="O totem fala as orientações do cadastro e confirma quando a biometria é cadastrada ou removida. Desligado, ficam só os bipes de sempre."
+                {...form.register("totemAudioEnabled")}
+              />
+
+              {audioEnabled && (
+                <fieldset className="flex flex-col gap-2">
+                  <legend className="mb-2 text-sm font-medium text-flauzino-navy-900">
+                    Voz do totem
+                  </legend>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {TOTEM_VOICES.map((voice) => {
+                      const selected = selectedVoice === voice.value;
+                      return (
+                        <div
+                          key={voice.value}
+                          className={cn(
+                            "flex items-center gap-3 rounded-xl border px-4 py-3 transition-colors",
+                            selected
+                              ? "border-flauzino-accent-500 bg-flauzino-accent-50"
+                              : "border-flauzino-slate-200 bg-white hover:border-flauzino-slate-300"
+                          )}
+                        >
+                          <label className="flex flex-1 cursor-pointer items-center gap-3">
+                            <span className="relative inline-flex">
+                              <input
+                                type="radio"
+                                value={voice.value}
+                                className="peer sr-only"
+                                {...form.register("totemVoice")}
+                              />
+                              <span
+                                aria-hidden="true"
+                                className="flex h-[18px] w-[18px] items-center justify-center rounded-full border border-flauzino-slate-300 bg-white transition-colors peer-checked:border-flauzino-accent-600 peer-focus-visible:shadow-fl-focus"
+                              >
+                                <span
+                                  className={cn(
+                                    "h-2 w-2 rounded-full transition-colors",
+                                    selected ? "bg-flauzino-accent-600" : "bg-transparent"
+                                  )}
+                                />
+                              </span>
+                            </span>
+                            <span className="flex flex-col gap-0.5">
+                              <span className="text-sm font-medium text-flauzino-navy-900">
+                                {voice.label}
+                              </span>
+                              <span className="text-xs text-flauzino-slate-500">
+                                {voice.description}
+                              </span>
+                            </span>
+                          </label>
+                          {/* Mesmo player do totem: uma prévia interrompe a outra */}
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            iconLeft={<Play size={12} strokeWidth={2} />}
+                            aria-label={`Ouvir a voz ${voice.label}`}
+                            onClick={() =>
+                              totemAudio.play(
+                                voiceCueUrl(voice.value, "reconhecimento_facial_cadastrado")
+                              )
+                            }
+                          >
+                            Ouvir
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </fieldset>
+              )}
+            </div>
           </CardBody>
         </Card>
       </div>

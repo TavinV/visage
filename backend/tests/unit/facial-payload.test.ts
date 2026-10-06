@@ -22,6 +22,7 @@ vi.mock("../../src/lib/prisma", () => ({ prisma: mocks.prisma, disconnectPrisma:
 import {
   getCandidatesForClass,
   getCandidatesForLocation,
+  getCandidatesForUser,
   getTenantDekPayload,
 } from "../../src/services/facial-payload";
 import { NotFoundError } from "../../src/utils/errors";
@@ -49,6 +50,20 @@ describe("facial-payload — isolamento multi-tenant", () => {
     expect(args.where.tenantId).toBe("tenant-b");
     expect(args.where.user.facialStatus).toBe("registered");
     expect(args.where.user.classEnrollments.some.class.locationId).toBe("location-9");
+  });
+
+  it("getCandidatesForUser traz só a biometria daquele aluno, na instituição dele", async () => {
+    await getCandidatesForUser("tenant-a", "student-1");
+
+    const args = mocks.prisma.facialEmbedding.findMany.mock.calls[0][0] as any;
+    expect(args.where).toEqual({
+      tenantId: "tenant-a",
+      userId: "student-1",
+      user: { tenantId: "tenant-a" },
+    });
+    // Confere o dono antes de apagar, inclusive cadastro anterior guardado
+    // durante um recadastro interrompido — por isso sem filtro de status
+    expect(args.where.user.facialStatus).toBeUndefined();
   });
 
   it("candidatos saem em hex com person_id = userId (nunca bytes crus)", async () => {

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ScanFace, UserPlus, KeyRound } from "lucide-react";
+import { ScanFace, UserPlus, KeyRound, Trash2 } from "lucide-react";
 import { Logo } from "@/components/ui/Logo";
 import {
   deviceApi,
@@ -17,13 +17,15 @@ import { TotemClock } from "@/components/totem/TotemClock";
 import { DeviceKeyModal } from "@/components/totem/DeviceKeyModal";
 import { PanelPasswordModal } from "@/components/totem/PanelPasswordModal";
 import { EnrollmentWizard } from "@/components/totem/EnrollmentWizard";
+import { BiometricErasureWizard } from "@/components/totem/BiometricErasureWizard";
 import { CalibrationMode } from "@/components/totem/CalibrationMode";
 import { useTotemSounds } from "@/components/totem/useTotemSounds";
+import { totemAudio } from "@/components/totem/totemAudio";
 import type { TotemResult } from "@/components/totem/TotemStage";
 
 const RESULT_DURATION_MS = 3400;
 
-type Mode = "idle" | "attendance" | "enroll" | "calibration";
+type Mode = "idle" | "attendance" | "enroll" | "erase" | "calibration";
 
 function resultFor(
   status: string,
@@ -141,6 +143,11 @@ export default function TotemPage() {
       cancelled = true;
     };
   }, [hasKey]);
+
+  // Falas do totem seguem a instituição — sem contexto, só os bipes
+  useEffect(() => {
+    totemAudio.configure(context?.audio ?? null);
+  }, [context]);
 
   // Sessão aberta na sala do totem — sonda a cada 25s
   useEffect(() => {
@@ -369,6 +376,19 @@ export default function TotemPage() {
                 </button>
               )}
 
+              {/* Discreto de propósito: é um direito do aluno, não uma ação do
+                  dia a dia — só texto, sem cor de alerta */}
+              {hasKey && context && (
+                <button
+                  type="button"
+                  onClick={() => requireKey(() => setMode("erase"))}
+                  className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-flauzino-slate-400 transition-colors hover:text-flauzino-slate-600 focus-visible:outline-none focus-visible:shadow-fl-focus"
+                >
+                  <Trash2 size={13} strokeWidth={1.75} />
+                  Excluir dados biométricos
+                </button>
+              )}
+
               <p className="text-xs tracking-wide text-flauzino-slate-400">
                 Desenvolvido pela Flauzino · Feito para confiar.
               </p>
@@ -402,6 +422,16 @@ export default function TotemPage() {
       <AnimatePresence>
         {mode === "enroll" && (
           <EnrollmentWizard
+            identification={context?.totemIdentification ?? "cpf"}
+            onExit={() => setMode("idle")}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Modo exclusão da biometria pelo próprio aluno */}
+      <AnimatePresence>
+        {mode === "erase" && (
+          <BiometricErasureWizard
             identification={context?.totemIdentification ?? "cpf"}
             onExit={() => setMode("idle")}
           />

@@ -10,6 +10,7 @@ import {
   type StudentIdentification,
   type TotemIdentification,
 } from "../utils/identification";
+import { resolveTotemAudio, type TotemVoice } from "../utils/totemAudio";
 import { auditService } from "./audit.service";
 
 /**
@@ -34,6 +35,8 @@ const AUDITED_SETTINGS_FIELDS = [
   "livenessThresholdEnrollment",
   "totemPanelPassword",
   "totemClockTimezone",
+  "totemAudioEnabled",
+  "totemVoice",
   "studentIdentification",
   "totemIdentification",
   "validateCpf",
@@ -57,6 +60,8 @@ export interface UpdateTenantSettingsInput {
   livenessThresholdEnrollment?: number;
   totemPanelPassword?: string | null;
   totemClockTimezone?: string;
+  totemAudioEnabled?: boolean;
+  totemVoice?: TotemVoice;
   studentIdentification?: StudentIdentification;
   totemIdentification?: TotemIdentification;
   validateCpf?: boolean;
@@ -79,6 +84,9 @@ export interface TenantSettingsOutput {
   livenessThresholdEnrollment: number;
   totemPanelPassword: string | null;
   totemClockTimezone: string;
+  /** Totens falam as orientações e confirmações (além dos bipes). */
+  totemAudioEnabled: boolean;
+  totemVoice: TotemVoice;
   /** Identificadores registrados no cadastro do aluno. */
   studentIdentification: StudentIdentification;
   /** O que o aluno digita no totem — já ajustado ao que é registrado. */
@@ -140,6 +148,8 @@ class TenantSettingsService extends BaseService {
         ...(input.livenessThresholdEnrollment !== undefined && { livenessThresholdEnrollment: input.livenessThresholdEnrollment }),
         ...(input.totemPanelPassword !== undefined && { totemPanelPassword: input.totemPanelPassword }),
         ...(input.totemClockTimezone !== undefined && { totemClockTimezone: input.totemClockTimezone }),
+        ...(input.totemAudioEnabled !== undefined && { totemAudioEnabled: input.totemAudioEnabled }),
+        ...(input.totemVoice !== undefined && { totemVoice: input.totemVoice }),
         ...(input.studentIdentification !== undefined && { studentIdentification: input.studentIdentification }),
         ...(input.totemIdentification !== undefined && { totemIdentification: input.totemIdentification }),
         ...(input.validateCpf !== undefined && { validateCpf: input.validateCpf }),
@@ -169,6 +179,7 @@ class TenantSettingsService extends BaseService {
     // Sai já normalizada: o painel e o totem leem o modo efetivo, nunca uma
     // combinação impossível (ex.: totem pedindo CPF numa escola sem CPF)
     const identification = resolveIdentification(settings);
+    const audio = resolveTotemAudio(settings);
     return {
       tenantId: settings.tenantId,
       recognitionThreshold: settings.recognitionThreshold,
@@ -186,6 +197,8 @@ class TenantSettingsService extends BaseService {
       livenessThresholdEnrollment: settings.livenessThresholdEnrollment,
       totemPanelPassword: settings.totemPanelPassword ?? null,
       totemClockTimezone: settings.totemClockTimezone ?? "local",
+      totemAudioEnabled: audio.enabled,
+      totemVoice: audio.voice,
       studentIdentification: identification.studentIdentification,
       totemIdentification: identification.totemIdentification,
       validateCpf: identification.validateCpf,

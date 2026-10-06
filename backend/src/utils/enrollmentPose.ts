@@ -3,7 +3,7 @@
  * exige dela.
  *
  * O totem alterna as instruções na ordem frontal → direita → esquerda
- * (frontend/src/components/totem/EnrollmentWizard.tsx, captureInstructions),
+ * (frontend/src/components/totem/captureGuide.ts, CAPTURE_POSES),
  * indexadas pelos frames já aceitos — a mesma contagem que a sessão guarda.
  *
  * O det_score do SCRFD é a confiança de que há um rosto, não nitidez: rostos

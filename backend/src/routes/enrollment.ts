@@ -1,5 +1,6 @@
 /**
- * Enrollment Routes — Fluxo de cadastro biométrico no totem
+ * Enrollment Routes — Fluxo de cadastro biométrico no totem (e a exclusão
+ * dele pelo próprio aluno, em /erasure/*)
  *
  * Todas as rotas são autenticadas por X-Device-Key (deviceAuth): o totem é
  * o único cliente deste fluxo. A sessão de cadastro vive no Redis (TTL 10min)
@@ -45,9 +46,20 @@ export default function createEnrollmentRouter(): Router {
     imageB64: z.string().min(100),
   });
 
+  // Rotas novas: só `identifier` (o alias `document` existe pelos totens antigos)
+  const ErasureLookupSchema = z.object({
+    identifier: z.string().min(3).max(50),
+  });
+
+  const ErasureConfirmSchema = ErasureLookupSchema.extend({
+    imageB64: z.string().min(100),
+  });
+
   type IdentifierRequest = z.infer<typeof IdentifierSchema>;
   type SessionRequest = z.infer<typeof SessionSchema>;
   type FrameRequest = z.infer<typeof FrameSchema>;
+  type ErasureLookupRequest = z.infer<typeof ErasureLookupSchema>;
+  type ErasureConfirmRequest = z.infer<typeof ErasureConfirmSchema>;
 
   /**
    * POST /enrollment/lookup
@@ -167,6 +179,54 @@ export default function createEnrollmentRouter(): Router {
         const { tenantId } = req.device!;
         const result = await enrollmentService.finalize(tenantId, req.body.sessionId);
         res.status(201).json({ data: result });
+      } catch (error) {
+        next(error);
+      }
+    }
+  );
+
+  /**
+   * POST /enrollment/erasure/lookup
+   * Exclusão da biometria pelo próprio aluno: acha o cadastro pelo CPF ou
+   * matrícula e confirma que há o que apagar. Mesmo limiter do lookup do
+   * cadastro — é o mesmo oráculo de identificador.
+   */
+  router.post(
+    "/erasure/lookup",
+    lookupLimiter,
+    validate(ErasureLookupSchema),
+    async (req: Request<{}, {}, ErasureLookupRequest>, res: Response, next: NextFunction) => {
+      try {
+        const { tenantId } = req.device!;
+        const result = await enrollmentService.lookupForErasure(tenantId, req.body.identifier);
+        res.json({ data: result });
+      } catch (error) {
+        next(error);
+      }
+    }
+  );
+
+  /**
+   * POST /enrollment/erasure/confirm
+   * Reconhecimento 1:1 contra a biometria do próprio aluno — só apaga se o
+   * rosto conferir. Também identifica o aluno pelo identificador, então fica
+   * no mesmo limiter do lookup: com um teto maior, viraria o atalho do
+   * oráculo de CPF.
+   */
+  router.post(
+    "/erasure/confirm",
+    lookupLimiter,
+    validate(ErasureConfirmSchema),
+    async (req: Request<{}, {}, ErasureConfirmRequest>, res: Response, next: NextFunction) => {
+      try {
+        const { tenantId, deviceId } = req.device!;
+        const result = await enrollmentService.confirmErasure(
+          tenantId,
+          deviceId,
+          req.body.identifier,
+          req.body.imageB64
+        );
+        res.json({ data: result });
       } catch (error) {
         next(error);
       }

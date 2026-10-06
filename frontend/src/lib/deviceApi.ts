@@ -5,6 +5,7 @@
  */
 
 import { API_URL } from "./api";
+import type { TotemVoice } from "./types";
 
 const DEVICE_KEY = "visage.deviceKey";
 
@@ -83,6 +84,12 @@ export interface CurrentSession {
 /** O que o aluno digita no totem — definido em Configurações. */
 export type TotemIdentification = "cpf" | "enrollment_code" | "any";
 
+/** Falas do totem, definidas em Configurações. */
+export interface TotemAudioSettings {
+  enabled: boolean;
+  voice: TotemVoice;
+}
+
 export interface DeviceContext {
   tenantName: string;
   deviceLabel: string | null;
@@ -93,6 +100,8 @@ export interface DeviceContext {
   allowEnrollment: boolean;
   /** Identificador pedido na primeira tela do cadastro. */
   totemIdentification: TotemIdentification;
+  /** Ausente em backend anterior às falas — o totem trata como desligado. */
+  audio?: TotemAudioSettings;
 }
 
 export interface EnrollmentLookup {
@@ -119,6 +128,19 @@ export interface EnrollmentFrameResult {
   framesCollected: number;
   requiredFrames: number;
   completed: boolean;
+}
+
+export interface ErasureLookup {
+  /** Só o primeiro nome — quem protege contra o cadastro errado é o rosto. */
+  firstName: string;
+}
+
+export interface ErasureConfirmResult {
+  erased: boolean;
+  /** Por que não apagou: enquadramento (não gasta tentativa) ou identidade. */
+  reason?: "no_face_detected" | "multiple_faces_detected" | "face_mismatch" | "liveness_failed";
+  /** Confirmações que restam antes do bloqueio temporário. */
+  attemptsLeft?: number;
 }
 
 export type CalibrationPhase = "genuine" | "impostor" | "attack" | "done";
@@ -199,6 +221,21 @@ export const deviceApi = {
     deviceFetch<{ data: { userId: string; framesUsed: number } }>("/enrollment/finalize", {
       method: "POST",
       body: JSON.stringify({ sessionId }),
+    }).then((r) => r.data),
+
+  // ── Exclusão da biometria pelo próprio aluno ───────────────────────────────
+
+  erasureLookup: (identifier: string) =>
+    deviceFetch<{ data: ErasureLookup }>("/enrollment/erasure/lookup", {
+      method: "POST",
+      body: JSON.stringify({ identifier }),
+    }).then((r) => r.data),
+
+  /** Só apaga se o rosto deste frame conferir com a biometria do aluno. */
+  erasureConfirm: (identifier: string, imageB64: string) =>
+    deviceFetch<{ data: ErasureConfirmResult }>("/enrollment/erasure/confirm", {
+      method: "POST",
+      body: JSON.stringify({ identifier, imageB64 }),
     }).then((r) => r.data),
 
   // ── Calibração guiada (Youden na engine) ───────────────────────────────────

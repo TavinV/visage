@@ -115,6 +115,13 @@ model TenantSettings {
   // Fuso do relógio exibido no totem: "local" (dispositivo) ou IANA tz
   // (ex.: "America/Sao_Paulo" para horário de Brasília)
   totemClockTimezone String  @default("local")
+  // Falas do totem (orientação do rosto no cadastro, confirmação de cadastro e
+  // de exclusão da biometria). Desligado por padrão: o totem fica só com os
+  // bipes de sucesso/erro de sempre.
+  totemAudioEnabled  Boolean @default(false)
+  // Voz das falas: 'telma' | 'eduardo' — mesmo nome da pasta em
+  // frontend/public/audio/
+  totemVoice         String  @default("telma") @db.VarChar(20)
 
   updatedAt DateTime @updatedAt @db.Timestamptz()
 

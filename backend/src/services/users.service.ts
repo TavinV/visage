@@ -600,11 +600,17 @@ class UsersService extends BaseService {
    *     ação separada (ver delete()).
    *   - biometric_consents são revogados mas MANTIDOS como evidência legal
    *     de que houve consentimento e de quando foi revogado.
+   *
+   * Dois caminhos chegam aqui: o admin no console (DELETE /users/:id/data) e o
+   * próprio aluno no totem, depois de confirmar o rosto (ver
+   * enrollment.service → confirmErasure). `audit` descreve o segundo na
+   * trilha; a exclusão em si é a mesma.
    */
   async eraseUserData(
     userId: string,
     tenantId: string,
-    requestedById: string
+    requestedById: string,
+    audit?: { details: string; metadata?: Record<string, unknown> }
   ): Promise<void> {
     const user = await this.prisma.user.findFirst({
       where: { id: userId, tenantId },
@@ -636,13 +642,16 @@ class UsersService extends BaseService {
       beforeState: { facialStatus: user.facialStatus, biometricsStored: true },
       afterState: { facialStatus: "revoked", biometricsStored: false },
       changedFields: ["facialStatus", "biometricsStored"],
-      details: `Dados biométricos de ${user.name} excluídos definitivamente (direito de eliminação, LGPD art. 18)`,
+      details:
+        audit?.details ??
+        `Dados biométricos de ${user.name} excluídos definitivamente (direito de eliminação, LGPD art. 18)`,
       metadata: {
         embeddingsDeleted: deletedEmbeddings.count,
         enrollmentTokensDeleted: deletedTokens.count,
         // O cadastro e os consentimentos ficam: são a prova legal de que houve
         // consentimento e de quando ele foi revogado
         registrationPreserved: true,
+        ...audit?.metadata,
       },
     });
 

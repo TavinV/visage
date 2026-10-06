@@ -7,7 +7,8 @@
  *
  * RULE LGPD: apenas usuários com facial_status = 'registered' entram como
  * candidatos. Usuários com consentimento revogado ('revoked') jamais são
- * elegíveis para reconhecimento.
+ * elegíveis para reconhecimento. A única exceção é getCandidatesForUser, que
+ * não reconhece ninguém: confere o rosto do próprio titular antes de apagar.
  */
 
 import { prisma } from "../lib/prisma";
@@ -75,6 +76,26 @@ export async function getCandidatesForClass(
         classEnrollments: { some: { classId } },
       },
     },
+    select: EMBEDDING_SELECT,
+  });
+  return toCandidates(rows);
+}
+
+/**
+ * Embedding(s) de um único aluno, para a verificação 1:1 que antecede a
+ * exclusão da biometria pelo próprio titular no totem.
+ *
+ * Sem o filtro facial_status='registered' de propósito: aqui não se decide
+ * quem entra na chamada, e sim se o rosto diante do totem é o do DONO dos
+ * dados que vão ser apagados — inclusive de um cadastro anterior que continua
+ * guardado enquanto um recadastro ficou pela metade ('consent_given').
+ */
+export async function getCandidatesForUser(
+  tenantId: string,
+  userId: string
+): Promise<EncryptedCandidate[]> {
+  const rows = await prisma.facialEmbedding.findMany({
+    where: { tenantId, userId, user: { tenantId } },
     select: EMBEDDING_SELECT,
   });
   return toCandidates(rows);

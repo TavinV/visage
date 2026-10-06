@@ -18,7 +18,9 @@ import { EagleMark } from "@/components/ui/Logo";
 import { useTotemCamera } from "./useTotemCamera";
 import { useFaceDetection } from "./useFaceDetection";
 import { useTotemSounds } from "./useTotemSounds";
+import { totemAudio } from "./totemAudio";
 import { CaptureStage, type FramingHint } from "./CaptureStage";
+import { capturePose } from "./captureGuide";
 import {
   PreparationIllustration,
   KnownGroupIllustration,
@@ -27,12 +29,6 @@ import {
   PersonDoneIllustration,
   CollectionDoneIllustration,
 } from "./calibrationIllustrations";
-
-const poseTexts = [
-  "Olhe para o centro",
-  "Vire levemente para a direita",
-  "Vire levemente para a esquerda",
-];
 
 const SHOT_COOLDOWN_MS = 2200;
 
@@ -218,6 +214,9 @@ export function CalibrationMode({ progress: initialProgress }: CalibrationModePr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);
 
+  // Calibração encerrada pelo painel no meio de uma orientação falada
+  useEffect(() => () => totemAudio.stop(), []);
+
   const personComplete = progress.photosCurrentPerson >= progress.photosPerPerson;
   const completePeople = personComplete ? progress.people : progress.people - 1;
   const canLeaveGroupOne = completePeople >= limits.minPeople;
@@ -229,10 +228,7 @@ export function CalibrationMode({ progress: initialProgress }: CalibrationModePr
   const paused = phaseIntro !== null || personDone || awaitingNext;
 
   const instruction: string = (() => {
-    if (phase === "genuine") {
-      const pose = progress.photosCurrentPerson % poseTexts.length;
-      return poseTexts[pose];
-    }
+    if (phase === "genuine") return capturePose(progress.photosCurrentPerson).instruction;
     if (phase === "impostor") return "Uma pessoa do grupo 2, olhando para a câmera";
     return "Mostre a foto do rosto na tela do celular";
   })();
@@ -303,6 +299,15 @@ export function CalibrationMode({ progress: initialProgress }: CalibrationModePr
       hasLocalUpdates.current = true;
       setProgress(next);
       setAcceptedTick((t) => t + 1);
+      // Grupo 1: a pose mudou e a fala da anterior perde a validade na hora
+      // (com as 3 poses feitas, só cala — a tela de pessoa concluída assume)
+      if (next.phase === "genuine") {
+        totemAudio.say(
+          next.photosCurrentPerson >= next.photosPerPerson
+            ? null
+            : capturePose(next.photosCurrentPerson).cue
+        );
+      }
       // Grupo 2 e teste da foto avançam de pessoa a cada foto; no grupo 1 a
       // pausa vem sozinha quando as 3 poses fecham
       if (next.phase === "impostor" || next.phase === "attack") setAwaitingNext(true);

@@ -159,6 +159,8 @@ const fieldLabels: Record<string, string> = {
   enrollmentMultiFrameCount: "Frames no cadastro",
   totemPanelPassword: "Senha do painel do totem",
   totemClockTimezone: "Fuso do relógio do totem",
+  totemAudioEnabled: "Áudio nos totens",
+  totemVoice: "Voz do totem",
   studentIdentification: "Identificação registrada do aluno",
   totemIdentification: "Identificação pedida no totem",
   validateCpf: "Validar dígitos do CPF",

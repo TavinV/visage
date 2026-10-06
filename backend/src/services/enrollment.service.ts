@@ -15,13 +15,17 @@
  *      liveness_threshold_enrollment). Embeddings retornam cifrados.
  *   5. Finalize: engine calcula média vetorial + L2 e devolve o embedding
  *      consolidado cifrado, persistido em facial_embeddings.
+ *
+ * O caminho inverso também mora aqui: o próprio aluno pode apagar a biometria
+ * no totem (lookupForErasure / confirmErasure), com a mesma identificação por
+ * CPF ou matrícula — mas quem autoriza a exclusão é o rosto, não o número.
  */
 
 import crypto from "crypto";
 import { BaseService } from "./base.service";
 import { redis } from "../lib/redis";
 import { NotFoundError, ValidationError } from "../utils/errors";
-import { getTenantDekPayload } from "./facial-payload";
+import { getTenantDekPayload, getCandidatesForUser } from "./facial-payload";
 import {
   resolveIdentification,
   totemIdentifierLabel,
@@ -31,8 +35,11 @@ import {
   engineEnrollFrame,
   engineEnrollFinalize,
   engineInvalidateEmbedding,
+  engineRecognize,
+  type RecognizeThresholds,
 } from "../lib/faceEngine";
 import { auditService } from "./audit.service";
+import { usersService } from "./users.service";
 import { enrollmentPose, enrollmentDetScoreMin } from "../utils/enrollmentPose";
 
 // Versão do texto de consentimento LGPD exibido no totem (rastreabilidade)
@@ -40,6 +47,12 @@ export const CONSENT_TEXT_VERSION = "v1.0";
 
 const SESSION_TTL_SECONDS = 600; // 10 minutos
 const SESSION_KEY_PREFIX = "enroll:session:";
+
+// Exclusão pelo titular: confirmações faciais recusadas até bloquear a
+// exclusão daquele aluno — em qualquer totem — pela janela abaixo
+const ERASURE_MAX_FAILURES = 3;
+const ERASURE_LOCK_SECONDS = 15 * 60;
+const ERASURE_FAILURES_PREFIX = "erase:failures:";
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -83,6 +96,19 @@ export interface FrameResultOutput {
   framesCollected: number;
   requiredFrames: number;
   completed: boolean;
+}
+
+export interface ErasureLookupOutput {
+  /** Só o primeiro nome: contra o cadastro errado, quem protege é o rosto. */
+  firstName: string;
+}
+
+export interface ErasureConfirmOutput {
+  erased: boolean;
+  /** Por que não apagou — o totem orienta o aluno a partir daqui. */
+  reason?: "no_face_detected" | "multiple_faces_detected" | "face_mismatch" | "liveness_failed";
+  /** Confirmações que ainda restam antes do bloqueio temporário. */
+  attemptsLeft?: number;
 }
 
 // ── Serviço ───────────────────────────────────────────────────────────────────
@@ -208,9 +234,8 @@ class EnrollmentService extends BaseService {
     const requiresConsent = settings?.requireConsentBeforeFacial ?? true;
     const requiredFrames = settings?.enrollmentMultiFrameCount ?? 3;
     // Clamp [0.5, 0.95]: calibração ruim não pode inviabilizar o cadastro
-    const livenessThresholdEnrollment = Math.min(
-      0.95,
-      Math.max(0.5, settings?.livenessThresholdEnrollment ?? 0.9)
+    const livenessThresholdEnrollment = this.clampLiveness(
+      settings?.livenessThresholdEnrollment ?? 0.9
     );
 
     const sessionId = crypto.randomBytes(16).toString("hex");
@@ -473,7 +498,179 @@ class EnrollmentService extends BaseService {
     };
   }
 
+  // ── Exclusão da biometria pelo próprio titular (X-Device-Key) ─────────────
+  //
+  // O identificador digitado só aponta QUAL cadastro apagar; quem autoriza é o
+  // rosto. A exclusão acontece apenas quando um reconhecimento feito naquele
+  // instante confere com a biometria guardada desse mesmo aluno (1:1, com a
+  // vivacidade no rigor do cadastro). CPF ou matrícula de outra pessoa, sem o
+  // rosto dela, não apaga nada.
+
+  /** Passo de confirmação: acha o cadastro e garante que há o que apagar. */
+  async lookupForErasure(tenantId: string, identifier: string): Promise<ErasureLookupOutput> {
+    const { student } = await this.findErasureTarget(tenantId, identifier);
+    return { firstName: student.name.trim().split(/\s+/)[0] };
+  }
+
+  /**
+   * Confere o rosto contra a biometria do próprio aluno e, só se conferir,
+   * apaga tudo numa transação (usersService.eraseUserData — a mesma exclusão
+   * que o admin faz pelo console).
+   *
+   * Falha de enquadramento (sem rosto, mais de um) não conta como tentativa.
+   * Rosto que não confere ou reprovado na vivacidade conta: depois de
+   * ERASURE_MAX_FAILURES, a exclusão desse aluno fica bloqueada em qualquer
+   * totem por ERASURE_LOCK_SECONDS — teto para quem tenta a sorte com o CPF
+   * de outra pessoa.
+   */
+  async confirmErasure(
+    tenantId: string,
+    deviceId: string,
+    identifier: string,
+    imageB64: string
+  ): Promise<ErasureConfirmOutput> {
+    const { student, candidates } = await this.findErasureTarget(tenantId, identifier);
+    const imageJpeg = this.decodeImage(imageB64);
+
+    const [dek, thresholds] = await Promise.all([
+      getTenantDekPayload(tenantId),
+      this.erasureThresholds(tenantId, deviceId),
+    ]);
+
+    const result = await engineRecognize({ tenantId, imageJpeg, dek, candidates, thresholds });
+
+    if (result.status === "no_face_detected" || result.status === "multiple_faces_detected") {
+      return { erased: false, reason: result.status };
+    }
+
+    // A lista tem um único dono, então "identified" já quer dizer "é ele" —
+    // conferir o id é a trava contra qualquer surpresa vinda da engine
+    const confirmed =
+      result.status === "identified" && String(result.person_id) === student.id;
+
+    if (!confirmed) {
+      const reason = result.status === "liveness_failed" ? "liveness_failed" : "face_mismatch";
+      const attemptsLeft = await this.registerErasureFailure(tenantId, student.id);
+
+      // Tentativa contra a biometria de alguém é o que a instituição precisa
+      // enxergar primeiro. Só o desfecho entra na trilha: nem imagem nem score.
+      auditService.record({
+        action: "data.erasure_denied",
+        status: "failure",
+        tenantId,
+        targetId: student.id,
+        targetLabel: student.name,
+        details:
+          reason === "liveness_failed"
+            ? `Pedido de exclusão da biometria de ${student.name} recusado: o totem não confirmou uma pessoa real diante da câmera. Nenhum dado foi apagado.`
+            : `Pedido de exclusão da biometria de ${student.name} recusado: o rosto não confere com o cadastro. Nenhum dado foi apagado.`,
+        metadata: { reason, attemptsLeft },
+      });
+
+      this.logger.warn(
+        { tenantId, deviceId, userId: student.id, reason, attemptsLeft },
+        "Biometric erasure denied — face not confirmed"
+      );
+      return { erased: false, reason, attemptsLeft };
+    }
+
+    await usersService.eraseUserData(student.id, tenantId, student.id, {
+      details: `Dados biométricos de ${student.name} excluídos a pedido do próprio titular, no totem, com a identidade confirmada por reconhecimento facial (direito de eliminação, LGPD art. 18)`,
+      metadata: { requestedBy: "holder", identityCheck: "facial_recognition" },
+    });
+    // Os dados já foram apagados: falhar aqui não pode virar erro para o
+    // aluno. Sem biometria, o contador não serve mais e expira sozinho.
+    await redis.del(this.erasureFailuresKey(tenantId, student.id)).catch((error) => {
+      this.logger.warn({ tenantId, userId: student.id, error }, "Failed to reset erasure failures");
+    });
+
+    this.logger.info({ tenantId, deviceId, userId: student.id }, "Biometric data erased by holder");
+    return { erased: true };
+  }
+
   // ── Helpers privados ────────────────────────────────────────────────────────
+
+  /**
+   * Aluno dono do identificador, com a biometria dele já no formato da engine.
+   * Barra antes de qualquer captura quem não tem o que apagar ou está
+   * bloqueado por confirmações recusadas.
+   */
+  private async findErasureTarget(tenantId: string, identifier: string) {
+    const policy = await this.loadIdentificationPolicy(tenantId);
+    const student = await this.findStudentByIdentifier(tenantId, identifier, policy);
+    await this.assertErasureNotLocked(tenantId, student.id);
+
+    const candidates = await getCandidatesForUser(tenantId, student.id);
+    if (candidates.length === 0) {
+      throw new NotFoundError(
+        "Não há dados biométricos cadastrados para este aluno",
+        "NO_BIOMETRIC_DATA"
+      );
+    }
+    return { student, candidates };
+  }
+
+  /**
+   * Limiares da confirmação: reconhecimento igual ao da chamada neste totem
+   * (calibrado ou o da instituição) e vivacidade nunca abaixo do rigor do
+   * cadastro — apagar a biometria é tão sensível quanto criá-la.
+   */
+  private async erasureThresholds(
+    tenantId: string,
+    deviceId: string
+  ): Promise<RecognizeThresholds> {
+    const [settings, device] = await Promise.all([
+      this.prisma.tenantSettings.findUnique({
+        where: { tenantId },
+        select: {
+          recognitionThreshold: true,
+          livenessThreshold: true,
+          livenessThresholdEnrollment: true,
+        },
+      }),
+      this.prisma.device.findFirst({
+        where: { id: deviceId, tenantId },
+        select: { recognitionThreshold: true, livenessThreshold: true },
+      }),
+    ]);
+
+    return {
+      recognitionThreshold: device?.recognitionThreshold ?? settings?.recognitionThreshold,
+      livenessThreshold: Math.max(
+        this.clampLiveness(device?.livenessThreshold ?? settings?.livenessThreshold ?? 0.85),
+        this.clampLiveness(settings?.livenessThresholdEnrollment ?? 0.9)
+      ),
+    };
+  }
+
+  /** Faixa operável [0.5, 0.95]: calibração ruim não trava o fluxo nem desliga o antifraude. */
+  private clampLiveness(value: number): number {
+    return Math.min(0.95, Math.max(0.5, value));
+  }
+
+  private erasureFailuresKey(tenantId: string, userId: string): string {
+    return `${ERASURE_FAILURES_PREFIX}${tenantId}:${userId}`;
+  }
+
+  private async assertErasureNotLocked(tenantId: string, userId: string): Promise<void> {
+    const failures = Number((await redis.get(this.erasureFailuresKey(tenantId, userId))) ?? 0);
+    if (failures >= ERASURE_MAX_FAILURES) {
+      throw new ValidationError(
+        `Muitas tentativas sem confirmar a identidade. Tente de novo em ${ERASURE_LOCK_SECONDS / 60} minutos ou procure a secretaria.`,
+        "ERASURE_LOCKED"
+      );
+    }
+  }
+
+  /** Conta a confirmação recusada e devolve quantas ainda restam. */
+  private async registerErasureFailure(tenantId: string, userId: string): Promise<number> {
+    const key = this.erasureFailuresKey(tenantId, userId);
+    // SET NX antes do INCR: a janela começa na primeira recusa e o contador
+    // nunca fica sem TTL (um INCR solto criaria a chave sem expiração)
+    await redis.set(key, "0", { NX: true, EX: ERASURE_LOCK_SECONDS });
+    const failures = await redis.incr(key);
+    return Math.max(0, ERASURE_MAX_FAILURES - failures);
+  }
 
   private async loadSession(tenantId: string, sessionId: string): Promise<EnrollmentSession> {
     const raw = await redis.get(SESSION_KEY_PREFIX + sessionId);

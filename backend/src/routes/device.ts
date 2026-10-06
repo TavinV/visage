@@ -17,6 +17,7 @@ import { deviceAuth } from "../middleware/deviceAuth";
 import { validate } from "../middleware/validate";
 import { prisma } from "../lib/prisma";
 import { resolveIdentification } from "../utils/identification";
+import { resolveTotemAudio } from "../utils/totemAudio";
 import {
   createDeviceRecognizeLimiter,
   createDeviceHeartbeatLimiter,
@@ -85,6 +86,8 @@ export default function createDeviceRouter(): Router {
               totemClockTimezone: true,
               studentIdentification: true,
               totemIdentification: true,
+              totemAudioEnabled: true,
+              totemVoice: true,
             },
           }),
           prisma.device.findUnique({
@@ -104,6 +107,8 @@ export default function createDeviceRouter(): Router {
             panelPassword: settings?.totemPanelPassword ?? null,
             allowEnrollment: device?.allowEnrollment ?? false,
             totemIdentification: identification.totemIdentification,
+            // Falas do totem: desligado = só os bipes de sempre
+            audio: resolveTotemAudio(settings),
           },
         });
       } catch (error) {

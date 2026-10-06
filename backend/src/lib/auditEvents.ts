@@ -73,6 +73,7 @@ export const AUDIT_EVENTS = {
 
   // ── Dados pessoais ────────────────────────────────────────────────────────
   "data.erased": { category: "data", severity: "critical", label: "Dados biométricos excluídos definitivamente", targetType: "user" },
+  "data.erasure_denied": { category: "data", severity: "warning", label: "Exclusão de biometria recusada: rosto não confirmado", targetType: "user" },
   "data.fraud_frame_viewed": { category: "data", severity: "warning", label: "Foto de tentativa de fraude visualizada", targetType: "recognition_log" },
   "data.student_history_viewed": { category: "data", severity: "info", label: "Histórico de aluno consultado", targetType: "user" },
 

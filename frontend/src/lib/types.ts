@@ -64,6 +64,8 @@ export interface RotateDekResult {
 export type StudentIdentification = "cpf" | "enrollment_code" | "both";
 /** O que o aluno digita no totem — `any` aceita CPF ou matrícula. */
 export type TotemIdentification = "cpf" | "enrollment_code" | "any";
+/** Voz das falas do totem — mesmo nome da pasta em public/audio/. */
+export type TotemVoice = "telma" | "eduardo";
 
 export interface TenantSettings {
   tenantId: string;
@@ -82,6 +84,9 @@ export interface TenantSettings {
   livenessThresholdEnrollment: number;
   totemPanelPassword: string | null;
   totemClockTimezone: string;
+  /** Totens falam as orientações e confirmações (além dos bipes). */
+  totemAudioEnabled: boolean;
+  totemVoice: TotemVoice;
   studentIdentification: StudentIdentification;
   totemIdentification: TotemIdentification;
   /** Confere os dígitos verificadores do CPF no cadastro. */
